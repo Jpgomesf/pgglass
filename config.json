@@ -1,0 +1,27 @@
+{
+  "defaults": {
+    "readonly": true,
+    "statement_timeout_seconds": 30
+  },
+  "connections": {
+    "my-db": {
+      "source": "direct",
+      "dsn": "postgres://user:password@localhost:5432/mydb"
+    },
+    "from-env": {
+      "source": "env",
+      "dsn_env_var": "DATABASE_URL"
+    },
+    "from-dotenv": {
+      "source": "dotenv",
+      "dotenv_path": ".env",
+      "dsn_env_var": "DATABASE_URL"
+    },
+    "from-aws": {
+      "source": "aws_secrets_manager",
+      "aws_profile": "my-profile",
+      "secret_name": "prod/RDS/CRM",
+      "requires_vpn": true
+    }
+  }
+}
