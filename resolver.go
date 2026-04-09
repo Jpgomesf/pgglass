@@ -10,52 +10,100 @@ import (
 	"sync"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 )
 
-// ResolveCredentials returns a DSN string for the given connection based on its source type.
-func ResolveCredentials(ctx context.Context, connName string, conn Connection) (string, error) {
-	switch conn.Source {
-	case "direct":
-		return resolveDirect(connName, conn)
-	case "env":
-		return resolveEnv(connName, conn)
-	case "dotenv":
-		return resolveDotenv(connName, conn)
-	case "aws_secrets_manager":
-		return resolveAWS(ctx, connName, conn)
-	default:
-		return "", fmt.Errorf("connection %q: unknown source %q", connName, conn.Source)
-	}
+// CredentialSource resolves a DSN from a connection configuration.
+// Each implementation handles one source type (direct, env, dotenv, aws_secrets_manager).
+type CredentialSource interface {
+	// Type returns the source identifier used in config.json (e.g. "direct", "env").
+	Type() string
+
+	// Resolve returns a libpq-compatible DSN string for the given connection.
+	Resolve(ctx context.Context, connName string, conn Connection) (string, error)
 }
 
-func resolveDirect(connName string, conn Connection) (string, error) {
+// sources maps source type strings to their implementations.
+var sources = map[string]CredentialSource{}
+
+// RegisterSource registers a CredentialSource implementation.
+// Call this in init() functions to add custom sources.
+func RegisterSource(s CredentialSource) {
+	sources[s.Type()] = s
+}
+
+// RegisteredSourceTypes returns the list of registered source type names.
+func RegisteredSourceTypes() []string {
+	types := make([]string, 0, len(sources))
+	for t := range sources {
+		types = append(types, t)
+	}
+	return types
+}
+
+func init() {
+	RegisterSource(&DirectSource{})
+	RegisterSource(&EnvSource{})
+	RegisterSource(&DotenvSource{})
+	RegisterSource(&AWSSecretsSource{})
+}
+
+// ResolveCredentials dispatches to the appropriate CredentialSource based on conn.Source.
+func ResolveCredentials(ctx context.Context, connName string, conn Connection) (string, error) {
+	src, ok := sources[conn.Source]
+	if !ok {
+		return "", fmt.Errorf("connection %q: unknown source %q (registered: %s)",
+			connName, conn.Source, strings.Join(RegisteredSourceTypes(), ", "))
+	}
+	return src.Resolve(ctx, connName, conn)
+}
+
+// --- DirectSource ---
+
+// DirectSource resolves credentials from an inline DSN string.
+type DirectSource struct{}
+
+func (DirectSource) Type() string { return "direct" }
+
+func (DirectSource) Resolve(_ context.Context, connName string, conn Connection) (string, error) {
 	if conn.DSN == "" {
 		return "", fmt.Errorf("connection %q (direct): 'dsn' is required", connName)
 	}
 	return conn.DSN, nil
 }
 
-func resolveEnv(connName string, conn Connection) (string, error) {
-	envVar := conn.DSNEnvVar
-	if envVar == "" {
+// --- EnvSource ---
+
+// EnvSource resolves credentials from an environment variable.
+type EnvSource struct{}
+
+func (EnvSource) Type() string { return "env" }
+
+func (EnvSource) Resolve(_ context.Context, connName string, conn Connection) (string, error) {
+	if conn.DSNEnvVar == "" {
 		return "", fmt.Errorf("connection %q (env): 'dsn_env_var' is required", connName)
 	}
-	dsn := os.Getenv(envVar)
+	dsn := os.Getenv(conn.DSNEnvVar)
 	if dsn == "" {
-		return "", fmt.Errorf("connection %q (env): environment variable %q is not set", connName, envVar)
+		return "", fmt.Errorf("connection %q (env): environment variable %q is not set", connName, conn.DSNEnvVar)
 	}
 	return dsn, nil
 }
 
-func resolveDotenv(connName string, conn Connection) (string, error) {
+// --- DotenvSource ---
+
+// DotenvSource resolves credentials from a .env file.
+type DotenvSource struct{}
+
+func (DotenvSource) Type() string { return "dotenv" }
+
+func (DotenvSource) Resolve(_ context.Context, connName string, conn Connection) (string, error) {
 	dotenvPath := conn.DotenvPath
 	if dotenvPath == "" {
 		dotenvPath = ".env"
 	}
-	envVar := conn.DSNEnvVar
-	if envVar == "" {
+	if conn.DSNEnvVar == "" {
 		return "", fmt.Errorf("connection %q (dotenv): 'dsn_env_var' is required", connName)
 	}
 
@@ -64,9 +112,9 @@ func resolveDotenv(connName string, conn Connection) (string, error) {
 		return "", fmt.Errorf("connection %q (dotenv): %w", connName, err)
 	}
 
-	dsn, ok := vars[envVar]
+	dsn, ok := vars[conn.DSNEnvVar]
 	if !ok || dsn == "" {
-		return "", fmt.Errorf("connection %q (dotenv): %q not found in %s", connName, envVar, dotenvPath)
+		return "", fmt.Errorf("connection %q (dotenv): %q not found in %s", connName, conn.DSNEnvVar, dotenvPath)
 	}
 	return dsn, nil
 }
@@ -93,7 +141,6 @@ func parseDotenv(path string) (map[string]string, error) {
 		}
 		key = strings.TrimSpace(key)
 		value = strings.TrimSpace(value)
-		// Strip surrounding quotes
 		if len(value) >= 2 {
 			if (value[0] == '"' && value[len(value)-1] == '"') ||
 				(value[0] == '\'' && value[len(value)-1] == '\'') {
@@ -105,9 +152,55 @@ func parseDotenv(path string) (map[string]string, error) {
 	return vars, scanner.Err()
 }
 
-// --- AWS Secrets Manager resolver ---
+// --- AWSSecretsSource ---
 
-// awsSecretsCache provides thread-safe caching for AWS Secrets Manager values.
+// AWSSecretsSource resolves credentials from AWS Secrets Manager.
+// Secrets are cached in-memory for the lifetime of the process.
+type AWSSecretsSource struct{}
+
+func (AWSSecretsSource) Type() string { return "aws_secrets_manager" }
+
+func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn Connection) (string, error) {
+	if conn.SecretName == "" {
+		return "", fmt.Errorf("connection %q (aws_secrets_manager): 'secret_name' is required", connName)
+	}
+
+	secret, err := awsSecrets.Get(ctx, conn.AWSProfile, conn.SecretName)
+	if err != nil {
+		return "", err
+	}
+
+	host := secret["host"]
+	if host == "" {
+		return "", fmt.Errorf("connection %q (aws_secrets_manager): secret %q missing required field 'host'", connName, conn.SecretName)
+	}
+	dbName := secret["db_name"]
+	if dbName == "" {
+		return "", fmt.Errorf("connection %q (aws_secrets_manager): secret %q missing required field 'db_name'", connName, conn.SecretName)
+	}
+	user := secret["user"]
+	if user == "" {
+		return "", fmt.Errorf("connection %q (aws_secrets_manager): secret %q missing required field 'user'", connName, conn.SecretName)
+	}
+	password := secret["password"]
+	if password == "" {
+		return "", fmt.Errorf("connection %q (aws_secrets_manager): secret %q missing required field 'password'", connName, conn.SecretName)
+	}
+
+	port := secret["port"]
+	if port == "" {
+		port = "5432"
+	}
+
+	dsn := fmt.Sprintf(
+		"host=%s port=%s dbname=%s user=%s password=%s",
+		host, port, dbName, user, password,
+	)
+	return dsn, nil
+}
+
+// --- AWS secrets cache (shared by AWSSecretsSource) ---
+
 type awsSecretsCache struct {
 	mu    sync.RWMutex
 	cache map[string]map[string]string
@@ -125,8 +218,7 @@ func (sc *awsSecretsCache) IsCached(secretName string) bool {
 	return ok
 }
 
-// Get fetches a secret from AWS Secrets Manager, returning cached values
-// on subsequent calls.
+// Get fetches a secret from AWS Secrets Manager, returning cached values on subsequent calls.
 func (sc *awsSecretsCache) Get(ctx context.Context, awsProfile, secretName string) (map[string]string, error) {
 	sc.mu.RLock()
 	if cached, ok := sc.cache[secretName]; ok {
@@ -135,12 +227,12 @@ func (sc *awsSecretsCache) Get(ctx context.Context, awsProfile, secretName strin
 	}
 	sc.mu.RUnlock()
 
-	opts := []func(*config.LoadOptions) error{}
+	opts := []func(*awsconfig.LoadOptions) error{}
 	if awsProfile != "" {
-		opts = append(opts, config.WithSharedConfigProfile(awsProfile))
+		opts = append(opts, awsconfig.WithSharedConfigProfile(awsProfile))
 	}
 
-	cfg, err := config.LoadDefaultConfig(ctx, opts...)
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("load AWS config (profile %q): %w", awsProfile, err)
 	}
@@ -163,26 +255,4 @@ func (sc *awsSecretsCache) Get(ctx context.Context, awsProfile, secretName strin
 	sc.mu.Unlock()
 
 	return secret, nil
-}
-
-func resolveAWS(ctx context.Context, connName string, conn Connection) (string, error) {
-	if conn.SecretName == "" {
-		return "", fmt.Errorf("connection %q (aws_secrets_manager): 'secret_name' is required", connName)
-	}
-
-	secret, err := awsSecrets.Get(ctx, conn.AWSProfile, conn.SecretName)
-	if err != nil {
-		return "", err
-	}
-
-	port := secret["port"]
-	if port == "" {
-		port = "5432"
-	}
-
-	dsn := fmt.Sprintf(
-		"host=%s port=%s dbname=%s user=%s password=%s",
-		secret["host"], port, secret["db_name"], secret["user"], secret["password"],
-	)
-	return dsn, nil
 }

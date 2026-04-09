@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -107,11 +108,9 @@ func LoadConfig() error {
 	}
 
 	for name, conn := range AppConfig.Connections {
-		switch conn.Source {
-		case "direct", "env", "dotenv", "aws_secrets_manager":
-			// valid
-		default:
-			return fmt.Errorf("connection %q: unknown source %q (must be direct, env, dotenv, or aws_secrets_manager)", name, conn.Source)
+		if _, ok := sources[conn.Source]; !ok {
+			return fmt.Errorf("connection %q: unknown source %q (registered: %s)",
+				name, conn.Source, strings.Join(RegisteredSourceTypes(), ", "))
 		}
 	}
 
