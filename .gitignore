@@ -1,0 +1,35 @@
+# Binaries
+mcp-postgres
+mcp-postgres-linux-amd64
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Coverage
+*.out
+*.coverprofile
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.*
+
+# GoReleaser
+dist/
+
+# OS
+.DS_Store
