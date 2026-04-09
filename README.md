@@ -76,6 +76,68 @@ Add to your `~/.claude.json` (global) or `.claude/settings.json` (per-project):
 }
 ```
 
+## Usage Guide
+
+Once the server is running and connected to Claude Code, you interact with your databases through natural language. The AI assistant calls the MCP tools on your behalf.
+
+### Step 1: Discover your connections
+
+Ask Claude to list what's available:
+
+> "What databases do I have access to?"
+
+Claude calls `pg_list_connections` and returns something like:
+
+```
+Connections (3):
+  local-dev [direct, readonly]
+  staging-app [env, readonly, schema:app]
+  prod-app [aws_secrets_manager, readonly, vpn, schema:app, loaded]
+```
+
+### Step 2: Explore the schema
+
+Ask Claude to show you what's in a database:
+
+> "Show me the tables in staging-app"
+
+Claude calls `pg_schema` with `connection: "staging-app"`. You get back a tree of schemas, tables, and columns with types — enough context for Claude to write accurate queries.
+
+You can also filter:
+
+> "Show me just the users table in prod-app"
+
+### Step 3: Query
+
+Ask questions in plain language:
+
+> "How many active users signed up this month in staging?"
+
+Claude writes the SQL, calls `pg_query`, and returns formatted results. All queries are enforced read-only — Claude cannot modify your data even if it tries.
+
+### Step 4: Cross-database investigation
+
+This is where parallel queries shine. Ask something that spans databases:
+
+> "Compare the row count of the orders table between staging and production"
+
+Claude fires two `pg_query` calls **in parallel** — one against `staging-app`, one against `prod-app` — and presents the comparison. No waiting for sequential execution.
+
+More examples:
+
+> "Check if the users table schema matches between staging and prod"
+>
+> "Find all tables that have a column named 'tenant_id' across all my connections"
+>
+> "Show me the last 10 orders in prod and the matching records in the analytics db"
+
+### Tips
+
+- **Start with `pg_schema`** — Claude writes better queries when it knows the exact column names and types.
+- **Use `default_schema`** in your config to avoid specifying the schema every time.
+- **Large results** are automatically saved to a temp file with a summary. Claude can then read specific parts of the file instead of flooding the conversation.
+- **Readonly is your friend** — keep it enabled in production. The server blocks writes at two levels: SQL keyword filtering and PostgreSQL's `default_transaction_read_only` mode.
+
 ## Connection Structure
 
 ### How Connections Work
@@ -319,7 +381,7 @@ make lint       # run golangci-lint
 - DDL and DML keywords are blocked at the tool layer before reaching the database.
 - Statement timeout prevents runaway queries.
 - Credentials are resolved at runtime and never logged.
-- AWS secrets are cached in-memory for the lifetime of the process (no disk persistence).
+- AWS secrets are cached in-memory with a 24-hour TTL (no disk persistence). Rotated credentials are picked up automatically.
 - Direct DSN values in `config.json` should be treated as sensitive — use `env` or `dotenv` sources in shared environments, and keep `config.json` out of version control if it contains credentials.
 
 ## License
