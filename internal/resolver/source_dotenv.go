@@ -1,4 +1,4 @@
-package main
+package resolver
 
 import (
 	"bufio"
@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/jpgomesf/mcp-postgres/internal/config"
 )
 
 func init() { RegisterSource(&DotenvSource{}) }
@@ -15,10 +17,10 @@ type DotenvSource struct{}
 
 func (DotenvSource) Type() string { return "dotenv" }
 
-func (DotenvSource) Resolve(_ context.Context, connName string, conn Connection) (string, error) {
-	v := newValidator(connName, "dotenv")
-	v.require("dsn_env_var", conn.DSNEnvVar)
-	if err := v.err(); err != nil {
+func (DotenvSource) Resolve(_ context.Context, connName string, conn config.Connection) (string, error) {
+	v := NewValidator(connName, "dotenv")
+	v.Require("dsn_env_var", conn.DSNEnvVar)
+	if err := v.Err(); err != nil {
 		return "", err
 	}
 
@@ -27,7 +29,7 @@ func (DotenvSource) Resolve(_ context.Context, connName string, conn Connection)
 		dotenvPath = ".env"
 	}
 
-	vars, err := parseDotenv(dotenvPath)
+	vars, err := ParseDotenv(dotenvPath)
 	if err != nil {
 		return "", fmt.Errorf("connection %q (dotenv): %w", connName, err)
 	}
@@ -39,9 +41,11 @@ func (DotenvSource) Resolve(_ context.Context, connName string, conn Connection)
 	return dsn, nil
 }
 
-// parseDotenv reads a .env file into a map. Supports KEY=VALUE, quoted values,
+func (DotenvSource) Status(_ config.Connection) string { return "" }
+
+// ParseDotenv reads a .env file into a map. Supports KEY=VALUE, quoted values,
 // comments (#), and blank lines. No variable expansion.
-func parseDotenv(path string) (map[string]string, error) {
+func ParseDotenv(path string) (map[string]string, error) {
 	f, err := os.Open(path) //nolint:gosec // user-configured path
 	if err != nil {
 		return nil, err

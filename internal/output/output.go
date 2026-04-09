@@ -1,4 +1,4 @@
-package main
+package output
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/jpgomesf/mcp-postgres/internal/config"
 )
 
 var tempDir = filepath.Join(os.TempDir(), "mcp-postgres")
@@ -13,12 +15,12 @@ var tempDir = filepath.Join(os.TempDir(), "mcp-postgres")
 // SmartOutput returns content inline if under the threshold, otherwise
 // writes to a temp file and returns a summary.
 func SmartOutput(content, toolName string, rowCount int, headers []string) string {
-	if len(content) <= InlineMaxChars {
+	if len(content) <= config.InlineMaxChars {
 		return content
 	}
 
 	if err := os.MkdirAll(tempDir, 0o750); err != nil {
-		return content // fallback to inline
+		return content
 	}
 
 	ts := time.Now().UTC().Format("20060102_150405")
@@ -57,16 +59,14 @@ func FormatTable(rows []map[string]string, headers []string) string {
 
 	var sb strings.Builder
 
-	// Header line
 	for i, h := range headers {
 		if i > 0 {
 			sb.WriteString(" | ")
 		}
-		sb.WriteString(padRight(h, colWidths[h]))
+		sb.WriteString(PadRight(h, colWidths[h]))
 	}
 	sb.WriteString("\n")
 
-	// Separator
 	for i, h := range headers {
 		if i > 0 {
 			sb.WriteString("-+-")
@@ -75,13 +75,12 @@ func FormatTable(rows []map[string]string, headers []string) string {
 	}
 	sb.WriteString("\n")
 
-	// Data rows
 	for _, row := range rows {
 		for i, h := range headers {
 			if i > 0 {
 				sb.WriteString(" | ")
 			}
-			sb.WriteString(padRight(row[h], colWidths[h]))
+			sb.WriteString(PadRight(row[h], colWidths[h]))
 		}
 		sb.WriteString("\n")
 	}
@@ -89,7 +88,8 @@ func FormatTable(rows []map[string]string, headers []string) string {
 	return sb.String()
 }
 
-func padRight(s string, width int) string {
+// PadRight pads a string with spaces to the given width.
+func PadRight(s string, width int) string {
 	if len(s) >= width {
 		return s
 	}

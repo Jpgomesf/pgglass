@@ -1,4 +1,4 @@
-package main
+package output
 
 import (
 	"testing"
@@ -67,9 +67,9 @@ func TestPadRight(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		got := padRight(tt.s, tt.width)
+		got := PadRight(tt.s, tt.width)
 		if got != tt.want {
-			t.Errorf("padRight(%q, %d) = %q, want %q", tt.s, tt.width, got, tt.want)
+			t.Errorf("PadRight(%q, %d) = %q, want %q", tt.s, tt.width, got, tt.want)
 		}
 	}
 }

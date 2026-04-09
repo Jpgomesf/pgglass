@@ -1,4 +1,4 @@
-package main
+package resolver
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
+	"github.com/jpgomesf/mcp-postgres/internal/config"
 )
 
 func init() { RegisterSource(&AWSSecretsSource{}) }
@@ -19,10 +20,10 @@ type AWSSecretsSource struct{}
 
 func (AWSSecretsSource) Type() string { return "aws_secrets_manager" }
 
-func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn Connection) (string, error) {
-	v := newValidator(connName, "aws_secrets_manager")
-	v.require("secret_name", conn.SecretName)
-	if err := v.err(); err != nil {
+func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn config.Connection) (string, error) {
+	v := NewValidator(connName, "aws_secrets_manager")
+	v.Require("secret_name", conn.SecretName)
+	if err := v.Err(); err != nil {
 		return "", err
 	}
 
@@ -31,12 +32,12 @@ func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn Conne
 		return "", err
 	}
 
-	sv := newValidator(connName, fmt.Sprintf("aws_secrets_manager secret %q", conn.SecretName))
-	host := sv.requireFromMap(secret, "host")
-	dbName := sv.requireFromMap(secret, "db_name")
-	user := sv.requireFromMap(secret, "user")
-	password := sv.requireFromMap(secret, "password")
-	if err := sv.err(); err != nil {
+	sv := NewValidator(connName, fmt.Sprintf("aws_secrets_manager secret %q", conn.SecretName))
+	host := sv.RequireFromMap(secret, "host")
+	dbName := sv.RequireFromMap(secret, "db_name")
+	user := sv.RequireFromMap(secret, "user")
+	password := sv.RequireFromMap(secret, "password")
+	if err := sv.Err(); err != nil {
 		return "", err
 	}
 
@@ -50,6 +51,17 @@ func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn Conne
 		host, port, dbName, user, password,
 	)
 	return dsn, nil
+}
+
+// Status returns whether the AWS secret has been cached.
+func (AWSSecretsSource) Status(conn config.Connection) string {
+	if conn.SecretName == "" {
+		return ""
+	}
+	if awsSecrets.IsCached(conn.SecretName) {
+		return "loaded"
+	}
+	return "not loaded"
 }
 
 // --- AWS secrets cache ---

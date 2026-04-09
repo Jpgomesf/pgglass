@@ -1,9 +1,11 @@
-package main
+package resolver
 
 import (
 	"context"
 	"fmt"
 	"os"
+
+	"github.com/jpgomesf/mcp-postgres/internal/config"
 )
 
 func init() { RegisterSource(&EnvSource{}) }
@@ -13,10 +15,10 @@ type EnvSource struct{}
 
 func (EnvSource) Type() string { return "env" }
 
-func (EnvSource) Resolve(_ context.Context, connName string, conn Connection) (string, error) {
-	v := newValidator(connName, "env")
-	envVar := v.require("dsn_env_var", conn.DSNEnvVar)
-	if err := v.err(); err != nil {
+func (EnvSource) Resolve(_ context.Context, connName string, conn config.Connection) (string, error) {
+	v := NewValidator(connName, "env")
+	envVar := v.Require("dsn_env_var", conn.DSNEnvVar)
+	if err := v.Err(); err != nil {
 		return "", err
 	}
 	dsn := os.Getenv(envVar)
@@ -25,3 +27,5 @@ func (EnvSource) Resolve(_ context.Context, connName string, conn Connection) (s
 	}
 	return dsn, nil
 }
+
+func (EnvSource) Status(_ config.Connection) string { return "" }

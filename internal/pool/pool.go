@@ -1,4 +1,4 @@
-package main
+package pool
 
 import (
 	"context"
@@ -11,6 +11,9 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/jpgomesf/mcp-postgres/internal/config"
+	"github.com/jpgomesf/mcp-postgres/internal/resolver"
 )
 
 type poolEntry struct {
@@ -25,9 +28,12 @@ type ConnPool struct {
 	ttl   time.Duration
 }
 
-var pool = &ConnPool{
-	conns: make(map[string]*poolEntry),
-	ttl:   DefaultConnectionTTL,
+// New creates a connection pool with the given TTL.
+func New(ttl time.Duration) *ConnPool {
+	return &ConnPool{
+		conns: make(map[string]*poolEntry),
+		ttl:   ttl,
+	}
 }
 
 // Get returns a cached connection if available and alive, nil otherwise.
@@ -81,34 +87,32 @@ func CheckVPN(host string, port int, timeout time.Duration) bool {
 }
 
 // OpenConnection returns a pooled or new pgx connection for the named connection.
-func OpenConnection(ctx context.Context, connName string) (*pgx.Conn, error) {
-	if cached := pool.Get(ctx, connName); cached != nil {
+func (p *ConnPool) OpenConnection(ctx context.Context, cfg config.Config, connName string) (*pgx.Conn, error) {
+	if cached := p.Get(ctx, connName); cached != nil {
 		return cached, nil
 	}
 
-	connCfg, ok := AppConfig.Connections[connName]
+	connCfg, ok := cfg.Connections[connName]
 	if !ok {
-		return nil, fmt.Errorf("unknown connection %q (available: %s)", connName, strings.Join(connNames(), ", "))
+		return nil, fmt.Errorf("unknown connection %q (available: %s)", connName, strings.Join(cfg.ConnNames(), ", "))
 	}
 
-	dsn, err := ResolveCredentials(ctx, connName, connCfg)
+	dsn, err := resolver.Resolve(ctx, connName, connCfg)
 	if err != nil {
 		return nil, err
 	}
 
 	if connCfg.RequiresVPN {
-		host, port := extractHostPort(dsn)
+		host, port := ExtractHostPort(dsn)
 		if host != "" && !CheckVPN(host, port, 3*time.Second) {
 			return nil, fmt.Errorf("connection %q: host %s:%d unreachable — is VPN active?", connName, host, port)
 		}
 	}
 
-	// Append statement timeout
-	dsn = appendDSNParam(dsn, "statement_timeout", strconv.Itoa(AppConfig.StatementTimeoutMS()))
+	dsn = AppendDSNParam(dsn, "statement_timeout", strconv.Itoa(cfg.StatementTimeoutMS()))
 
-	// Enforce read-only if configured
-	if connCfg.IsReadonly(AppConfig.Defaults) {
-		dsn = appendDSNParam(dsn, "default_transaction_read_only", "on")
+	if connCfg.IsReadonly(cfg.Defaults) {
+		dsn = AppendDSNParam(dsn, "default_transaction_read_only", "on")
 	}
 
 	conn, err := pgx.Connect(ctx, dsn)
@@ -116,7 +120,7 @@ func OpenConnection(ctx context.Context, connName string) (*pgx.Conn, error) {
 		return nil, fmt.Errorf("connect to %q: %w", connName, err)
 	}
 
-	pool.Put(ctx, connName, conn)
+	p.Put(ctx, connName, conn)
 	return conn, nil
 }
 
@@ -125,9 +129,9 @@ func ReturnConnection(ctx context.Context, conn *pgx.Conn) {
 	_, _ = conn.Exec(ctx, "ROLLBACK")
 }
 
-// appendDSNParam adds a key=value parameter to a DSN string.
+// AppendDSNParam adds a key=value parameter to a DSN string.
 // Handles both URI format (postgres://...) and keyword/value format (host=... port=...).
-func appendDSNParam(dsn, key, value string) string {
+func AppendDSNParam(dsn, key, value string) string {
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		sep := "?"
 		if strings.Contains(dsn, "?") {
@@ -138,8 +142,8 @@ func appendDSNParam(dsn, key, value string) string {
 	return dsn + " " + key + "=" + value
 }
 
-// extractHostPort parses host and port from a DSN (URI or keyword/value format).
-func extractHostPort(dsn string) (string, int) {
+// ExtractHostPort parses host and port from a DSN (URI or keyword/value format).
+func ExtractHostPort(dsn string) (string, int) {
 	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		u, err := url.Parse(dsn)
 		if err != nil {
@@ -153,7 +157,6 @@ func extractHostPort(dsn string) (string, int) {
 		return host, port
 	}
 
-	// keyword/value format: host=... port=...
 	var host string
 	port := 5432
 	for _, part := range strings.Fields(dsn) {

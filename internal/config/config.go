@@ -1,11 +1,10 @@
-package main
+package config
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -83,15 +82,21 @@ func (cfg Config) StatementTimeoutMS() int {
 	return DefaultStatementTimeoutS * 1000
 }
 
-// AppConfig holds the loaded configuration.
-var AppConfig Config
+// ConnNames returns the list of configured connection names.
+func (cfg Config) ConnNames() []string {
+	names := make([]string, 0, len(cfg.Connections))
+	for k := range cfg.Connections {
+		names = append(names, k)
+	}
+	return names
+}
 
-// LoadConfig reads config.json from the same directory as the executable,
+// Load reads config.json from the same directory as the executable,
 // falling back to the current working directory.
-func LoadConfig() error {
+func Load() (Config, error) {
 	exe, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve executable path: %w", err)
+		return Config{}, fmt.Errorf("resolve executable path: %w", err)
 	}
 	configPath := filepath.Join(filepath.Dir(exe), "config.json")
 
@@ -99,28 +104,14 @@ func LoadConfig() error {
 	if err != nil {
 		data, err = os.ReadFile("config.json")
 		if err != nil {
-			return fmt.Errorf("read config.json: %w", err)
+			return Config{}, fmt.Errorf("read config.json: %w", err)
 		}
 	}
 
-	if err := json.Unmarshal(data, &AppConfig); err != nil {
-		return fmt.Errorf("parse config.json: %w", err)
+	var cfg Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse config.json: %w", err)
 	}
 
-	for name, conn := range AppConfig.Connections {
-		if _, ok := sources[conn.Source]; !ok {
-			return fmt.Errorf("connection %q: unknown source %q (registered: %s)",
-				name, conn.Source, strings.Join(RegisteredSourceTypes(), ", "))
-		}
-	}
-
-	return nil
-}
-
-func connNames() []string {
-	names := make([]string, 0, len(AppConfig.Connections))
-	for k := range AppConfig.Connections {
-		names = append(names, k)
-	}
-	return names
+	return cfg, nil
 }

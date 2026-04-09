@@ -1,4 +1,4 @@
-package main
+package tools
 
 import (
 	"context"
@@ -8,17 +8,28 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/jpgomesf/mcp-postgres/internal/config"
+	"github.com/jpgomesf/mcp-postgres/internal/output"
+	"github.com/jpgomesf/mcp-postgres/internal/pool"
+	"github.com/jpgomesf/mcp-postgres/internal/resolver"
 )
+
+// Handlers holds the dependencies needed by tool handlers.
+type Handlers struct {
+	Config config.Config
+	Pool   *pool.ConnPool
+}
 
 // --- Input structs ---
 
-type PgQueryInput struct {
+type pgQueryInput struct {
 	Connection string `json:"connection"`
 	SQL        string `json:"sql"`
 	Schema     string `json:"schema,omitempty"`
 }
 
-type PgSchemaInput struct {
+type pgSchemaInput struct {
 	Connection string `json:"connection"`
 	Schema     string `json:"schema,omitempty"`
 	Table      string `json:"table,omitempty"`
@@ -46,11 +57,12 @@ func errTxt(format string, args ...any) (*mcp.CallToolResult, error) {
 
 // --- Tool handlers ---
 
-func HandleListConnections(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+// HandleListConnections returns all configured connections and their status.
+func (h *Handlers) HandleListConnections(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var lines []string
-	for name, conn := range AppConfig.Connections {
+	for name, conn := range h.Config.Connections {
 		flags := []string{conn.Source}
-		if conn.IsReadonly(AppConfig.Defaults) {
+		if conn.IsReadonly(h.Config.Defaults) {
 			flags = append(flags, "readonly")
 		}
 		if conn.RequiresVPN {
@@ -59,22 +71,19 @@ func HandleListConnections(_ context.Context, _ *mcp.CallToolRequest) (*mcp.Call
 		if conn.DefaultSchema != "" {
 			flags = append(flags, "schema:"+conn.DefaultSchema)
 		}
-		if conn.Source == "aws_secrets_manager" && conn.SecretName != "" {
-			cached := "not loaded"
-			if awsSecrets.IsCached(conn.SecretName) {
-				cached = "loaded"
-			}
-			flags = append(flags, cached)
+		if status := resolver.StatusFor(conn); status != "" {
+			flags = append(flags, status)
 		}
 		lines = append(lines, fmt.Sprintf("  %s [%s]", name, strings.Join(flags, ", ")))
 	}
 
-	header := fmt.Sprintf("Connections (%d):", len(AppConfig.Connections))
+	header := fmt.Sprintf("Connections (%d):", len(h.Config.Connections))
 	return txt(header + "\n" + strings.Join(lines, "\n"))
 }
 
-func HandleQuery(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var input PgQueryInput
+// HandleQuery executes a read-only SQL query against a named connection.
+func (h *Handlers) HandleQuery(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var input pgQueryInput
 	if err := parseArgs(req, &input); err != nil {
 		return errTxt("invalid arguments: %v", err)
 	}
@@ -85,22 +94,22 @@ func HandleQuery(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 	}
 
 	firstWord := strings.ToUpper(strings.Fields(sql)[0])
-	if BlockedSQL[firstWord] {
+	if config.BlockedSQL[firstWord] {
 		return errTxt("'%s' statements are not allowed.", firstWord)
 	}
 
 	schema := input.Schema
 	if schema == "" {
-		if connCfg, ok := AppConfig.Connections[input.Connection]; ok {
+		if connCfg, ok := h.Config.Connections[input.Connection]; ok {
 			schema = connCfg.DefaultSchema
 		}
 	}
 
-	conn, err := OpenConnection(ctx, input.Connection)
+	conn, err := h.Pool.OpenConnection(ctx, h.Config, input.Connection)
 	if err != nil {
 		return errTxt("%v", err)
 	}
-	defer ReturnConnection(ctx, conn)
+	defer pool.ReturnConnection(ctx, conn)
 
 	if schema != "" {
 		_, err := conn.Exec(ctx, fmt.Sprintf(
@@ -124,34 +133,35 @@ func HandleQuery(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolRe
 		prefix = fmt.Sprintf("[search_path: %s]\n", schema)
 	}
 
-	table := FormatTable(records, headers)
+	table := output.FormatTable(records, headers)
 	rowLabel := "rows"
 	if len(records) == 1 {
 		rowLabel = "row"
 	}
-	output := fmt.Sprintf("%s%s\n(%d %s)", prefix, table, len(records), rowLabel)
+	out := fmt.Sprintf("%s%s\n(%d %s)", prefix, table, len(records), rowLabel)
 
-	return txt(SmartOutput(output, "pg_query", len(records), headers))
+	return txt(output.SmartOutput(out, "pg_query", len(records), headers))
 }
 
-func HandleSchema(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	var input PgSchemaInput
+// HandleSchema lists tables and columns for a named connection.
+func (h *Handlers) HandleSchema(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var input pgSchemaInput
 	if err := parseArgs(req, &input); err != nil {
 		return errTxt("invalid arguments: %v", err)
 	}
 
 	schemaFilter := input.Schema
 	if schemaFilter == "" {
-		if connCfg, ok := AppConfig.Connections[input.Connection]; ok {
+		if connCfg, ok := h.Config.Connections[input.Connection]; ok {
 			schemaFilter = connCfg.DefaultSchema
 		}
 	}
 
-	conn, err := OpenConnection(ctx, input.Connection)
+	conn, err := h.Pool.OpenConnection(ctx, h.Config, input.Connection)
 	if err != nil {
 		return errTxt("%v", err)
 	}
-	defer ReturnConnection(ctx, conn)
+	defer pool.ReturnConnection(ctx, conn)
 
 	var targetSchemas []string
 	if schemaFilter != "" {
@@ -175,8 +185,8 @@ func HandleSchema(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolR
 		return txt(noTablesMessage(schemaFilter, input.Table))
 	}
 
-	output := formatSchemaTree(columns)
-	return txt(SmartOutput(output, "pg_schema", len(columns),
+	out := formatSchemaTree(columns)
+	return txt(output.SmartOutput(out, "pg_schema", len(columns),
 		[]string{"table_schema", "table_name", "column_name"}))
 }
 
@@ -223,7 +233,7 @@ func discoverSchemas(ctx context.Context, conn *pgx.Conn) ([]string, error) {
 		if err := rows.Scan(&name); err != nil {
 			return nil, err
 		}
-		if !SystemSchemas[name] && !strings.HasPrefix(name, "pg_") {
+		if !config.SystemSchemas[name] && !strings.HasPrefix(name, "pg_") {
 			schemas = append(schemas, name)
 		}
 	}

@@ -2,15 +2,30 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/jpgomesf/mcp-postgres/internal/config"
+	"github.com/jpgomesf/mcp-postgres/internal/pool"
+	"github.com/jpgomesf/mcp-postgres/internal/resolver"
+	"github.com/jpgomesf/mcp-postgres/internal/tools"
 )
 
 func main() {
-	if err := LoadConfig(); err != nil {
+	cfg, err := config.Load()
+	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
+
+	if err := validateSources(cfg); err != nil {
+		log.Fatalf("config validation: %v", err)
+	}
+
+	connPool := pool.New(config.DefaultConnectionTTL)
+	h := &tools.Handlers{Config: cfg, Pool: connPool}
 
 	server := mcp.NewServer(
 		&mcp.Implementation{
@@ -28,7 +43,7 @@ func main() {
 			"type":       "object",
 			"properties": map[string]any{},
 		},
-	}, HandleListConnections)
+	}, h.HandleListConnections)
 
 	server.AddTool(&mcp.Tool{
 		Name: "pg_query",
@@ -46,7 +61,7 @@ func main() {
 			},
 			"required": []string{"connection", "sql"},
 		},
-	}, HandleQuery)
+	}, h.HandleQuery)
 
 	server.AddTool(&mcp.Tool{
 		Name: "pg_schema",
@@ -63,9 +78,19 @@ func main() {
 			},
 			"required": []string{"connection"},
 		},
-	}, HandleSchema)
+	}, h.HandleSchema)
 
 	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
 		log.Fatalf("server error: %v", err)
 	}
+}
+
+func validateSources(cfg config.Config) error {
+	for name, conn := range cfg.Connections {
+		if !resolver.IsRegistered(conn.Source) {
+			return fmt.Errorf("connection %q: unknown source %q (registered: %s)",
+				name, conn.Source, strings.Join(resolver.RegisteredSourceTypes(), ", "))
+		}
+	}
+	return nil
 }

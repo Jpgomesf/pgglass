@@ -1,9 +1,11 @@
-package main
+package resolver
 
 import (
 	"context"
 	"fmt"
 	"strings"
+
+	"github.com/jpgomesf/mcp-postgres/internal/config"
 )
 
 // CredentialSource resolves a DSN from a connection configuration.
@@ -13,7 +15,11 @@ type CredentialSource interface {
 	Type() string
 
 	// Resolve returns a libpq-compatible DSN string for the given connection.
-	Resolve(ctx context.Context, connName string, conn Connection) (string, error)
+	Resolve(ctx context.Context, connName string, conn config.Connection) (string, error)
+
+	// Status returns a short status hint for display in pg_list_connections.
+	// Return "" if the source has no meaningful status to report.
+	Status(conn config.Connection) string
 }
 
 // sources maps source type strings to their implementations.
@@ -34,8 +40,23 @@ func RegisteredSourceTypes() []string {
 	return types
 }
 
-// ResolveCredentials dispatches to the appropriate CredentialSource based on conn.Source.
-func ResolveCredentials(ctx context.Context, connName string, conn Connection) (string, error) {
+// IsRegistered returns true if the given source type has been registered.
+func IsRegistered(sourceType string) bool {
+	_, ok := sources[sourceType]
+	return ok
+}
+
+// StatusFor returns the status hint for a connection from its registered source.
+func StatusFor(conn config.Connection) string {
+	src, ok := sources[conn.Source]
+	if !ok {
+		return ""
+	}
+	return src.Status(conn)
+}
+
+// Resolve dispatches to the appropriate CredentialSource based on conn.Source.
+func Resolve(ctx context.Context, connName string, conn config.Connection) (string, error) {
 	src, ok := sources[conn.Source]
 	if !ok {
 		return "", fmt.Errorf("connection %q: unknown source %q (registered: %s)",
