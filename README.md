@@ -384,6 +384,10 @@ make lint       # run golangci-lint
 - AWS secrets are cached in-memory with a 24-hour TTL (no disk persistence). Rotated credentials are picked up automatically.
 - Direct DSN values in `config.json` should be treated as sensitive — use `env` or `dotenv` sources in shared environments, and keep `config.json` out of version control if it contains credentials.
 
+## Contributing
+
+We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow, branch strategy, commit conventions, and a guide on adding new credential sources.
+
 ## License
 
 MIT
