@@ -59,6 +59,45 @@ func ResolveCredentials(ctx context.Context, connName string, conn Connection) (
 	return src.Resolve(ctx, connName, conn)
 }
 
+// --- Validation ---
+
+// fieldValidator collects missing or empty fields and reports them all at once.
+type fieldValidator struct {
+	connName   string
+	sourceType string
+	missing    []string
+}
+
+func newValidator(connName, sourceType string) *fieldValidator {
+	return &fieldValidator{connName: connName, sourceType: sourceType}
+}
+
+// require checks that value is non-empty. Returns the value for convenient chaining.
+func (v *fieldValidator) require(field, value string) string {
+	if value == "" {
+		v.missing = append(v.missing, field)
+	}
+	return value
+}
+
+// requireFromMap checks that a key exists and is non-empty in the map.
+func (v *fieldValidator) requireFromMap(m map[string]string, key string) string {
+	val := m[key]
+	if val == "" {
+		v.missing = append(v.missing, key)
+	}
+	return val
+}
+
+// err returns a combined error if any fields are missing, nil otherwise.
+func (v *fieldValidator) err() error {
+	if len(v.missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("connection %q (%s): missing required fields: %s",
+		v.connName, v.sourceType, strings.Join(v.missing, ", "))
+}
+
 // --- DirectSource ---
 
 // DirectSource resolves credentials from an inline DSN string.
@@ -67,8 +106,10 @@ type DirectSource struct{}
 func (DirectSource) Type() string { return "direct" }
 
 func (DirectSource) Resolve(_ context.Context, connName string, conn Connection) (string, error) {
-	if conn.DSN == "" {
-		return "", fmt.Errorf("connection %q (direct): 'dsn' is required", connName)
+	v := newValidator(connName, "direct")
+	v.require("dsn", conn.DSN)
+	if err := v.err(); err != nil {
+		return "", err
 	}
 	return conn.DSN, nil
 }
@@ -81,12 +122,14 @@ type EnvSource struct{}
 func (EnvSource) Type() string { return "env" }
 
 func (EnvSource) Resolve(_ context.Context, connName string, conn Connection) (string, error) {
-	if conn.DSNEnvVar == "" {
-		return "", fmt.Errorf("connection %q (env): 'dsn_env_var' is required", connName)
+	v := newValidator(connName, "env")
+	envVar := v.require("dsn_env_var", conn.DSNEnvVar)
+	if err := v.err(); err != nil {
+		return "", err
 	}
-	dsn := os.Getenv(conn.DSNEnvVar)
+	dsn := os.Getenv(envVar)
 	if dsn == "" {
-		return "", fmt.Errorf("connection %q (env): environment variable %q is not set", connName, conn.DSNEnvVar)
+		return "", fmt.Errorf("connection %q (env): environment variable %q is not set", connName, envVar)
 	}
 	return dsn, nil
 }
@@ -99,12 +142,15 @@ type DotenvSource struct{}
 func (DotenvSource) Type() string { return "dotenv" }
 
 func (DotenvSource) Resolve(_ context.Context, connName string, conn Connection) (string, error) {
+	v := newValidator(connName, "dotenv")
+	v.require("dsn_env_var", conn.DSNEnvVar)
+	if err := v.err(); err != nil {
+		return "", err
+	}
+
 	dotenvPath := conn.DotenvPath
 	if dotenvPath == "" {
 		dotenvPath = ".env"
-	}
-	if conn.DSNEnvVar == "" {
-		return "", fmt.Errorf("connection %q (dotenv): 'dsn_env_var' is required", connName)
 	}
 
 	vars, err := parseDotenv(dotenvPath)
@@ -161,8 +207,10 @@ type AWSSecretsSource struct{}
 func (AWSSecretsSource) Type() string { return "aws_secrets_manager" }
 
 func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn Connection) (string, error) {
-	if conn.SecretName == "" {
-		return "", fmt.Errorf("connection %q (aws_secrets_manager): 'secret_name' is required", connName)
+	v := newValidator(connName, "aws_secrets_manager")
+	v.require("secret_name", conn.SecretName)
+	if err := v.err(); err != nil {
+		return "", err
 	}
 
 	secret, err := awsSecrets.Get(ctx, conn.AWSProfile, conn.SecretName)
@@ -170,21 +218,13 @@ func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn Conne
 		return "", err
 	}
 
-	host := secret["host"]
-	if host == "" {
-		return "", fmt.Errorf("connection %q (aws_secrets_manager): secret %q missing required field 'host'", connName, conn.SecretName)
-	}
-	dbName := secret["db_name"]
-	if dbName == "" {
-		return "", fmt.Errorf("connection %q (aws_secrets_manager): secret %q missing required field 'db_name'", connName, conn.SecretName)
-	}
-	user := secret["user"]
-	if user == "" {
-		return "", fmt.Errorf("connection %q (aws_secrets_manager): secret %q missing required field 'user'", connName, conn.SecretName)
-	}
-	password := secret["password"]
-	if password == "" {
-		return "", fmt.Errorf("connection %q (aws_secrets_manager): secret %q missing required field 'password'", connName, conn.SecretName)
+	sv := newValidator(connName, fmt.Sprintf("aws_secrets_manager secret %q", conn.SecretName))
+	host := sv.requireFromMap(secret, "host")
+	dbName := sv.requireFromMap(secret, "db_name")
+	user := sv.requireFromMap(secret, "user")
+	password := sv.requireFromMap(secret, "password")
+	if err := sv.err(); err != nil {
+		return "", err
 	}
 
 	port := secret["port"]
