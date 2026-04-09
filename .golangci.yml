@@ -1,7 +1,5 @@
-version: "2"
-
 linters:
-  default: none
+  disable-all: true
   enable:
     - errcheck
     - govet
@@ -14,14 +12,14 @@ linters:
     - unconvert
     - unparam
     - gocyclo
-  settings:
-    gocyclo:
-      min-complexity: 15
-    revive:
-      rules:
-        - name: exported
-          disabled: true
 
-  exclusions:
-    presets:
-      - std-error-handling
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+  revive:
+    rules:
+      - name: exported
+        disabled: true
+
+issues:
+  exclude-use-default: true
