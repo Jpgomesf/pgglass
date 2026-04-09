@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -66,29 +67,37 @@ func (AWSSecretsSource) Status(conn config.Connection) string {
 
 // --- AWS secrets cache ---
 
+const secretCacheTTL = 24 * time.Hour
+
+type secretEntry struct {
+	value     map[string]string
+	fetchedAt time.Time
+}
+
 type awsSecretsCache struct {
 	mu    sync.RWMutex
-	cache map[string]map[string]string
+	cache map[string]*secretEntry
 }
 
 var awsSecrets = &awsSecretsCache{
-	cache: make(map[string]map[string]string),
+	cache: make(map[string]*secretEntry),
 }
 
-// IsCached returns true if the secret has already been fetched.
+// IsCached returns true if the secret is cached and not expired.
 func (sc *awsSecretsCache) IsCached(secretName string) bool {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	_, ok := sc.cache[secretName]
-	return ok
+	entry, ok := sc.cache[secretName]
+	return ok && time.Since(entry.fetchedAt) < secretCacheTTL
 }
 
-// Get fetches a secret from AWS Secrets Manager, returning cached values on subsequent calls.
+// Get fetches a secret from AWS Secrets Manager, returning cached values
+// if available and not older than 24 hours.
 func (sc *awsSecretsCache) Get(ctx context.Context, awsProfile, secretName string) (map[string]string, error) {
 	sc.mu.RLock()
-	if cached, ok := sc.cache[secretName]; ok {
+	if entry, ok := sc.cache[secretName]; ok && time.Since(entry.fetchedAt) < secretCacheTTL {
 		sc.mu.RUnlock()
-		return cached, nil
+		return entry.value, nil
 	}
 	sc.mu.RUnlock()
 
@@ -116,7 +125,7 @@ func (sc *awsSecretsCache) Get(ctx context.Context, awsProfile, secretName strin
 	}
 
 	sc.mu.Lock()
-	sc.cache[secretName] = secret
+	sc.cache[secretName] = &secretEntry{value: secret, fetchedAt: time.Now()}
 	sc.mu.Unlock()
 
 	return secret, nil
