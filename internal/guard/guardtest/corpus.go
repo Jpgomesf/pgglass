@@ -226,6 +226,35 @@ var Rejected = []Case{
 	// [crystaldba] The same gap for pg_stat_file.
 	{`SELECT * FROM pg_stat_file('postgresql.conf') AS t`, "pg_stat_file"},
 
+	// --- Server configuration files through catalog views and functions ---
+	// pg_read_file on these files is denied; these interfaces return the same
+	// content. [redteam] is the confirmed v2 bypass: a superuser-connected
+	// agent read the whole authentication policy with an ordinary SELECT.
+
+	// [redteam] pg_hba_file_rules is a view returning pg_hba.conf; it is a
+	// relation reference, not a function call, so it is denied as a relation.
+	{`SELECT type, database, user_name, auth_method FROM pg_hba_file_rules`, "pg_hba_file_rules"},
+	// [redteam] The exact exfiltration payload: string_agg over the view.
+	{`SELECT string_agg(type||' '||array_to_string(database,',')||' '||auth_method, E'\n' ORDER BY line_number) FROM pg_hba_file_rules`, "pg_hba_file_rules"},
+	// [redteam] Schema-qualified: still a relation reference to the same view.
+	{`SELECT count(*) FROM pg_catalog.pg_hba_file_rules`, "pg_hba_file_rules"},
+	// [redteam] pg_ident_file_mappings returns pg_ident.conf (PostgreSQL 15+).
+	{`SELECT map_name, sys_name, pg_username FROM pg_ident_file_mappings`, "pg_ident_file_mappings"},
+	// [redteam] pg_file_settings returns postgresql.conf and its include files,
+	// with their absolute source paths.
+	{`SELECT DISTINCT sourcefile FROM pg_file_settings WHERE sourcefile <> ''`, "pg_file_settings"},
+	// [redteam] pg_show_all_file_settings() is the function behind that view,
+	// called in FROM.
+	{`SELECT * FROM pg_show_all_file_settings()`, "pg_show_all_file_settings"},
+	// [redteam] And as a target-list call.
+	{`SELECT pg_show_all_file_settings()`, "pg_show_all_file_settings"},
+	// [redteam] pg_current_logfile() discloses the active log file's path.
+	{`SELECT pg_current_logfile()`, "pg_current_logfile"},
+	// [redteam] Its one-argument form.
+	{`SELECT pg_current_logfile('csvlog')`, "pg_current_logfile"},
+	// [policy] Called as a field: Postgres reads x.pg_current_logfile as the call.
+	{`SELECT ('stderr'::text).pg_current_logfile`, "function pg_current_logfile"},
+
 	// --- Denied functions: v1 bypasses and spellings ---
 
 	// [v1] query_to_xml runs the SQL string it is given.
@@ -517,7 +546,10 @@ var Allowed = []string{
 	`SELECT n.nspname FROM pg_catalog.pg_namespace n`,
 	`SELECT pg_advisory_xact_lock(42), pg_try_advisory_xact_lock(43), pg_advisory_unlock(44)`,
 	`SELECT relname, seq_scan FROM pg_stat_user_tables`,
-	`SELECT pg_is_wal_replay_paused(), pg_lsn('0/16B3748'), name FROM pg_file_settings`,
+	`SELECT pg_is_wal_replay_paused(), pg_lsn('0/16B3748'), name FROM pg_settings`,
+	// pg_settings (current GUC values, like SHOW) stays allowed; only the
+	// views that return raw config-file contents are denied.
+	`SELECT name, setting, unit FROM pg_settings WHERE name = 'statement_timeout'`,
 	`SELECT net.id FROM app.events AS net`,
 	`SELECT "dblink" FROM (SELECT 1 AS "dblink") s`,
 	`SELECT 'São Paulo' AS cidade`,

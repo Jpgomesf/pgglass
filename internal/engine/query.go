@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -82,9 +83,23 @@ func collect(ctx context.Context, tx pgx.Tx, q Query, l Limits) (*result.Result,
 		}
 	}
 	if err := rows.Err(); err != nil {
+		// A row wider than the per-message cap is a byte-budget overrun that
+		// pgx caught before buffering it, so truncate rather than error, like
+		// the collector's own MaxBytes cut.
+		if oversizedRow(err) {
+			c.truncate("max_bytes", c.limits.MaxBytes)
+			return c.res, nil
+		}
 		return nil, err
 	}
 	return c.res, nil
+}
+
+// oversizedRow reports whether err is pgx rejecting a protocol message larger
+// than the per-message cap harden set from max_bytes.
+func oversizedRow(err error) bool {
+	var e *pgproto3.ExceededMaxBodyLenErr
+	return errors.As(err, &e)
 }
 
 // collector keeps rows until one would exceed a limit.

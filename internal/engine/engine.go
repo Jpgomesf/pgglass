@@ -197,7 +197,7 @@ func (m *Manager) pool(ctx context.Context, name string) (*pgxpool.Pool, error) 
 		if m.isClosed() {
 			return nil, errClosed
 		}
-		p, err := open(ctx, name, m.cfg.Connections[name])
+		p, err := open(ctx, name, m.cfg.Connections[name], m.limits.MaxBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -236,9 +236,15 @@ func unknownConnection(name string, conns map[string]config.Connection) error {
 	return fmt.Errorf("unknown connection %q (available: %s)", name, strings.Join(slices.Sorted(maps.Keys(conns)), ", "))
 }
 
+// rowByteHeadroom is added to max_bytes to get the per-message cap, so a row
+// whose values sum to the whole byte budget is never rejected for its wire
+// framing alone (two bytes plus four per column, well under this).
+const rowByteHeadroom = 1 << 20
+
 // open resolves the DSN of the connection named name and creates its pool,
-// which dials on first use.
-func open(ctx context.Context, name string, conn config.Connection) (*pgxpool.Pool, error) {
+// which dials on first use. maxBytes is the result byte budget, used to bound
+// one wire message.
+func open(ctx context.Context, name string, conn config.Connection, maxBytes int) (*pgxpool.Pool, error) {
 	dsn, err := resolver.Resolve(ctx, name, conn)
 	if err != nil {
 		return nil, err
@@ -252,7 +258,7 @@ func open(ctx context.Context, name string, conn config.Connection) (*pgxpool.Po
 			return checkVPN(name, c.Host, int(c.Port))
 		}
 	}
-	harden(cfg.ConnConfig)
+	harden(cfg.ConnConfig, maxBytes+rowByteHeadroom)
 	p, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("connection %q: %w", name, err)
@@ -271,8 +277,9 @@ func checkVPN(name, host string, port int) error {
 	return nil
 }
 
-// harden sets what every connection needs, whatever the DSN says.
-func harden(c *pgx.ConnConfig) {
+// harden sets what every connection needs, whatever the DSN says. maxBodyLen
+// bounds one protocol message.
+func harden(c *pgx.ConnConfig, maxBodyLen int) {
 	// A second layer under the READ ONLY transactions. PgBouncer refuses
 	// startup parameters it does not know: list this one in its
 	// track_extra_parameters (1.20+), or in ignore_startup_parameters.
@@ -288,5 +295,14 @@ func harden(c *pgx.ConnConfig) {
 	// connection for the next query; pgx's default drops the connection.
 	c.BuildContextWatcherHandler = func(pc *pgconn.PgConn) ctxwatch.Handler {
 		return &pgconn.CancelRequestContextWatcherHandler{Conn: pc, DeadlineDelay: cancelWait}
+	}
+	// Bound one wire message so a single huge field (SELECT repeat('x', 1e9))
+	// cannot be buffered far past the byte budget: pgx rejects a larger
+	// message after reading its 5-byte header, before allocating the body. The
+	// collector's MaxBytes cap only bounds the bytes it keeps, which is after
+	// pgx has already buffered the whole row.
+	c.AfterConnect = func(_ context.Context, pc *pgconn.PgConn) error {
+		pc.Frontend().SetMaxBodyLen(maxBodyLen)
+		return nil
 	}
 }

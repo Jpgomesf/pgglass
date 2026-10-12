@@ -168,6 +168,8 @@ func checkNode(m protoreflect.ProtoMessage) error {
 	switch n := m.(type) {
 	case *pg_query.FuncCall:
 		return checkFunction(n.GetFuncname())
+	case *pg_query.RangeVar:
+		return checkRelation(n)
 	case *pg_query.ColumnRef:
 		return checkColumnRef(n)
 	case *pg_query.A_Indirection:
@@ -202,6 +204,20 @@ func checkSelect(s *pg_query.SelectStmt) error {
 func checkCTE(c *pg_query.CommonTableExpr) error {
 	if c.GetCtequery().GetSelectStmt() == nil {
 		return violation("WITH query %q is a %s: only SELECT is allowed", c.GetCtename(), nodeName(c.GetCtequery()))
+	}
+	return nil
+}
+
+// checkRelation rejects a reference to a system view that parses and returns
+// the content of a server configuration file. pg_read_file on those files is
+// already denied; these views are the same read under another name, so they
+// belong to the guard's "Server files" category. The match is on the
+// relation's own name, lower-cased and whatever the schema, like
+// checkFunction: a CTE or table that shadows one of these names is rejected
+// too, since the parse tree cannot tell them apart.
+func checkRelation(r *pg_query.RangeVar) error {
+	if deniedRelations[strings.ToLower(r.GetRelname())] {
+		return violation("relation %s is not allowed: it discloses a server configuration file", r.GetRelname())
 	}
 	return nil
 }
@@ -283,6 +299,13 @@ var deniedFunctions = map[string]bool{
 	"pg_read_file":        true,
 	"pg_read_binary_file": true,
 	"pg_stat_file":        true,
+	// Server configuration files, read through catalog functions. The matching
+	// views (pg_hba_file_rules, pg_ident_file_mappings, pg_file_settings) are
+	// denied as relations; see deniedRelations.
+	"pg_show_all_file_settings": true, // postgresql.conf, behind the pg_file_settings view
+	"pg_current_logfile":        true, // the active log file's path
+	"pg_hba_file_rules":         true, // pg_hba.conf, where the view wraps a like-named function
+	"pg_ident_file_mappings":    true, // pg_ident.conf, likewise
 	// Other sessions and the server process.
 	"pg_terminate_backend": true,
 	"pg_cancel_backend":    true,
@@ -318,6 +341,16 @@ var deniedFunctions = map[string]bool{
 	"ts_stat":                    true,
 	"ts_rewrite":                 true, // ts_rewrite(query, select text) runs the select
 	"connectby":                  true, // tablefunc: builds SQL from its text arguments
+}
+
+// deniedRelations are system views that parse and return the server's
+// configuration files: the same disclosure as the denied pg_read_file, by
+// another name. They are referenced as relations, not function calls, so the
+// guard rejects them where it meets a RangeVar.
+var deniedRelations = map[string]bool{
+	"pg_hba_file_rules":      true, // pg_hba.conf, the authentication policy
+	"pg_ident_file_mappings": true, // pg_ident.conf, the user name maps (PostgreSQL 15+)
+	"pg_file_settings":       true, // postgresql.conf and its include files, with their paths
 }
 
 // deniedPrefixes deny whole function families by name prefix.
