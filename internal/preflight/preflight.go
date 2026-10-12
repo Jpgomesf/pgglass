@@ -75,12 +75,14 @@ var dangerousFunctions = []struct {
 	severity string
 	patterns []string
 }{
-	// Exfiltration paths: dblink* opens sessions of its own, http* (pgsql-http)
-	// and net.* (Supabase pg_net) send HTTP requests, and lo_export writes
-	// server files, even in a read-only transaction.
-	{SeverityCritical, []string{`%.dblink%`, `net.%`, `%.http%`, `%.lo\_export`}},
-	// They read server files.
-	{SeverityWarning, []string{`%.lo\_import`, `%.pg\_read\_file`}},
+	// Ways out of the read-only transaction: dblink* opens sessions of its
+	// own, pg_background* runs SQL in a worker's own transaction, http*
+	// (pgsql-http), net.* (Supabase pg_net), aws_s3.* and aws_lambda.* (RDS)
+	// send requests or rows out, and lo_export writes server files.
+	{SeverityCritical, []string{`%.dblink%`, `%.pg\_background%`, `%.http%`, `net.%`, `aws\_s3.%`, `aws\_lambda.%`, `%.lo\_export`}},
+	// They read server files, or make another backend dump its memory
+	// contexts to the server log.
+	{SeverityWarning, []string{`%.lo\_import`, `%.pg\_read\_file`, `%.pg\_read\_binary\_file`, `%.pg\_log\_backend\_memory\_contexts`}},
 }
 
 // Audit inspects, through q, the privileges of the role q connects as. A

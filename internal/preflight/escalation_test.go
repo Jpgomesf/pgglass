@@ -25,6 +25,10 @@ func TestAuditEscalation(t *testing.T) {
 		{"shadowed catalog", "pf_shadowed", []preflight.Finding{
 			critical("role_membership", "member of pg_execute_server_program"),
 		}},
+		{"extension escapes", "pf_escapes", []preflight.Finding{
+			critical("function_execute", "EXECUTE on 3 functions: aws_lambda.invoke, aws_s3.query_export_to_s3, bg.pg_background_launch"),
+			warning("function_execute", "EXECUTE on 2 functions: pg_catalog.pg_log_backend_memory_contexts, pg_catalog.pg_read_binary_file"),
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
