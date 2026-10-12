@@ -194,8 +194,10 @@ func TestRegistration(t *testing.T) {
 	}
 }
 
+// TestRegisterSource writes the source registry, which RegisterSource does not
+// lock because sources register in init. It is not parallel, so it ends before
+// the parallel tests that read the registry resume.
 func TestRegisterSource(t *testing.T) {
-	t.Parallel()
 	resolver.RegisterSource(fakeSource{})
 	if !resolver.IsRegistered("resolver_test_fake") {
 		t.Fatal("RegisterSource did not register the source")
