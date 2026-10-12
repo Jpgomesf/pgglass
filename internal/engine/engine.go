@@ -1,7 +1,9 @@
 // Package engine runs read-only queries against the configured connections.
-// It is the server's read-only boundary: each query runs alone in a READ ONLY
-// transaction that is always rolled back, under timeouts and result limits,
-// so nothing a query does outlives it.
+// Each query runs alone in a READ ONLY transaction that is always rolled
+// back, under timeouts and result limits, so nothing it does inside the
+// transaction outlives it. What acts outside the transaction (dblink, server
+// files and programs, session advisory locks) is for internal/guard to
+// reject and for the connection's role to lack.
 package engine
 
 import (
@@ -9,7 +11,9 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,7 +24,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/pool"
 	"github.com/jpgomesf/mcp-postgres/internal/resolver"
 	"github.com/jpgomesf/mcp-postgres/internal/result"
 )
@@ -55,6 +58,9 @@ type Query struct {
 	// SearchPath, when set, names the one schema used as search_path for this
 	// query only. The engine quotes it as an identifier.
 	SearchPath string
+	// MaxRows, when positive, lowers Limits.MaxRows for this query only. It
+	// never raises it.
+	MaxRows int
 }
 
 // QueryError is an error reported by Postgres, flattened for display.
@@ -126,7 +132,7 @@ func (m *Manager) Query(ctx context.Context, conn string, q Query) (*result.Resu
 	ctx, cancel := context.WithTimeout(ctx, m.limits.StatementTimeout+deadlineGrace)
 	defer cancel()
 
-	res, err := run(ctx, p, q, m.limits)
+	res, err := run(ctx, p, q, m.limitsFor(q))
 	if err == nil {
 		err = nameTypes(ctx, p, res.Columns)
 	}
@@ -134,6 +140,16 @@ func (m *Manager) Query(ctx context.Context, conn string, q Query) (*result.Resu
 		return nil, queryError(ctx, err)
 	}
 	return res, nil
+}
+
+// limitsFor returns the limits of q: the Manager's, with MaxRows lowered to
+// q.MaxRows when that is smaller.
+func (m *Manager) limitsFor(q Query) Limits {
+	l := m.limits
+	if q.MaxRows > 0 && q.MaxRows < l.MaxRows {
+		l.MaxRows = q.MaxRows
+	}
+	return l
 }
 
 // Querier returns a Querier bound to the connection named conn.
@@ -247,9 +263,11 @@ func open(ctx context.Context, name string, conn config.Connection) (*pgxpool.Po
 // checkVPN fails fast, before each dial, when the host of a requires_vpn
 // connection is unreachable.
 func checkVPN(name, host string, port int) error {
-	if !pool.CheckVPN(host, port, vpnTimeout) {
+	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), vpnTimeout)
+	if err != nil {
 		return fmt.Errorf("connection %q: host %s:%d unreachable — is VPN active?", name, host, port)
 	}
+	_ = conn.Close()
 	return nil
 }
 
@@ -259,6 +277,10 @@ func harden(c *pgx.ConnConfig) {
 	// startup parameters it does not know: list this one in its
 	// track_extra_parameters (1.20+), or in ignore_startup_parameters.
 	c.RuntimeParams["default_transaction_read_only"] = "on"
+	// The guard reads SQL as UTF-8, and results are decoded as UTF-8: a role
+	// or database default such as SJIS, where a multibyte character can end
+	// in a backslash byte, must not change how the server reads either.
+	c.RuntimeParams["client_encoding"] = "UTF8"
 	// The extended protocol with the unnamed statement: one statement per
 	// query, and no server-side state for a transaction-mode pooler to lose.
 	c.DefaultQueryExecMode = pgx.QueryExecModeExec

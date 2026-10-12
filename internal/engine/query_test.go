@@ -206,6 +206,50 @@ func TestMaxRowsTruncates(t *testing.T) {
 	}
 }
 
+func TestQueryMaxRowsOnlyLowersTheCap(t *testing.T) {
+	t.Parallel()
+	m := cleanApp(t, config.Defaults{MaxRows: 10})
+	for _, tc := range []struct {
+		asked, wantRows int
+		wantReason      string
+	}{
+		{3, 3, "max_rows=3"},
+		{0, 10, "max_rows=10"},
+		{50, 10, "max_rows=10"}, // never above the configured cap
+	} {
+		res := mustQuery(t, m, engine.Query{SQL: "SELECT id FROM app.events", MaxRows: tc.asked})
+		if len(res.Rows) != tc.wantRows || res.TruncatedReason != tc.wantReason {
+			t.Errorf("MaxRows %d: %d rows, truncated %q; want %d, %s", tc.asked, len(res.Rows), res.TruncatedReason, tc.wantRows, tc.wantReason)
+		}
+	}
+}
+
+// Role and database defaults must not change how the server reads SQL that
+// the guard has checked, nor the encoding results come back in.
+func TestServerDefaultsCannotChangeHowSQLIsRead(t *testing.T) {
+	t.Parallel()
+	const name = "engine_lexing"
+	testdb.CreateDatabase(t, name, "ALTER DATABASE "+name+" SET standard_conforming_strings = off;"+
+		"ALTER DATABASE "+name+" SET client_encoding = 'LATIN1';")
+	var scs, encoding string
+	if err := observer(t, name).QueryRow(t.Context(), "SELECT current_setting('standard_conforming_strings'), current_setting('client_encoding')").
+		Scan(&scs, &encoding); err != nil {
+		t.Fatal(err)
+	}
+	if scs != "off" || encoding != "LATIN1" {
+		t.Fatalf("plain session: standard_conforming_strings=%s client_encoding=%s, want off and LATIN1", scs, encoding)
+	}
+
+	m := newManager(t, config.Defaults{}, testdb.DSN(t, testdb.RoleClean, name))
+	res := mustQuery(t, m, engine.Query{SQL: `SELECT current_setting('standard_conforming_strings'),
+		current_setting('client_encoding'), 'x\', 'São Paulo'`})
+	for i, want := range []string{"on", "UTF8", `x\`, "São Paulo"} {
+		if got := deref(res.Rows[0][i]); got != want {
+			t.Errorf("value %d = %q, want %q", i, got, want)
+		}
+	}
+}
+
 func TestMaxBytesTruncates(t *testing.T) {
 	t.Parallel()
 	m := cleanApp(t, config.Defaults{MaxBytes: 100})

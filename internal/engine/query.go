@@ -38,10 +38,15 @@ func run(ctx context.Context, p *pgxpool.Pool, q Query, l Limits) (*result.Resul
 // the transaction. set_config(name, value, true) is SET LOCAL as a function.
 // Calling it from a SELECT also takes the transaction's first snapshot, after
 // which Postgres refuses to switch the transaction to READ WRITE.
+//
+// It also turns standard_conforming_strings on, whatever the role or database
+// default: the guard parses SQL as Postgres does with it on, and with it off
+// a backslash in a '...' literal could move where the literal ends.
 func setup(l Limits, searchPath string) (string, []any) {
 	sql := "SELECT pg_catalog.set_config('statement_timeout', $1, true)," +
 		" pg_catalog.set_config('lock_timeout', $2, true)," +
-		" pg_catalog.set_config('idle_in_transaction_session_timeout', $3, true)"
+		" pg_catalog.set_config('idle_in_transaction_session_timeout', $3, true)," +
+		" pg_catalog.set_config('standard_conforming_strings', 'on', true)"
 	args := []any{millis(l.StatementTimeout), millis(l.LockTimeout), millis(l.StatementTimeout)}
 	if searchPath != "" {
 		sql += ", pg_catalog.set_config('search_path', $4, true)"

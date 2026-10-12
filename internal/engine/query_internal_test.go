@@ -20,7 +20,8 @@ func TestSetupAppliesLimitsAsLocalSettings(t *testing.T) {
 	sql, args := setup(l, "")
 	want := "SELECT pg_catalog.set_config('statement_timeout', $1, true)," +
 		" pg_catalog.set_config('lock_timeout', $2, true)," +
-		" pg_catalog.set_config('idle_in_transaction_session_timeout', $3, true)"
+		" pg_catalog.set_config('idle_in_transaction_session_timeout', $3, true)," +
+		" pg_catalog.set_config('standard_conforming_strings', 'on', true)"
 	if sql != want {
 		t.Errorf("sql = %q\nwant  %q", sql, want)
 	}
@@ -36,6 +37,26 @@ func TestSetupQuotesSearchPath(t *testing.T) {
 	}
 	if want := []any{"1000", "1000", "1000", `"app""; RESET ALL; --"`}; !slices.Equal(args, want) {
 		t.Errorf("args = %v, want %v", args, want)
+	}
+}
+
+func TestLimitsForOnlyLowersMaxRows(t *testing.T) {
+	m := &Manager{limits: Limits{MaxRows: 100, MaxBytes: 7}}
+	for _, tc := range []struct{ asked, want int }{
+		{0, 100},
+		{-5, 100},
+		{1, 1},
+		{99, 99},
+		{100, 100},
+		{101, 100},
+	} {
+		got := m.limitsFor(Query{MaxRows: tc.asked})
+		if got.MaxRows != tc.want || got.MaxBytes != 7 {
+			t.Errorf("limitsFor(MaxRows %d) = %+v, want MaxRows %d and MaxBytes 7", tc.asked, got, tc.want)
+		}
+	}
+	if m.limits.MaxRows != 100 {
+		t.Errorf("limitsFor changed the Manager's limits: %+v", m.limits)
 	}
 }
 

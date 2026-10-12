@@ -19,7 +19,7 @@ var (
 	_ error                                                                                = (*engine.QueryError)(nil)
 
 	_ = engine.Limits{StatementTimeout: time.Second, LockTimeout: time.Second, MaxRows: 1, MaxBytes: 1}
-	_ = engine.Query{SQL: "SELECT 1", Params: []any{1}, SearchPath: "app"}
+	_ = engine.Query{SQL: "SELECT 1", Params: []any{1}, SearchPath: "app", MaxRows: 10}
 	_ = engine.QueryError{SQLState: "42P01", Message: "m", Detail: "d", Hint: "h", Position: 1}
 )
 
