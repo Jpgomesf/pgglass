@@ -117,7 +117,7 @@ track_extra_parameters = default_transaction_read_only
 | `source` | string | *required* | `direct`, `env`, `dotenv`, or `aws_secrets_manager` |
 | `readonly` | bool | — | Deprecated and ignored: the server is always read-only. Logs a warning at startup |
 | `requires_vpn` | bool | `false` | TCP reachability check before each new database connection |
-| `default_schema` | string | `""` | `search_path` for `pg_query` when the call names no `schema`, and the schema `pg_schema` looks a `table` up in |
+| `default_schema` | string | `""` | `search_path` for `pg_query` when the call names no `schema`, and the schema `pg_schema` looks a `table` up in. A schema whose functions the guard denies, such as `net`, cannot be the `search_path` |
 
 ## Defaults
 
