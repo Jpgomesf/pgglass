@@ -385,11 +385,14 @@ var deniedPrefixes = []string{
 	"pg_ls_",          // pg_ls_dir and the other server directory listings
 	"pg_file_",        // adminpack (before PostgreSQL 17): writes, renames and removes server files
 	"pg_stat_reset",   // statistics resets, which are not transactional
-	// Session advisory locks: the rollback does not release them, so they stay
-	// held on the pooled connection. Transaction-level ones (pg_advisory_xact_*)
-	// are released with it.
+	// Advisory locks. The rollback does not release session ones, so they stay
+	// held on the pooled connection; transaction ones can still hold the
+	// application's own lock keys, read from pg_locks, stalling its job queues
+	// and migrations until statement_timeout. Unlocking is harmless.
 	"pg_advisory_lock",
+	"pg_advisory_xact_lock",
 	"pg_try_advisory_lock",
+	"pg_try_advisory_xact_lock",
 	"database_to_xml", // database_to_xml*: runs a query per table of the database
 	"schema_to_xml",   // schema_to_xml*: runs a query per table of the schema
 	"table_to_xml",    // table_to_xml*: reads the relation it is given by name (see checkRelation)

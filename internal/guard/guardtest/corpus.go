@@ -478,6 +478,18 @@ var Rejected = []Case{
 	// [policy] tablefunc's connectby builds SQL from its text arguments.
 	{`SELECT * FROM connectby('app.tree', 'id', 'parent_id', '1', 0) AS t(id int, parent_id int, level int)`, "connectby"},
 
+	// --- Denied functions: locks the application waits on ---
+
+	// [review] A transaction lock on the application's own key, read from
+	// pg_locks and held until statement_timeout, stalls its job queue.
+	{`SELECT pg_try_advisory_xact_lock(classid::int, objid::int), pg_sleep(29) FROM pg_locks WHERE locktype = 'advisory'`, "pg_try_advisory_xact_lock"},
+	// [review] The blocking transaction lock.
+	{`SELECT pg_advisory_xact_lock(42)`, "pg_advisory_xact_lock"},
+	// [review] Its shared variant.
+	{`SELECT pg_advisory_xact_lock_shared(1, 2)`, "pg_advisory_xact_lock_shared"},
+	// [review] The non-blocking shared variant.
+	{`SELECT pg_try_advisory_xact_lock_shared(42)`, "pg_try_advisory_xact_lock_shared"},
+
 	// --- Denied functions: state the rollback does not undo ---
 
 	// [policy] A session advisory lock stays held on the pooled connection.
@@ -586,7 +598,7 @@ var Allowed = []string{
 	`SELECT xmlelement(name total, sum(total)), xpath('/a/text()', '<a>1</a>'::xml) FROM app.orders`,
 	`SELECT pg_size_pretty(pg_total_relation_size('app.orders')), pg_backend_pid()`,
 	`SELECT n.nspname FROM pg_catalog.pg_namespace n`,
-	`SELECT pg_advisory_xact_lock(42), pg_try_advisory_xact_lock(43), pg_advisory_unlock(44)`,
+	`SELECT pg_advisory_unlock(44), pg_advisory_unlock_shared(45), pg_advisory_unlock_all()`,
 	`SELECT relname, seq_scan FROM pg_stat_user_tables`,
 	`SELECT pg_is_wal_replay_paused(), pg_lsn('0/16B3748'), name FROM pg_settings`,
 	// pg_settings (current GUC values, like SHOW) stays allowed; only the
