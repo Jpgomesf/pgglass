@@ -28,9 +28,11 @@ func newManager(t *testing.T, d config.Defaults, dsn string) *engine.Manager {
 	return managerFor(t, d, map[string]config.Connection{db: {Source: "direct", DSN: dsn}})
 }
 
+// managerFor returns a Manager for conns with d, its unset settings at their
+// defaults. It is closed when t ends.
 func managerFor(t *testing.T, d config.Defaults, conns map[string]config.Connection) *engine.Manager {
 	t.Helper()
-	m := engine.New(&config.Config{Defaults: d, Connections: conns})
+	m := engine.New(&config.Config{Defaults: d.WithDefaults(), Connections: conns})
 	t.Cleanup(m.Close)
 	return m
 }

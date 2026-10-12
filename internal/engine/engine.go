@@ -101,11 +101,12 @@ type lazyPool struct {
 }
 
 // New returns a Manager for the connections in cfg. Limits come from
-// cfg.Defaults.WithDefaults(): statement_timeout_seconds,
-// lock_timeout_seconds, max_rows and max_bytes. DSNs are resolved lazily with
-// resolver.Resolve when a connection is first used, so New does no I/O.
+// cfg.Defaults, whose defaults are filled in, as config.Parse returns them:
+// statement_timeout_seconds, lock_timeout_seconds, max_rows and max_bytes.
+// DSNs are resolved lazily with resolver.Resolve when a connection is first
+// used, so New does no I/O.
 func New(cfg *config.Config) *Manager {
-	d := cfg.Defaults.WithDefaults()
+	d := cfg.Defaults
 	return &Manager{
 		cfg: cfg,
 		limits: Limits{
@@ -213,7 +214,7 @@ func (m *Manager) lazyPool(name string) (*lazyPool, error) {
 		return nil, errClosed
 	}
 	if _, ok := m.cfg.Connections[name]; !ok {
-		return nil, unknownConnection(name, m.cfg.Connections)
+		return nil, UnknownConnection(name, m.cfg.Connections)
 	}
 	lp, ok := m.pools[name]
 	if !ok {
@@ -229,7 +230,8 @@ func (m *Manager) isClosed() bool {
 	return m.closed
 }
 
-func unknownConnection(name string, conns map[string]config.Connection) error {
+// UnknownConnection is the error for a connection name that is not in conns.
+func UnknownConnection(name string, conns map[string]config.Connection) error {
 	if len(conns) == 0 {
 		return fmt.Errorf("unknown connection %q: no connections are configured", name)
 	}

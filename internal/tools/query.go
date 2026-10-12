@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
@@ -77,13 +79,13 @@ func checkParams(params []any) error {
 // format returns the format named name, or the configured one when name is
 // empty.
 func (h *Handlers) format(name string) (render.Format, error) {
-	switch name {
-	case "":
+	switch {
+	case name == "":
 		return render.Format(h.cfg.Defaults.Format), nil
-	case config.FormatTSV, config.FormatJSON, config.FormatMarkdown:
+	case slices.Contains(config.Formats, name):
 		return render.Format(name), nil
 	default:
-		return "", fmt.Errorf("format must be one of tsv, json, markdown, got %q", name)
+		return "", fmt.Errorf("format must be one of %s, got %q", strings.Join(config.Formats, ", "), name)
 	}
 }
 

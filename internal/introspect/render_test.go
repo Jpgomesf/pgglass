@@ -60,9 +60,7 @@ func TestRenderMatchList(t *testing.T) {
 
 func TestRenderTableDetail(t *testing.T) {
 	d := introspect.TableDetail{
-		// Render takes row-level security from RLSEnabled.
-		Relation:   introspect.Relation{Schema: "app", Name: "orders", Kind: "table", Rows: 50, Size: "64 kB", Comment: "Customer orders"},
-		RLSEnabled: true,
+		Relation: introspect.Relation{Schema: "app", Name: "orders", Kind: "table", Rows: 50, Size: "64 kB", RLS: true, Comment: "Customer orders"},
 		Columns: []introspect.Column{
 			{Name: "id", Type: "bigint", NotNull: true, Generated: "GENERATED ALWAYS AS IDENTITY"},
 			{Name: "status", Type: "app.order_status", NotNull: true, Default: "'pending'::app.order_status",
@@ -111,7 +109,7 @@ triggers: orders_audit, orders_touch`)
 
 func TestRenderTableDetailOmitsEmptySections(t *testing.T) {
 	wantRender(t, "bare table", introspect.TableDetail{
-		Relation: introspect.Relation{Schema: "app", Name: "bare", Kind: "table", Rows: -1, RLS: true},
+		Relation: introspect.Relation{Schema: "app", Name: "bare", Kind: "table", Rows: -1},
 		Columns:  []introspect.Column{{Name: "id", Type: "integer"}},
 	}, "app.bare: table\n  id integer")
 

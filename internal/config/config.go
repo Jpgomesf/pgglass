@@ -41,7 +41,8 @@ const (
 
 var (
 	roleCheckModes = []string{RoleCheckStrict, RoleCheckWarn, RoleCheckOff}
-	formats        = []string{FormatTSV, FormatJSON, FormatMarkdown}
+	// Formats are the result formats a config and a pg_query call may name.
+	Formats = []string{FormatTSV, FormatJSON, FormatMarkdown}
 )
 
 // Config is the top-level configuration structure.
@@ -130,7 +131,7 @@ func (d Defaults) Validate() error {
 			errs = append(errs, fmt.Errorf("defaults.%s must be positive, got %d", s.key, s.value))
 		}
 	}
-	errs = append(errs, oneOf("format", d.Format, formats), oneOf("role_check", d.RoleCheck, roleCheckModes))
+	errs = append(errs, oneOf("format", d.Format, Formats), oneOf("role_check", d.RoleCheck, roleCheckModes))
 	return errors.Join(errs...)
 }
 

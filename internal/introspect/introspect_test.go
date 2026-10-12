@@ -256,16 +256,16 @@ func TestTableDescribesCustomers(t *testing.T) {
 
 func TestTableDescribesRowLevelSecurity(t *testing.T) {
 	d := describe(t, testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app", "tenant_notes")
-	if !d.RLSEnabled || !d.RLS {
-		t.Errorf("RLSEnabled = %v, RLS = %v, want both true", d.RLSEnabled, d.RLS)
+	if !d.RLS {
+		t.Error("RLS = false, want true")
 	}
 	equal(t, "policies", d.Policies, []introspect.Policy{
 		{Name: "tenant_notes_acme", Command: "SELECT", Permissive: true, Roles: []string{"public"}, Using: "tenant = 'acme'::text"},
 	})
 
 	d = describe(t, testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app", "audit_log")
-	if d.RLSEnabled || d.RLS || d.Policies != nil {
-		t.Errorf("audit_log: RLSEnabled = %v, RLS = %v, policies %v, want none", d.RLSEnabled, d.RLS, d.Policies)
+	if d.RLS || d.Policies != nil {
+		t.Errorf("audit_log: RLS = %v, policies %v, want none", d.RLS, d.Policies)
 	}
 }
 
@@ -295,7 +295,6 @@ func TestTableDescribesLabChild(t *testing.T) {
 			{Name: "child_parent_mood_key", Kind: "unique", Definition: "UNIQUE (parent_id, mood)"},
 			{Name: "child_qty_positive", Kind: "check", Definition: "CHECK (qty > 0)"},
 		},
-		RLSEnabled: true,
 		Policies: []introspect.Policy{
 			{Name: "child_guard", Command: "ALL", Roles: []string{"public"}, Using: "price >= 0::numeric", WithCheck: "price < 1000::numeric"},
 			{Name: "child_insert", Command: "INSERT", Permissive: true, Roles: []string{"public"}, WithCheck: "qty < 100"},

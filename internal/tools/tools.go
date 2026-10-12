@@ -13,9 +13,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"maps"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -37,11 +34,10 @@ type Handlers struct {
 	log     *slog.Logger
 }
 
-// New returns the Handlers for cfg. They query through eng, spill results too
-// large to return to store, and write one JSON audit line per call to
-// auditLog.
+// New returns the Handlers for cfg, whose defaults are filled in, as
+// config.Parse returns them. They query through eng, spill results too large
+// to return to store, and write one JSON audit line per call to auditLog.
 func New(cfg config.Config, eng *engine.Manager, store *spill.Store, auditLog io.Writer) *Handlers {
-	cfg.Defaults = cfg.Defaults.WithDefaults()
 	return &Handlers{
 		cfg:     cfg,
 		engine:  eng,
@@ -103,15 +99,8 @@ func decode(args json.RawMessage, dst any) error {
 // for the audit line.
 func (h *Handlers) useConnection(name string, c *call) error {
 	if _, ok := h.cfg.Connections[name]; !ok {
-		return unknownConnection(name, h.cfg.Connections)
+		return engine.UnknownConnection(name, h.cfg.Connections)
 	}
 	c.connection = name
 	return nil
-}
-
-func unknownConnection(name string, conns map[string]config.Connection) error {
-	if len(conns) == 0 {
-		return fmt.Errorf("unknown connection %q: no connections are configured", name)
-	}
-	return fmt.Errorf("unknown connection %q (available: %s)", name, strings.Join(slices.Sorted(maps.Keys(conns)), ", "))
 }

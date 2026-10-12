@@ -136,7 +136,6 @@ const policiesSQL = `SELECT json_agg(json_build_object(
 // cannot read it.
 const tableSQL = `
 SELECT ` + relationJSON + `::jsonb || jsonb_build_object(
-	'RLSEnabled', c.relrowsecurity,
 	'Columns', (` + columnsSQL + `),
 	'Constraints', (` + constraintsSQL + `),
 	'Indexes', (` + indexesSQL + `),
