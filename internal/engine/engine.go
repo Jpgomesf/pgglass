@@ -43,8 +43,8 @@ const (
 
 var errClosed = errors.New("engine: manager is closed")
 
-// Limits bound every query.
-type Limits struct {
+// limits bound every query.
+type limits struct {
 	StatementTimeout time.Duration // SET LOCAL statement_timeout
 	LockTimeout      time.Duration // SET LOCAL lock_timeout
 	MaxRows          int           // rows kept before the result is truncated
@@ -58,8 +58,8 @@ type Query struct {
 	// SearchPath, when set, names the one schema used as search_path for this
 	// query only. The engine quotes it as an identifier.
 	SearchPath string
-	// MaxRows, when positive, lowers Limits.MaxRows for this query only. It
-	// never raises it.
+	// MaxRows, when positive, lowers the max_rows limit for this query only.
+	// It never raises it.
 	MaxRows int
 }
 
@@ -86,7 +86,7 @@ type Querier interface {
 // first use. It is safe for concurrent use.
 type Manager struct {
 	cfg    *config.Config
-	limits Limits
+	limits limits
 
 	mu     sync.Mutex
 	closed bool
@@ -102,7 +102,7 @@ type lazyPool struct {
 	pool *pgxpool.Pool
 }
 
-// New returns a Manager for the connections in cfg. Limits come from
+// New returns a Manager for the connections in cfg. Its limits come from
 // cfg.Defaults.WithDefaults(): statement_timeout_seconds,
 // lock_timeout_seconds, max_rows and max_bytes. DSNs are resolved with
 // resolver.Resolve when a connection is first used, and again for each new
@@ -111,7 +111,7 @@ func New(cfg *config.Config) *Manager {
 	d := cfg.Defaults.WithDefaults()
 	return &Manager{
 		cfg: cfg,
-		limits: Limits{
+		limits: limits{
 			StatementTimeout: time.Duration(d.StatementTimeoutSeconds) * time.Second,
 			LockTimeout:      time.Duration(d.LockTimeoutSeconds) * time.Second,
 			MaxRows:          d.MaxRows,
@@ -122,7 +122,7 @@ func New(cfg *config.Config) *Manager {
 }
 
 // Query runs q on the connection named conn inside a READ ONLY transaction
-// that is always rolled back, with the Limits applied. Rows beyond MaxRows or
+// that is always rolled back, with the limits applied. Rows beyond MaxRows or
 // MaxBytes are dropped and reported through Result.Truncated. Errors raised
 // by Postgres are returned as *QueryError; connection, resolution and context
 // failures as plain errors. Query does not run guard.Check: callers passing
@@ -147,7 +147,7 @@ func (m *Manager) Query(ctx context.Context, conn string, q Query) (*result.Resu
 
 // limitsFor returns the limits of q: the Manager's, with MaxRows lowered to
 // q.MaxRows when that is smaller.
-func (m *Manager) limitsFor(q Query) Limits {
+func (m *Manager) limitsFor(q Query) limits {
 	l := m.limits
 	if q.MaxRows > 0 && q.MaxRows < l.MaxRows {
 		l.MaxRows = q.MaxRows

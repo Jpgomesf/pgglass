@@ -21,7 +21,7 @@ import (
 const typeNamesSQL = "SELECT oid, typname FROM pg_catalog.pg_type WHERE oid = ANY($1::pg_catalog.oid[])"
 
 // run executes q alone in a READ ONLY transaction that it always rolls back.
-func run(ctx context.Context, p *pgxpool.Pool, q Query, l Limits) (*result.Result, error) {
+func run(ctx context.Context, p *pgxpool.Pool, q Query, l limits) (*result.Result, error) {
 	tx, err := p.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func run(ctx context.Context, p *pgxpool.Pool, q Query, l Limits) (*result.Resul
 // It also turns standard_conforming_strings on, whatever the role or database
 // default: the guard parses SQL as Postgres does with it on, and with it off
 // a backslash in a '...' literal could move where the literal ends.
-func setup(l Limits, searchPath string) (string, []any) {
+func setup(l limits, searchPath string) (string, []any) {
 	sql := "SELECT pg_catalog.set_config('statement_timeout', $1, true)," +
 		" pg_catalog.set_config('lock_timeout', $2, true)," +
 		" pg_catalog.set_config('idle_in_transaction_session_timeout', $3, true)," +
@@ -62,7 +62,7 @@ func millis(d time.Duration) string {
 
 // collect runs q in tx and keeps its rows, as Postgres text, until one would
 // exceed a limit. It then cancels the rest of the query instead of reading it.
-func collect(ctx context.Context, tx pgx.Tx, q Query, l Limits) (*result.Result, error) {
+func collect(ctx context.Context, tx pgx.Tx, q Query, l limits) (*result.Result, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -104,7 +104,7 @@ func collect(ctx context.Context, tx pgx.Tx, q Query, l Limits) (*result.Result,
 
 // collector keeps rows until one would exceed a limit.
 type collector struct {
-	limits Limits
+	limits limits
 	res    *result.Result
 	bytes  int
 }

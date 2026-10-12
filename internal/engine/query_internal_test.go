@@ -15,7 +15,7 @@ import (
 )
 
 func TestSetupAppliesLimitsAsLocalSettings(t *testing.T) {
-	l := Limits{StatementTimeout: 30 * time.Second, LockTimeout: 1500 * time.Millisecond}
+	l := limits{StatementTimeout: 30 * time.Second, LockTimeout: 1500 * time.Millisecond}
 
 	sql, args := setup(l, "")
 	want := "SELECT pg_catalog.set_config('statement_timeout', $1, true)," +
@@ -31,7 +31,7 @@ func TestSetupAppliesLimitsAsLocalSettings(t *testing.T) {
 }
 
 func TestSetupQuotesSearchPath(t *testing.T) {
-	sql, args := setup(Limits{StatementTimeout: time.Second, LockTimeout: time.Second}, `app"; RESET ALL; --`)
+	sql, args := setup(limits{StatementTimeout: time.Second, LockTimeout: time.Second}, `app"; RESET ALL; --`)
 	if want := ", pg_catalog.set_config('search_path', $4, true)"; len(sql) < len(want) || sql[len(sql)-len(want):] != want {
 		t.Errorf("sql = %q, want it to end with %q", sql, want)
 	}
@@ -41,7 +41,7 @@ func TestSetupQuotesSearchPath(t *testing.T) {
 }
 
 func TestLimitsForOnlyLowersMaxRows(t *testing.T) {
-	m := &Manager{limits: Limits{MaxRows: 100, MaxBytes: 7}}
+	m := &Manager{limits: limits{MaxRows: 100, MaxBytes: 7}}
 	for _, tc := range []struct{ asked, want int }{
 		{0, 100},
 		{-5, 100},
@@ -71,8 +71,8 @@ func rawRow(values ...string) [][]byte {
 	return row
 }
 
-func collectAll(limits Limits, rows ...[][]byte) (*result.Result, int) {
-	c := collector{limits: limits, res: &result.Result{}}
+func collectAll(l limits, rows ...[][]byte) (*result.Result, int) {
+	c := collector{limits: l, res: &result.Result{}}
 	kept := 0
 	for _, r := range rows {
 		if !c.add(r) {
@@ -87,18 +87,18 @@ func TestCollectorLimits(t *testing.T) {
 	row := rawRow("ab", "cd") // 4 bytes of values, 52 with their valueCost
 	for _, tc := range []struct {
 		name      string
-		limits    Limits
+		limits    limits
 		rows      int
 		wantKept  int
 		wantTrunc string
 	}{
-		{"under both limits", Limits{MaxRows: 5, MaxBytes: 1000}, 3, 3, ""},
-		{"exactly max_rows", Limits{MaxRows: 3, MaxBytes: 1000}, 3, 3, ""},
-		{"one past max_rows", Limits{MaxRows: 3, MaxBytes: 1000}, 4, 3, "max_rows=3"},
-		{"exactly max_bytes", Limits{MaxRows: 100, MaxBytes: 156}, 3, 3, ""},
-		{"one byte short", Limits{MaxRows: 100, MaxBytes: 155}, 3, 2, "max_bytes=155"},
-		{"first row too big", Limits{MaxRows: 100, MaxBytes: 51}, 1, 0, "max_bytes=51"},
-		{"max_rows checked first", Limits{MaxRows: 1, MaxBytes: 52}, 2, 1, "max_rows=1"},
+		{"under both limits", limits{MaxRows: 5, MaxBytes: 1000}, 3, 3, ""},
+		{"exactly max_rows", limits{MaxRows: 3, MaxBytes: 1000}, 3, 3, ""},
+		{"one past max_rows", limits{MaxRows: 3, MaxBytes: 1000}, 4, 3, "max_rows=3"},
+		{"exactly max_bytes", limits{MaxRows: 100, MaxBytes: 156}, 3, 3, ""},
+		{"one byte short", limits{MaxRows: 100, MaxBytes: 155}, 3, 2, "max_bytes=155"},
+		{"first row too big", limits{MaxRows: 100, MaxBytes: 51}, 1, 0, "max_bytes=51"},
+		{"max_rows checked first", limits{MaxRows: 1, MaxBytes: 52}, 2, 1, "max_rows=1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rows := make([][][]byte, tc.rows)
@@ -129,7 +129,7 @@ func TestCollectorCountsEmptyAndNullValues(t *testing.T) {
 	for i := range rows {
 		rows[i] = empty
 	}
-	res, kept := collectAll(Limits{MaxRows: 1000, MaxBytes: 1 << 20}, rows...)
+	res, kept := collectAll(limits{MaxRows: 1000, MaxBytes: 1 << 20}, rows...)
 	if want := (1 << 20) / (1600 * valueCost); kept != want || res.TruncatedReason != "max_bytes=1048576" {
 		t.Errorf("kept %d rows, truncated %q; want %d, max_bytes=1048576", kept, res.TruncatedReason, want)
 	}
@@ -137,7 +137,7 @@ func TestCollectorCountsEmptyAndNullValues(t *testing.T) {
 
 func TestCollectorKeepsNullDistinctAndCopiesValues(t *testing.T) {
 	raw := rawRow("\x00", "", "abc")
-	res, _ := collectAll(Limits{MaxRows: 10, MaxBytes: 3 + 3*valueCost}, raw)
+	res, _ := collectAll(limits{MaxRows: 10, MaxBytes: 3 + 3*valueCost}, raw)
 	if len(res.Rows) != 1 {
 		t.Fatalf("rows = %v, want one", res.Rows)
 	}
