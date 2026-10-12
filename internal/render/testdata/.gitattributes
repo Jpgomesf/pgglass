@@ -1,0 +1,2 @@
+# Golden files are compared byte for byte (fixture.csv has CRLF line breaks).
+* -text
