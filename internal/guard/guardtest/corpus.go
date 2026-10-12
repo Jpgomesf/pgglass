@@ -416,6 +416,11 @@ var Rejected = []Case{
 	{`SELECT pg_terminate_backend(pid) FROM pg_stat_activity`, "pg_terminate_backend"},
 	// [policy] Signals another session.
 	{`SELECT pg_cancel_backend(pid) FROM pg_stat_activity`, "pg_cancel_backend"},
+	// [redteam] Signals another backend to dump its memory contexts to the
+	// server log, outside the caller's statement_timeout.
+	{`SELECT pg_log_backend_memory_contexts(1)`, "pg_log_backend_memory_contexts"},
+	// [redteam] Every other backend at once, the log-amplification form.
+	{`SELECT pg_log_backend_memory_contexts(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid()`, "pg_log_backend_memory_contexts"},
 	// [policy] Server process control.
 	{`SELECT pg_reload_conf()`, "pg_reload_conf"},
 	// [policy] Server process control.

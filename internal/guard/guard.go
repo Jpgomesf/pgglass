@@ -311,11 +311,12 @@ var deniedFunctions = map[string]bool{
 	"pg_hba_file_rules":         true, // pg_hba.conf, where the view wraps a like-named function
 	"pg_ident_file_mappings":    true, // pg_ident.conf, likewise
 	// Other sessions and the server process.
-	"pg_terminate_backend": true,
-	"pg_cancel_backend":    true,
-	"pg_reload_conf":       true,
-	"pg_rotate_logfile":    true,
-	"pg_promote":           true,
+	"pg_terminate_backend":           true,
+	"pg_cancel_backend":              true,
+	"pg_log_backend_memory_contexts": true, // another backend dumps its memory contexts to the server log
+	"pg_reload_conf":                 true,
+	"pg_rotate_logfile":              true,
+	"pg_promote":                     true,
 	// Settings and notifications.
 	"set_config": true,
 	"pg_notify":  true,
