@@ -369,6 +369,12 @@ var Rejected = []Case{
 	{`SELECT pg_log_standby_snapshot()`, "pg_log_standby_snapshot"},
 	// [policy] pg_log_*: makes another backend write to the server log.
 	{`SELECT pg_log_backend_memory_contexts(pg_backend_pid())`, "pg_log_backend_memory_contexts"},
+	// [policy] heap_force_*: pg_surgery deletes a row in place, which READ ONLY and the rollback do not stop.
+	{`SELECT heap_force_kill('app.orders'::regclass, ARRAY['(0,1)']::tid[])`, "heap_force_kill"},
+	// [policy] heap_force_*: freezes a row in place.
+	{`SELECT heap_force_freeze('app.orders'::regclass, ARRAY['(0,1)']::tid[])`, "heap_force_freeze"},
+	// [policy] pg_visibility truncates a visibility map in place.
+	{`SELECT pg_truncate_visibility_map('app.orders')`, "pg_truncate_visibility_map"},
 	// [policy] pg_replication_*.
 	{`SELECT pg_replication_origin_create('o')`, "pg_replication_origin_create"},
 	// [policy] pg_create_*.
