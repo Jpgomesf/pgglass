@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
@@ -265,6 +266,48 @@ func TestGateOffSkipsTheAudit(t *testing.T) {
 	}
 	if calls.Load() != 0 || rc.status("su") != "role check off" {
 		t.Errorf("audited %d times, status %q", calls.Load(), rc.status("su"))
+	}
+}
+
+// A call that ends while another call audits its connection stops waiting.
+func TestGateStopsWaitingWhenTheCallEnds(t *testing.T) {
+	started, release := make(chan struct{}), make(chan struct{})
+	releaseAudit := sync.OnceFunc(func() { close(release) })
+	defer releaseAudit()
+	rc, calls := fakeChecks(config.RoleCheckStrict, func() (preflight.Report, error) {
+		close(started)
+		<-release
+		return cleanReport, nil
+	})
+	first := make(chan error, 1)
+	go func() {
+		_, err := rc.gate(context.Background(), "db")
+		first <- err
+	}()
+	<-started
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	second := make(chan error, 1)
+	go func() {
+		_, err := rc.gate(ctx, "db")
+		second <- err
+	}()
+	select {
+	case err := <-second:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("gate after its context ended = %v, want context.Canceled", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("gate kept waiting for the audit after its context ended")
+	}
+	if got := rc.status("db"); got != "role not checked yet: checked on first use" {
+		t.Errorf("status = %q: an ended call is not a failed audit", got)
+	}
+
+	releaseAudit()
+	if err := <-first; err != nil || calls.Load() != 1 {
+		t.Errorf("first gate = %v after %d audits, want nil after 1", err, calls.Load())
 	}
 }
 

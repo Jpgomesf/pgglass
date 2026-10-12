@@ -36,7 +36,9 @@ func newRoleChecks(mode string, eng *engine.Manager) *roleChecks {
 // roleCheck is the audit of one connection. A failed audit is retried by the
 // next call; a report, once made, is kept.
 type roleCheck struct {
-	running sync.Mutex // held during an audit, so one runs at a time
+	// running holds a token during an audit, so one runs at a time. A
+	// channel, unlike a mutex, lets a waiting call give up when it ends.
+	running chan struct{}
 
 	mu     sync.Mutex
 	report *preflight.Report // nil until an audit succeeds
@@ -100,17 +102,22 @@ func (rc *roleChecks) check(conn string) *roleCheck {
 	defer rc.mu.Unlock()
 	c, ok := rc.conns[conn]
 	if !ok {
-		c = &roleCheck{}
+		c = &roleCheck{running: make(chan struct{}, 1)}
 		rc.conns[conn] = c
 	}
 	return c
 }
 
 // run returns the report, auditing first unless an audit has succeeded;
-// fresh reports whether this call made the report.
+// fresh reports whether this call made the report. A call that ends while
+// another audits returns its context's error and records no failure.
 func (c *roleCheck) run(ctx context.Context, audit func(context.Context) (preflight.Report, error)) (report preflight.Report, fresh bool, err error) {
-	c.running.Lock()
-	defer c.running.Unlock()
+	select {
+	case c.running <- struct{}{}:
+	case <-ctx.Done():
+		return preflight.Report{}, false, ctx.Err()
+	}
+	defer func() { <-c.running }()
 	if r, _ := c.state(); r != nil {
 		return *r, false, nil
 	}
