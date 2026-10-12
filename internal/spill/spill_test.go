@@ -222,22 +222,24 @@ func TestOutputSummary(t *testing.T) {
 	res := &result.Result{
 		Columns: []result.Column{
 			{Name: "id", TypeOID: pgtype.Int8OID, TypeName: "int8"},
-			{Name: "status", TypeOID: 16385, TypeName: "order_status"},
+			{Name: "status", TypeOID: 16385}, // a type the engine could not name
 			{Name: "placed", TypeOID: pgtype.TimestamptzOID, TypeName: "timestamptz"},
 			{Name: "note", TypeOID: pgtype.TextOID, TypeName: "text"},
 		},
 		Truncated:       true,
-		TruncatedReason: "max_rows=7",
+		TruncatedReason: "max_rows=50",
 	}
-	for i, row := range [][]string{
+	rows := [][]string{
 		{"1", "pending", "2026-01-02 00:00:00+00", "first\tline"},
 		{"2", "paid", "2026-01-01 00:00:00+00", ""},
 		{"3", "paid", "2026-03-01 12:00:00+00", strings.Repeat("x", 100)},
 		{"4", "shipped", "", "NULL"},
 		{"5", "paid", "2026-02-01 00:00:00+00", "note"},
-		{"6", "pending", "2026-02-01 00:00:00+00", ""},
-		{"7", "paid", "2026-02-15 08:30:00+00", "note"},
-	} {
+	}
+	for i := 6; i <= 50; i++ {
+		rows = append(rows, []string{strconv.Itoa(i), "paid", "2026-02-15 08:30:00+00", "note"})
+	}
+	for i, row := range rows {
 		cells := make([]*string, len(row))
 		for j, v := range row {
 			if v != "" || j != 2 {
@@ -249,26 +251,26 @@ func TestOutputSummary(t *testing.T) {
 		}
 		res.Rows = append(res.Rows, cells)
 	}
-	store := newStore(t, 100)
+	store := newStore(t, 1500)
 
 	out, err := store.Output("pg_query", "prod", res, render.TSV)
 	if err != nil {
 		t.Fatal(err)
 	}
 	path := spillPath(t, out)
-	size := len(inlineOf(t, res, render.TSV, "(7 rows; truncated: max_rows=7)"))
+	size := len(inlineOf(t, res, render.TSV, "(50 rows; truncated: max_rows=50)"))
 	want := strings.Join([]string{
-		fmt.Sprintf("Result too large to return inline (%d bytes, limit 100): 7 rows × 4 columns, truncated=true (max_rows=7).", size),
+		fmt.Sprintf("Result too large to return inline (%d bytes, limit 1500): 50 rows × 4 columns, truncated=true (max_rows=50).", size),
 		"Full result: " + path,
 		`It is CSV (RFC 4180) with a header row; NULL is an unquoted empty field and "" the empty string.`,
 		"Use Read or Grep on the file instead of re-running the query.",
 		"",
 		"Columns:",
-		"column\ttype\tnulls\tdistinct\tmin\tmax",
-		"id\tint8\t0\t7\t1\t7",
-		"status\torder_status\t0\t3\t\t",
-		"placed\ttimestamptz\t1\t5\t2026-01-01 00:00:00+00\t2026-03-01 12:00:00+00",
-		"note\ttext\t1\t5\t\t",
+		"column\ttype",
+		"id\tint8",
+		"status\toid 16385",
+		"placed\ttimestamptz",
+		"note\ttext",
 		"",
 		"First 5 rows:",
 		"id\tstatus\tplaced\tnote",
@@ -280,6 +282,49 @@ func TestOutputSummary(t *testing.T) {
 	}, "\n")
 	if out != want {
 		t.Errorf("summary:\n%s\nwant:\n%s", out, want)
+	}
+}
+
+// A summary lists at most 20 columns and previews only the rows that fit,
+// so a wide result still gets a summary within the inline limit.
+func TestOutputSummaryStaysWithinTheLimit(t *testing.T) {
+	// Each preview row is 20 cells of 64 four-byte characters: about 5.4 kB.
+	res := &result.Result{}
+	for i := range 100 {
+		res.Columns = append(res.Columns, result.Column{Name: "c" + strconv.Itoa(i), TypeOID: pgtype.TextOID, TypeName: "text"})
+	}
+	for range 10 {
+		row := make([]*string, len(res.Columns))
+		for j := range row {
+			row[j] = str(strings.Repeat("😀", 100))
+		}
+		res.Rows = append(res.Rows, row)
+	}
+
+	summary := func(limit int) string {
+		t.Helper()
+		out, err := newStore(t, limit).Output("pg_query", "prod", res, render.TSV)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) > limit {
+			t.Errorf("limit %d: the summary has %d bytes", limit, len(out))
+		}
+		if !strings.Contains(out, "\n\nColumns (first 20 of 100):\ncolumn\ttype\nc0\ttext\n") ||
+			!strings.Contains(out, "\nc19\ttext") || strings.Contains(out, "c20") {
+			t.Errorf("limit %d: want the first 20 columns listed, got:\n%s", limit, out)
+		}
+		return out
+	}
+
+	// One preview row fits in 10 kB, two do not.
+	_, preview, _ := strings.Cut(summary(10_000), "\n\nFirst 1 row:\n")
+	if !strings.HasPrefix(preview, "c0\tc1\t") || strings.Count(preview, "\n") != 1 {
+		t.Errorf("want a header and one row of preview, got:\n%s", preview)
+	}
+	// Not one fits in 3 kB.
+	if out := summary(3_000); strings.Contains(out, "First") {
+		t.Errorf("want no preview, got:\n%s", out)
 	}
 }
 

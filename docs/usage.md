@@ -88,14 +88,16 @@ It is CSV (RFC 4180) with a header row; NULL is an unquoted empty field and "" t
 Use Read or Grep on the file instead of re-running the query.
 
 Columns:
-column	type	nulls	distinct	min	max
-id	int8	0	1000	1	1000
-kind	text	0	4
-occurred_at	timestamptz	0	1000	2024-01-01 00:01:00+00	2024-01-01 16:40:00+00
+column	type
+id	int8
+kind	text
+occurred_at	timestamptz
 
 First 5 rows:
 ...
 ```
+
+The summary lists at most 20 columns, previews only as many of the first 5 rows as fit in 10 KB, and cuts preview cells at 64 characters.
 
 Spill files live in `mcp-postgres` under the system temp directory (`$TMPDIR`), readable only by you (mode 0600). Files older than `spill_ttl_hours` are removed at startup, then at most once an hour as `pg_query` returns results.
 
