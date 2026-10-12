@@ -140,3 +140,28 @@ Two `pg_query` calls run at the same time, one per connection.
 - **Start with `pg_schema` or `pg_search`.** Agents write better SQL when they know the exact names and types.
 - **Set `default_schema`** so unqualified names resolve without a `schema` argument.
 - **Aggregate in SQL.** A `count(*)` or `GROUP BY` answers in one row where reading rows spills a file.
+
+## Explain a query
+
+`pg_explain` takes `connection`, `sql`, `analyze`? and `schema`?, and summarizes the plan of one `SELECT` instead of returning EXPLAIN's output. `sql` passes the same checks as in `pg_query`, and only a `SELECT` can be explained. `schema` works as in `pg_query`. Without `analyze` the query is only planned. With `analyze: true` it runs in the same read-only transaction, which is rolled back, and under the same `statement_timeout`, to report actual times, rows and buffers:
+
+```
+total cost 678.64, 5.496 ms, 5000 rows, 333 buffers hit, 0 read
+top nodes by own time:
+  Sort: 3.195 ms, 5000 rows
+  Seq Scan on app.events: 2.087 ms, 5000 rows
+flags:
+  Sort: 5000 rows, planned 25
+  Sort: spilled to disk (external merge, 504 kB)
+  Seq Scan on app.events: 5000 rows, planned 25
+  Seq Scan on app.events: full scan of ~20000 rows
+```
+
+The 5 top nodes are ranked by what each takes on its own: its total less its children's. That is cost without `analyze`, and time with it, summed over loops and parallel workers. Rows are per loop, as in EXPLAIN. The flags are:
+
+- a seq scan of a relation with over 10,000 rows (`pg_class.reltuples`)
+- with `analyze`: a node that returned more than 10 times its estimated rows, or less than a tenth of them
+- with `analyze`: a sort, hash or hash aggregate that spilled to disk
+- a nested loop whose outer side returns over 10,000 rows, so that its inner side runs that many times
+
+Error positions point into `sql` as written. A summary over 10 KB is written to a spill file, one line per row, like a large `pg_query` result.
