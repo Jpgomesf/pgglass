@@ -124,15 +124,27 @@ func (sc *awsSecretsCache) Get(ctx context.Context, awsProfile, secretName strin
 	if err != nil {
 		return nil, fmt.Errorf("get secret %q: %w", secretName, err)
 	}
-
-	var secret map[string]string
-	if err := json.Unmarshal([]byte(*result.SecretString), &secret); err != nil {
-		return nil, fmt.Errorf("parse secret %q: %w", secretName, err)
+	secret, err := secretValue(secretName, result)
+	if err != nil {
+		return nil, err
 	}
 
 	sc.mu.Lock()
 	sc.cache[secretName] = &secretEntry{value: secret, fetchedAt: time.Now()}
 	sc.mu.Unlock()
 
+	return secret, nil
+}
+
+// secretValue decodes the JSON object a secret holds as its string value. A
+// binary secret has none.
+func secretValue(secretName string, out *secretsmanager.GetSecretValueOutput) (map[string]string, error) {
+	if out.SecretString == nil {
+		return nil, fmt.Errorf("secret %q has no string value: binary secrets are not supported", secretName)
+	}
+	var secret map[string]string
+	if err := json.Unmarshal([]byte(*out.SecretString), &secret); err != nil {
+		return nil, fmt.Errorf("parse secret %q: %w", secretName, err)
+	}
 	return secret, nil
 }

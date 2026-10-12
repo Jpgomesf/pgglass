@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
@@ -92,6 +94,24 @@ func TestAWSSecretsSourceResolveFromCache(t *testing.T) {
 	got := resolveSecret(t, "resolver_test_noport", map[string]string{"host": "::1", "db_name": "d", "user": "u", "password": "p"})
 	if got.Host != "::1" || got.Port != 5432 {
 		t.Errorf("without a port: host %s, port %d; want ::1 and 5432", got.Host, got.Port)
+	}
+}
+
+func TestSecretValue(t *testing.T) {
+	got, err := secretValue("s", &secretsmanager.GetSecretValueOutput{SecretString: aws.String(`{"host": "h", "user": "u"}`)})
+	if err != nil || got["host"] != "h" || got["user"] != "u" {
+		t.Errorf("secretValue of a JSON string = %v, %v", got, err)
+	}
+
+	// A binary secret has no string value: an error, not a panic.
+	_, err = secretValue("bin", &secretsmanager.GetSecretValueOutput{SecretBinary: []byte{1, 2, 3}})
+	if err == nil || !strings.Contains(err.Error(), "binary secrets are not supported") {
+		t.Errorf("secretValue of a binary secret: err = %v", err)
+	}
+
+	_, err = secretValue("bad", &secretsmanager.GetSecretValueOutput{SecretString: aws.String("not json")})
+	if err == nil || !strings.Contains(err.Error(), `parse secret "bad"`) {
+		t.Errorf("secretValue of a non-JSON string: err = %v", err)
 	}
 }
 
