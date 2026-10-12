@@ -109,9 +109,29 @@ func TestParseReportsEveryInvalidSetting(t *testing.T) {
 }
 
 func TestParseRejectsMalformedJSON(t *testing.T) {
-	_, err := Parse([]byte(`{"defaults": `))
-	if err == nil || !strings.Contains(err.Error(), "parse config.json") {
-		t.Errorf("error = %v, want a parse error", err)
+	for _, doc := range []string{
+		`{"defaults": `,
+		`{"defaults": {}} {"connections": {}}`, // json.Unmarshal refused trailing data too
+		`{"defaults": {}}}`,
+	} {
+		if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "parse config.json") {
+			t.Errorf("Parse(%s): error = %v, want a parse error", doc, err)
+		}
+	}
+}
+
+// A misspelled key must fail, not quietly leave its setting at the default:
+// "role_chek": "strict" would otherwise run with role_check warn.
+func TestParseRejectsUnknownKeys(t *testing.T) {
+	for _, tc := range []struct{ doc, key string }{
+		{`{"defaults": {"role_chek": "strict"}}`, "role_chek"},
+		{`{"connections": {"db": {"source": "direct", "dsn": "postgres://x", "requires_vpm": true}}}`, "requires_vpm"},
+		{`{"default": {"max_rows": 10}}`, "default"},
+	} {
+		_, err := Parse([]byte(tc.doc))
+		if err == nil || !strings.Contains(err.Error(), `unknown field "`+tc.key+`"`) {
+			t.Errorf("Parse(%s): error = %v, want unknown field %q", tc.doc, err, tc.key)
+		}
 	}
 }
 

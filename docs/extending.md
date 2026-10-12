@@ -45,7 +45,7 @@ func (VaultSource) Resolve(ctx context.Context, connName string, conn config.Con
 func (VaultSource) Status(conn config.Connection) string { return "" }
 ```
 
-4. If your source needs new fields, add them to `Connection` in `internal/config/config.go`
+4. If your source needs new fields, add them to `Connection` in `internal/config/config.go`: `config.json` rejects unknown keys
 5. Add tests in `internal/resolver/source_yourname_test.go`
 6. Use it in `config.json`:
 

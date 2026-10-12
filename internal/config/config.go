@@ -1,9 +1,11 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -156,10 +158,17 @@ func (cfg Config) UsesReadonly() bool {
 }
 
 // Parse decodes a config.json document, fills unset defaults and validates them.
+// An unknown key is an error, so a misspelled setting such as "role_chek"
+// fails loudly instead of leaving its default in place.
 func Parse(data []byte) (Config, error) {
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("parse config.json: %w", err)
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return Config{}, errors.New("parse config.json: unexpected data after the top-level object")
 	}
 	cfg.Defaults = cfg.Defaults.WithDefaults()
 	if err := cfg.Defaults.Validate(); err != nil {

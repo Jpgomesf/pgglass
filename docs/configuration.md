@@ -166,6 +166,7 @@ If the audit itself fails, it is retried on the next call; meanwhile `strict` re
 
 | When | What | Error |
 |------|------|-------|
+| Startup | Every key must be known: a misspelled one is not ignored | `json: unknown field "role_chek"` |
 | Startup | `defaults` values must be valid | `defaults.max_rows must be positive, got -1` |
 | Startup | `source` must be a registered type | `unknown source "foo" (registered: ...)` |
 | Connect | `direct`: `dsn` must be non-empty | `missing required fields: dsn` |
