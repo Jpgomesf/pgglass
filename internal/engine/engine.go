@@ -102,8 +102,9 @@ type lazyPool struct {
 
 // New returns a Manager for the connections in cfg. Limits come from
 // cfg.Defaults.WithDefaults(): statement_timeout_seconds,
-// lock_timeout_seconds, max_rows and max_bytes. DSNs are resolved lazily with
-// resolver.Resolve when a connection is first used, so New does no I/O.
+// lock_timeout_seconds, max_rows and max_bytes. DSNs are resolved with
+// resolver.Resolve when a connection is first used, and again for each new
+// database connection, so New does no I/O.
 func New(cfg *config.Config) *Manager {
 	d := cfg.Defaults.WithDefaults()
 	return &Manager{
@@ -242,9 +243,39 @@ func unknownConnection(name string, conns map[string]config.Connection) error {
 const rowByteHeadroom = 1 << 20
 
 // open resolves the DSN of the connection named name and creates its pool,
-// which dials on first use. maxBytes is the result byte budget, used to bound
-// one wire message.
+// which dials on first use. Each new database connection resolves the DSN
+// again and takes its server, TLS settings and credentials from it, so a
+// rotated password reaches it without a restart; the rest of the DSN, pool
+// settings included, is read once, here. maxBytes is the result byte budget,
+// used to bound one wire message.
 func open(ctx context.Context, name string, conn config.Connection, maxBytes int) (*pgxpool.Pool, error) {
+	cfg, err := parseDSN(ctx, name, conn)
+	if err != nil {
+		return nil, err
+	}
+	cfg.BeforeConnect = func(ctx context.Context, c *pgx.ConnConfig) error {
+		fresh, err := parseDSN(ctx, name, conn)
+		if err != nil {
+			return err
+		}
+		f := fresh.ConnConfig
+		c.Host, c.Port, c.TLSConfig, c.Fallbacks = f.Host, f.Port, f.TLSConfig, f.Fallbacks
+		c.Database, c.User, c.Password = f.Database, f.User, f.Password
+		if conn.RequiresVPN {
+			return checkVPN(name, c.Host, int(c.Port))
+		}
+		return nil
+	}
+	harden(cfg.ConnConfig, maxBytes+rowByteHeadroom)
+	p, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("connection %q: %w", name, err)
+	}
+	return p, nil
+}
+
+// parseDSN resolves the DSN of the connection named name and parses it.
+func parseDSN(ctx context.Context, name string, conn config.Connection) (*pgxpool.Config, error) {
 	dsn, err := resolver.Resolve(ctx, name, conn)
 	if err != nil {
 		return nil, err
@@ -253,17 +284,7 @@ func open(ctx context.Context, name string, conn config.Connection, maxBytes int
 	if err != nil {
 		return nil, fmt.Errorf("connection %q: %w", name, err) // pgx redacts the password
 	}
-	if conn.RequiresVPN {
-		cfg.BeforeConnect = func(_ context.Context, c *pgx.ConnConfig) error {
-			return checkVPN(name, c.Host, int(c.Port))
-		}
-	}
-	harden(cfg.ConnConfig, maxBytes+rowByteHeadroom)
-	p, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		return nil, fmt.Errorf("connection %q: %w", name, err)
-	}
-	return p, nil
+	return cfg, nil
 }
 
 // checkVPN fails fast, before each dial, when the host of a requires_vpn

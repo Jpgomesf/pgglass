@@ -51,7 +51,7 @@ Read DSN from a `.env` file. Supports `KEY=VALUE`, quoted values, and comments.
 
 ### AWS Secrets Manager
 
-Fetch credentials from AWS Secrets Manager. Secrets are cached in-memory with a 24-hour TTL.
+Fetch credentials from AWS Secrets Manager. Secrets are cached in memory for 24 hours: new database connections use the cached secret until it expires, so restart the server to pick up a rotated secret sooner.
 
 ```json
 {
@@ -100,7 +100,7 @@ host=localhost port=5432 dbname=mydb user=admin password=secret
 
 Whatever the DSN says, every session starts with `default_transaction_read_only=on` and `client_encoding=UTF8`, and each query sets `statement_timeout`, `lock_timeout` and `standard_conforming_strings=on` for its own transaction.
 
-Each connection's DSN is resolved once, on first use, and kept for the life of the process: restart the server after rotating a password or secret.
+Each connection's DSN is resolved on first use and again for every new database connection, which takes its host, port, database, user, password and TLS settings from it: a rotated password or an edited `.env` needs no restart. The rest of the DSN, such as `pool_max_conns`, is read on first use only.
 
 ### PgBouncer
 

@@ -18,7 +18,7 @@ import (
 func init() { RegisterSource(&AWSSecretsSource{}) }
 
 // AWSSecretsSource resolves credentials from AWS Secrets Manager.
-// Secrets are cached in-memory for the lifetime of the process.
+// Secrets are cached in memory for secretCacheTTL.
 type AWSSecretsSource struct{}
 
 func (AWSSecretsSource) Type() string { return "aws_secrets_manager" }
