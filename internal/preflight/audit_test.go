@@ -44,10 +44,12 @@ func row(values ...any) reply {
 	return reply{res: &result.Result{Columns: make([]result.Column, len(cells)), Rows: [][]*string{cells}}}
 }
 
-// The queries Audit runs, in order.
+// The queries Audit runs, in order, when the session user is the current user.
 const (
-	attributesQuery = iota
+	usersQuery = iota
+	attributesQuery
 	membershipsQuery
+	superusersQuery
 	tableWritesQuery
 	criticalFunctionsQuery
 	warningFunctionsQuery
@@ -56,8 +58,10 @@ const (
 // clean returns the replies Postgres gives for a role with nothing to report.
 func clean() []reply {
 	return []reply{
-		attributesQuery:        row("app", "f", "f", "f", "f"),
+		usersQuery:             row("app", "app"),
+		attributesQuery:        row("f", "f", "f", "f"),
 		membershipsQuery:       row(nil),
+		superusersQuery:        row("0", nil),
 		tableWritesQuery:       row("0", nil),
 		criticalFunctionsQuery: row("0", nil),
 		warningFunctionsQuery:  row("0", nil),
@@ -91,21 +95,21 @@ func TestAuditCleanRole(t *testing.T) {
 	wantFindings(t, report)
 }
 
-func TestAuditSuperuserStopsAfterOneQuery(t *testing.T) {
-	s := &script{replies: []reply{row("admin", "t", "t", "t", "t")}}
+func TestAuditSuperuserStopsAtItsAttributes(t *testing.T) {
+	s := &script{replies: []reply{row("admin", "admin"), row("t", "t", "t", "t")}}
 	report, err := preflight.Audit(t.Context(), s)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Role != "admin" || s.queries != 1 {
-		t.Errorf("role = %q after %d queries, want admin after 1", report.Role, s.queries)
+	if report.Role != "admin" || s.queries != 2 {
+		t.Errorf("role = %q after %d queries, want admin after 2", report.Role, s.queries)
 	}
 	wantFindings(t, report, critical("superuser", "bypasses every privilege check"))
 }
 
 func TestAuditReportsEveryFindingCriticalFirst(t *testing.T) {
 	replies := clean()
-	replies[attributesQuery] = row("app", "f", "t", "t", "t")
+	replies[attributesQuery] = row("f", "t", "t", "t")
 	replies[membershipsQuery] = row("pg_execute_server_program pg_read_server_files pg_signal_backend pg_write_server_files")
 	replies[tableWritesQuery] = row("12", "INSERT on s.t1; DELETE on s.t2")
 	replies[criticalFunctionsQuery] = row("1", "net.http_post")
@@ -145,8 +149,10 @@ func TestAuditFailsClosed(t *testing.T) {
 		"short row":   {row(), "got 1 rows"},
 	}
 	checks := []string{
+		usersQuery:             "current and session user",
 		attributesQuery:        "role attributes",
 		membershipsQuery:       "role memberships",
+		superusersQuery:        "superuser memberships",
 		tableWritesQuery:       "table writes",
 		criticalFunctionsQuery: "function grants",
 		warningFunctionsQuery:  "function grants",
@@ -176,8 +182,8 @@ func TestAuditRejectsMalformedValues(t *testing.T) {
 		query int
 		reply reply
 	}{
-		"boolean":      {attributesQuery, row("app", "maybe", "f", "f", "f")},
-		"NULL boolean": {attributesQuery, row("app", "f", "f", nil, "f")},
+		"boolean":      {attributesQuery, row("maybe", "f", "f", "f")},
+		"NULL boolean": {attributesQuery, row("f", "f", nil, "f")},
 		"count":        {tableWritesQuery, row("many", nil)},
 		"NULL count":   {criticalFunctionsQuery, row(nil, nil)},
 	}
