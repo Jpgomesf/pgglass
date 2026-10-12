@@ -97,6 +97,21 @@ func TestSearchLimit(t *testing.T) {
 	}
 }
 
+func TestFirstLines(t *testing.T) {
+	text := strings.Repeat("0123456789\n", 99) + "0123456789" // 100 lines, 1099 bytes
+	if got := firstLines(text, len(text)); got != text {
+		t.Errorf("text that fits was cut:\n%s", got)
+	}
+	// 38 lines and the note take 497 bytes; a 39th line would not fit.
+	want := strings.Repeat("0123456789\n", 38) + "… 38 of 100 lines shown (output limit 500 bytes): use pg_search to find names"
+	if got := firstLines(text, 500); got != want || len(got) > 500 {
+		t.Errorf("firstLines(text, 500) =\n%s\nwant\n%s", got, want)
+	}
+	if got, want := firstLines(strings.Repeat("x", 1000), 100), "… 0 of 1 lines shown (output limit 100 bytes): use pg_search to find names"; got != want {
+		t.Errorf("a line longer than the limit: %q, want %q", got, want)
+	}
+}
+
 func TestFormat(t *testing.T) {
 	h := &Handlers{cfg: config.Config{Defaults: config.Defaults{Format: config.FormatMarkdown}}}
 	for name, want := range map[string]render.Format{"": render.Markdown, "tsv": render.TSV, "json": render.JSON, "markdown": render.Markdown} {

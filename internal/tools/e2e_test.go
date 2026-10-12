@@ -229,6 +229,23 @@ func TestSchemaIsCached(t *testing.T) {
 	}
 }
 
+// A description longer than the inline limit is cut at a line, with a note.
+func TestSchemaOutputIsCutToTheInlineLimit(t *testing.T) {
+	t.Parallel()
+	const name = "tools_many_tables"
+	testdb.CreateDatabase(t, name, `DO $$ BEGIN FOR i IN 1..500 LOOP
+		EXECUTE format('CREATE TABLE t%s (id int)', lpad(i::text, 3, '0'));
+	END LOOP; END $$`)
+	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{"db": direct(testdb.DSN(t, testdb.Superuser, name))}))
+
+	got := s.ok(t, "pg_schema", map[string]any{"connection": "db", "schema": "public"})
+	lines := strings.Split(got, "\n")
+	note := fmt.Sprintf("… %d of 500 lines shown (output limit %d bytes): use pg_search to find names", len(lines)-1, config.InlineMaxBytes)
+	if len(got) > config.InlineMaxBytes || len(lines) < 100 || !strings.HasPrefix(got, "public.t001: table") || lines[len(lines)-1] != note {
+		t.Errorf("pg_schema of 500 tables (%d bytes):\n%s", len(got), got)
+	}
+}
+
 func TestSearch(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
