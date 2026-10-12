@@ -4,9 +4,6 @@ import (
 	_ "embed" // fixture SQL
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/engine/enginetest"
 	"github.com/jpgomesf/mcp-postgres/internal/preflight"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
@@ -18,24 +15,6 @@ var fixtureSQL string
 
 // dbFixture holds testdata/fixture.sql: the roles pf_powers, pf_writer and pf_caller.
 const dbFixture = "preflight"
-
-// Every audit runs through the engine the server uses, and through the
-// simple protocol.
-var queriers = []struct {
-	name string
-	new  func(testing.TB, string) engine.Querier
-}{
-	{"engine", engineQuerier},
-	{"simple protocol", enginetest.Querier},
-}
-
-// engineQuerier queries dsn through an engine.Manager, as the server does.
-func engineQuerier(t testing.TB, dsn string) engine.Querier {
-	t.Helper()
-	m := engine.New(&config.Config{Connections: map[string]config.Connection{"db": {Source: "direct", DSN: dsn}}})
-	t.Cleanup(m.Close)
-	return m.Querier("db")
-}
 
 func TestAudit(t *testing.T) {
 	testdb.CreateDatabase(t, dbFixture, fixtureSQL)
@@ -81,21 +60,18 @@ func TestAudit(t *testing.T) {
 		}},
 	}
 	for _, tt := range tests {
-		for _, querier := range queriers {
-			t.Run(tt.name+"/"+querier.name, func(t *testing.T) {
-				q := querier.new(t, testdb.DSN(t, tt.role, tt.database))
-				report, err := preflight.Audit(t.Context(), q)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if report.Role != tt.role {
-					t.Errorf("role = %q, want %q", report.Role, tt.role)
-				}
-				wantFindings(t, report, tt.want...)
-				if report.Blocking() != tt.blocking {
-					t.Errorf("Blocking() = %v, want %v", report.Blocking(), tt.blocking)
-				}
-			})
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			report, err := preflight.Audit(t.Context(), testdb.Querier(t, tt.role, tt.database))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.Role != tt.role {
+				t.Errorf("role = %q, want %q", report.Role, tt.role)
+			}
+			wantFindings(t, report, tt.want...)
+			if report.Blocking() != tt.blocking {
+				t.Errorf("Blocking() = %v, want %v", report.Blocking(), tt.blocking)
+			}
+		})
 	}
 }

@@ -1,7 +1,6 @@
 package tools_test
 
 import (
-	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
@@ -29,17 +28,6 @@ func appConns(t *testing.T) map[string]config.Connection {
 		"leaky": direct(testdb.DSN(t, testdb.RoleLeaky, testdb.DBApp)),
 		"super": direct(testdb.DSN(t, testdb.Superuser, testdb.DBApp)),
 	}
-}
-
-// observer connects to database as the superuser, outside the server.
-func observer(t *testing.T, database string) *pgx.Conn {
-	t.Helper()
-	conn, err := pgx.Connect(t.Context(), testdb.DSN(t, testdb.Superuser, database))
-	if err != nil {
-		t.Fatalf("connect observer: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return conn
 }
 
 func observe(t *testing.T, conn *pgx.Conn, sql string) string {
@@ -229,7 +217,7 @@ func TestSchemaIsCached(t *testing.T) {
 		t.Fatalf("first listing:\n%s", first)
 	}
 
-	if _, err := observer(t, name).Exec(t.Context(), "CREATE TABLE after_listing (id int)"); err != nil {
+	if _, err := testdb.Conn(t, testdb.Superuser, name).Exec(t.Context(), "CREATE TABLE after_listing (id int)"); err != nil {
 		t.Fatal(err)
 	}
 	if again := s.ok(t, "pg_schema", list); again != first {
@@ -547,7 +535,7 @@ func TestBypassCorpusIsRejectedAndChangesNothing(t *testing.T) {
 		"app":      direct(testdb.DSN(t, testdb.Superuser, testdb.DBApp)),
 		"supabase": direct(testdb.DSN(t, testdb.Superuser, testdb.DBSupabase)),
 	}))
-	app, supabase := observer(t, testdb.DBApp), observer(t, testdb.DBSupabase)
+	app, supabase := testdb.Conn(t, testdb.Superuser, testdb.DBApp), testdb.Conn(t, testdb.Superuser, testdb.DBSupabase)
 	state := func() string {
 		return observe(t, app, stateSQL) + "\n" + observe(t, app, appRowsSQL) + "\n" +
 			observe(t, supabase, stateSQL) + "\n" + observe(t, supabase, supabaseRowsSQL)
@@ -605,7 +593,7 @@ func TestBackslashCannotHideACallFromTheGuard(t *testing.T) {
 	if want := `v` + "\n" + `x\\', dblink_exec($$dbname=` + name + `$$, $$INSERT INTO t VALUES (1)$$) --` + "\n(1 row)"; !strings.HasSuffix(got, want) {
 		t.Errorf("result:\n%s\nwant it to end with\n%s", got, want)
 	}
-	if n := observe(t, observer(t, name), "SELECT count(*)::text FROM t"); n != "0" {
+	if n := observe(t, testdb.Conn(t, testdb.Superuser, name), "SELECT count(*)::text FROM t"); n != "0" {
 		t.Errorf("t has %s rows: the hidden dblink_exec ran", n)
 	}
 }

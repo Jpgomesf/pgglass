@@ -1,7 +1,6 @@
 package introspect_test
 
 import (
-	"context"
 	_ "embed" // lab fixture SQL
 	"fmt"
 	"reflect"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/introspect"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
@@ -29,29 +27,6 @@ var labSQL string
 func loadLab(t *testing.T) {
 	t.Helper()
 	testdb.CreateDatabase(t, labDB, labSQL)
-}
-
-// connect returns a Querier that reads database as role through the engine,
-// as the server does.
-func connect(t *testing.T, role, database string) engine.Querier {
-	t.Helper()
-	m := engine.New(&config.Config{Connections: map[string]config.Connection{
-		"db": {Source: "direct", DSN: testdb.DSN(t, role, database)},
-	}})
-	t.Cleanup(m.Close)
-	return m.Querier("db")
-}
-
-// superuser opens a plain connection to database, for setup and for
-// computing expected values independently of the code under test.
-func superuser(t *testing.T, database string) *pgx.Conn {
-	t.Helper()
-	conn, err := pgx.Connect(t.Context(), testdb.DSN(t, testdb.Superuser, database))
-	if err != nil {
-		t.Fatalf("connect as superuser to %s: %v", database, err)
-	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return conn
 }
 
 func queryString(t *testing.T, conn *pgx.Conn, sql string) string {
@@ -98,7 +73,7 @@ func wantErr(t *testing.T, err error, want string) {
 }
 
 func TestSchemasAsCleanRole(t *testing.T) {
-	got, err := introspect.Schemas(t.Context(), connect(t, testdb.RoleClean, testdb.DBApp))
+	got, err := introspect.Schemas(t.Context(), testdb.Querier(t, testdb.RoleClean, testdb.DBApp))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +86,7 @@ func TestSchemasAsCleanRole(t *testing.T) {
 func TestSchemasExcludeSystemSchemas(t *testing.T) {
 	// The superuser may use every schema, so only the exclusions keep these
 	// out. A temporary table makes the session's pg_temp_N and pg_toast_temp_N.
-	conn := superuser(t, testdb.DBApp)
+	conn := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
 	if _, err := conn.Exec(t.Context(), "CREATE TEMP TABLE scratch (id int)"); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +97,7 @@ func TestSchemasExcludeSystemSchemas(t *testing.T) {
 		}
 	}
 
-	got, err := introspect.Schemas(t.Context(), connect(t, testdb.Superuser, testdb.DBApp))
+	got, err := introspect.Schemas(t.Context(), testdb.Querier(t, testdb.Superuser, testdb.DBApp))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +111,7 @@ func TestSchemasCountReadableRelationsWithoutPartitions(t *testing.T) {
 	loadLab(t)
 
 	// ro_clean cannot read lab.hidden, nor use schema locked.
-	got, err := introspect.Schemas(t.Context(), connect(t, testdb.RoleClean, labDB))
+	got, err := introspect.Schemas(t.Context(), testdb.Querier(t, testdb.RoleClean, labDB))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +121,7 @@ func TestSchemasCountReadableRelationsWithoutPartitions(t *testing.T) {
 	})
 
 	// The superuser reads everything; the two partitions still do not count.
-	got, err = introspect.Schemas(t.Context(), connect(t, testdb.Superuser, labDB))
+	got, err = introspect.Schemas(t.Context(), testdb.Querier(t, testdb.Superuser, labDB))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +133,7 @@ func TestSchemasCountReadableRelationsWithoutPartitions(t *testing.T) {
 }
 
 func TestTablesListsAppRelations(t *testing.T) {
-	got, err := introspect.Tables(t.Context(), connect(t, testdb.RoleClean, testdb.DBApp), "app")
+	got, err := introspect.Tables(t.Context(), testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +156,7 @@ func TestTablesListsAppRelations(t *testing.T) {
 
 func TestTablesListsEveryKindButPartitions(t *testing.T) {
 	loadLab(t)
-	got, err := introspect.Tables(t.Context(), connect(t, testdb.RoleClean, labDB), "lab")
+	got, err := introspect.Tables(t.Context(), testdb.Querier(t, testdb.RoleClean, labDB), "lab")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +177,7 @@ func TestTablesListsEveryKindButPartitions(t *testing.T) {
 		{Schema: "lab", Name: "wide", Kind: "view", Rows: -1},
 	})
 
-	partitions := queryString(t, superuser(t, labDB), `SELECT pg_size_pretty(
+	partitions := queryString(t, testdb.Conn(t, testdb.Superuser, labDB), `SELECT pg_size_pretty(
 		pg_total_relation_size('lab.measurements_2024') + pg_total_relation_size('lab.measurements_2025'))`)
 	if sizes["measurements"] != partitions {
 		t.Errorf("partitioned table size = %q, want its partitions' %q", sizes["measurements"], partitions)
@@ -214,7 +189,7 @@ func TestTablesListsEveryKindButPartitions(t *testing.T) {
 
 func TestTablesRejectsUnusableSchemas(t *testing.T) {
 	loadLab(t)
-	q := connect(t, testdb.RoleClean, labDB)
+	q := testdb.Querier(t, testdb.RoleClean, labDB)
 	for _, schema := range []string{"locked", "nope"} {
 		got, err := introspect.Tables(t.Context(), q, schema)
 		wantErr(t, err, fmt.Sprintf("schema %q does not exist or the current role lacks USAGE on it", schema))
@@ -225,7 +200,7 @@ func TestTablesRejectsUnusableSchemas(t *testing.T) {
 }
 
 func TestTableDescribesOrders(t *testing.T) {
-	d := describe(t, connect(t, testdb.RoleClean, testdb.DBApp), "app", "orders")
+	d := describe(t, testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app", "orders")
 	equal(t, "Table(app, orders)", *withoutSize(t, d, true), introspect.TableDetail{
 		Relation: introspect.Relation{Schema: "app", Name: "orders", Kind: "table", Rows: 50},
 		Columns: []introspect.Column{
@@ -254,7 +229,7 @@ func TestTableDescribesOrders(t *testing.T) {
 }
 
 func TestTableDescribesCustomers(t *testing.T) {
-	d := describe(t, connect(t, testdb.RoleClean, testdb.DBApp), "app", "customers")
+	d := describe(t, testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app", "customers")
 	equal(t, "Table(app, customers)", *withoutSize(t, d, true), introspect.TableDetail{
 		Relation: introspect.Relation{Schema: "app", Name: "customers", Kind: "table", Rows: 50, Comment: "People who place orders"},
 		Columns: []introspect.Column{
@@ -280,7 +255,7 @@ func TestTableDescribesCustomers(t *testing.T) {
 }
 
 func TestTableDescribesRowLevelSecurity(t *testing.T) {
-	d := describe(t, connect(t, testdb.RoleClean, testdb.DBApp), "app", "tenant_notes")
+	d := describe(t, testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app", "tenant_notes")
 	if !d.RLSEnabled || !d.RLS {
 		t.Errorf("RLSEnabled = %v, RLS = %v, want both true", d.RLSEnabled, d.RLS)
 	}
@@ -288,7 +263,7 @@ func TestTableDescribesRowLevelSecurity(t *testing.T) {
 		{Name: "tenant_notes_acme", Command: "SELECT", Permissive: true, Roles: []string{"public"}, Using: "tenant = 'acme'::text"},
 	})
 
-	d = describe(t, connect(t, testdb.RoleClean, testdb.DBApp), "app", "audit_log")
+	d = describe(t, testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app", "audit_log")
 	if d.RLSEnabled || d.RLS || d.Policies != nil {
 		t.Errorf("audit_log: RLSEnabled = %v, RLS = %v, policies %v, want none", d.RLSEnabled, d.RLS, d.Policies)
 	}
@@ -296,7 +271,7 @@ func TestTableDescribesRowLevelSecurity(t *testing.T) {
 
 func TestTableDescribesLabChild(t *testing.T) {
 	loadLab(t)
-	d := describe(t, connect(t, testdb.RoleClean, labDB), "lab", "child")
+	d := describe(t, testdb.Querier(t, testdb.RoleClean, labDB), "lab", "child")
 	moods := []string{"happy", "it's complicated", "sad"}
 	equal(t, "Table(lab, child)", *withoutSize(t, d, true), introspect.TableDetail{
 		Relation: introspect.Relation{Schema: "lab", Name: "child", Kind: "table", Rows: 0, RLS: true,
@@ -333,7 +308,7 @@ func TestTableDescribesLabChild(t *testing.T) {
 
 func TestTableDescribesExclusionConstraints(t *testing.T) {
 	loadLab(t)
-	d := describe(t, connect(t, testdb.RoleClean, labDB), "lab", "parent")
+	d := describe(t, testdb.Querier(t, testdb.RoleClean, labDB), "lab", "parent")
 	equal(t, "constraints", d.Constraints, []introspect.Constraint{
 		{Name: "parent_pkey", Kind: "primary key", Definition: "PRIMARY KEY (id)"},
 		{Name: "parent_active_excl", Kind: "exclusion", Definition: "EXCLUDE USING gist (active WITH &&)"},
@@ -347,7 +322,7 @@ func TestTableDescribesExclusionConstraints(t *testing.T) {
 }
 
 func TestTableDescribesViews(t *testing.T) {
-	q := connect(t, testdb.RoleClean, testdb.DBApp)
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 
 	d := describe(t, q, "app", "customer_order_totals")
 	equal(t, "Table(app, customer_order_totals)", *withoutSize(t, d, false), introspect.TableDetail{
@@ -378,7 +353,7 @@ func TestTableDescribesViews(t *testing.T) {
 
 func TestTableDescribesPartitionsAndForeignTables(t *testing.T) {
 	loadLab(t)
-	q := connect(t, testdb.RoleClean, labDB)
+	q := testdb.Querier(t, testdb.RoleClean, labDB)
 	columns := []introspect.Column{
 		{Name: "id", Type: "integer", NotNull: true},
 		{Name: "taken_on", Type: "date", NotNull: true},
@@ -407,7 +382,7 @@ func TestTableDescribesPartitionsAndForeignTables(t *testing.T) {
 
 func TestTableShowsOnlyWhatTheRoleCanRead(t *testing.T) {
 	loadLab(t)
-	q := connect(t, testdb.RoleClean, labDB)
+	q := testdb.Querier(t, testdb.RoleClean, labDB)
 
 	// ro_clean may SELECT only id and label: token stays hidden.
 	d := describe(t, q, "lab", "secrets")
@@ -499,7 +474,7 @@ definition:
      LEFT JOIN app.orders o ON o.customer_id = c.id
   GROUP BY c.id, c.email;`},
 	} {
-		d := describe(t, connect(t, testdb.RoleClean, tc.database), tc.schema, tc.name)
+		d := describe(t, testdb.Querier(t, testdb.RoleClean, tc.database), tc.schema, tc.name)
 		got := d.Render()
 		if d.Size != "" {
 			got = strings.Replace(got, d.Size, "SIZE", 1)
@@ -512,7 +487,7 @@ definition:
 
 func TestTableRenderCapsViewDefinition(t *testing.T) {
 	loadLab(t)
-	d := describe(t, connect(t, testdb.RoleClean, labDB), "lab", "wide")
+	d := describe(t, testdb.Querier(t, testdb.RoleClean, labDB), "lab", "wide")
 	if len(d.Columns) != 150 || !strings.Contains(d.Definition, "150 AS wide_column_150") {
 		t.Fatalf("wide: %d columns, definition %q", len(d.Columns), d.Definition)
 	}
@@ -525,7 +500,7 @@ func TestTableRenderCapsViewDefinition(t *testing.T) {
 
 func TestSearchFindsRelationsColumnsAndFunctions(t *testing.T) {
 	loadLab(t)
-	q := connect(t, testdb.RoleClean, labDB)
+	q := testdb.Querier(t, testdb.RoleClean, labDB)
 	for _, tc := range []struct {
 		pattern string
 		want    introspect.MatchList
@@ -570,7 +545,7 @@ func TestSearchFindsRelationsColumnsAndFunctions(t *testing.T) {
 
 func TestSearchTreatsUnderscoreLiterally(t *testing.T) {
 	loadLab(t)
-	got, err := introspect.Search(t.Context(), connect(t, testdb.RoleClean, labDB), "_", 1000)
+	got, err := introspect.Search(t.Context(), testdb.Querier(t, testdb.RoleClean, labDB), "_", 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +566,7 @@ func TestSearchTreatsUnderscoreLiterally(t *testing.T) {
 }
 
 func TestSearchKeepsTheFirstLimitMatches(t *testing.T) {
-	q := connect(t, testdb.RoleClean, testdb.DBApp)
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	all := introspect.MatchList{
 		{Schema: "app", Table: "customer_order_totals", Type: "view"},
 		{Schema: "app", Table: "orders", Type: "table"},
@@ -608,11 +583,11 @@ func TestSearchKeepsTheFirstLimitMatches(t *testing.T) {
 
 func TestSearchShowsOnlyExecutableFunctions(t *testing.T) {
 	// dblink's functions are executable by ro_leaky, not by ro_clean.
-	got, err := introspect.Search(t.Context(), connect(t, testdb.RoleClean, testdb.DBApp), "dblink_connect", 10)
+	got, err := introspect.Search(t.Context(), testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "dblink_connect", 10)
 	if err != nil || len(got) != 0 {
 		t.Errorf("as ro_clean: %v, %v; want no matches", got, err)
 	}
-	got, err = introspect.Search(t.Context(), connect(t, testdb.RoleLeaky, testdb.DBApp), "dblink_connect", 10)
+	got, err = introspect.Search(t.Context(), testdb.Querier(t, testdb.RoleLeaky, testdb.DBApp), "dblink_connect", 10)
 	if err != nil {
 		t.Fatal(err)
 	}

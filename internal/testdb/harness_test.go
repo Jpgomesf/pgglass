@@ -138,11 +138,11 @@ func TestDSN(t *testing.T) {
 
 func TestImage(t *testing.T) {
 	t.Setenv("MCP_PG_IMAGE", "")
-	if got := image(); got != DefaultImage {
-		t.Errorf("image() = %q, want %q", got, DefaultImage)
+	if got := Image(); got != DefaultImage {
+		t.Errorf("Image() = %q, want %q", got, DefaultImage)
 	}
 	t.Setenv("MCP_PG_IMAGE", "postgres:15-alpine")
-	if got := image(); got != "postgres:15-alpine" {
-		t.Errorf("image() = %q, want postgres:15-alpine", got)
+	if got := Image(); got != "postgres:15-alpine" {
+		t.Errorf("Image() = %q, want postgres:15-alpine", got)
 	}
 }

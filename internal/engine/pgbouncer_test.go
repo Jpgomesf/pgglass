@@ -4,7 +4,6 @@ import (
 	"context"
 	"net"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,7 +117,7 @@ func startPgBouncer(t *testing.T) string {
 	}
 	testcontainers.CleanupNetwork(t, nw)
 
-	pg, err := postgres.Run(ctx, pgImage(),
+	pg, err := postgres.Run(ctx, testdb.Image(),
 		postgres.WithDatabase("app"),
 		postgres.WithUsername("postgres"),
 		postgres.WithPassword("postgres"),
@@ -184,12 +183,4 @@ func loadFixture(t *testing.T, pg *postgres.PostgresContainer, sql string) {
 	if _, err := conn.Exec(t.Context(), sql); err != nil {
 		t.Fatalf("load fixture: %v", err)
 	}
-}
-
-// pgImage is the Postgres image testdb runs.
-func pgImage() string {
-	if img := os.Getenv("MCP_PG_IMAGE"); img != "" {
-		return img
-	}
-	return testdb.DefaultImage
 }

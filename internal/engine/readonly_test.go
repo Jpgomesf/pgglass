@@ -34,7 +34,7 @@ const stateSQL = `SELECT format('t=%s seq=%s temp_tables=%s',
 func superuserScratch(t *testing.T, name string) (*engine.Manager, *pgx.Conn) {
 	t.Helper()
 	testdb.CreateDatabase(t, name, writesFixture)
-	return newManager(t, config.Defaults{}, oneConn(testdb.DSN(t, testdb.Superuser, name))), observer(t, name)
+	return newManager(t, config.Defaults{}, oneConn(testdb.DSN(t, testdb.Superuser, name))), testdb.Conn(t, testdb.Superuser, name)
 }
 
 func TestWritesAreRefused(t *testing.T) {
@@ -67,7 +67,7 @@ func TestWritesAreRefused(t *testing.T) {
 func TestPgNetRequestIsRefused(t *testing.T) {
 	t.Parallel()
 	m := newManager(t, config.Defaults{}, testdb.DSN(t, testdb.Superuser, testdb.DBSupabase))
-	watch := observer(t, testdb.DBSupabase)
+	watch := testdb.Conn(t, testdb.Superuser, testdb.DBSupabase)
 
 	const queued = "SELECT count(*)::text FROM net.http_request_queue"
 	before := observe(t, watch, queued)
@@ -127,7 +127,7 @@ func TestGapsOwnedByTheGuard(t *testing.T) {
 	t.Parallel()
 	testdb.CreateDatabase(t, "engine_gaps", "CREATE EXTENSION dblink; CREATE TABLE t (id int PRIMARY KEY, v text NOT NULL);")
 	m := newManager(t, config.Defaults{}, testdb.DSN(t, testdb.Superuser, "engine_gaps"))
-	watch := observer(t, "engine_gaps")
+	watch := testdb.Conn(t, testdb.Superuser, "engine_gaps")
 
 	t.Run("dblink_exec writes through another session", func(t *testing.T) {
 		got := value(t, m, "SELECT dblink_exec('dbname=engine_gaps', 'INSERT INTO t VALUES (1, ''via dblink'')')")

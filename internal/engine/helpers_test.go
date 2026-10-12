@@ -73,18 +73,6 @@ func deref(s *string) string {
 	return *s
 }
 
-// observer connects to database as the superuser, outside the engine, to
-// observe the state queries leave behind.
-func observer(t *testing.T, database string) *pgx.Conn {
-	t.Helper()
-	conn, err := pgx.Connect(t.Context(), testdb.DSN(t, testdb.Superuser, database))
-	if err != nil {
-		t.Fatalf("connect observer: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return conn
-}
-
 func observe(t *testing.T, conn *pgx.Conn, sql string, args ...any) string {
 	t.Helper()
 	var s string

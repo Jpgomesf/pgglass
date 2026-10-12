@@ -1,7 +1,6 @@
 package testdb
 
 import (
-	"context"
 	"errors"
 	"slices"
 	"testing"
@@ -14,16 +13,6 @@ const (
 	sqlStateInsufficientPrivilege = "42501"
 	sqlStateReadOnlyTransaction   = "25006"
 )
-
-func connect(t *testing.T, role, database string) *pgx.Conn {
-	t.Helper()
-	conn, err := pgx.Connect(t.Context(), DSN(t, role, database))
-	if err != nil {
-		t.Fatalf("connect as %s to %s: %v", role, database, err)
-	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return conn
-}
 
 func queryValue[T any](t *testing.T, conn *pgx.Conn, sql string, args ...any) T {
 	t.Helper()
@@ -54,7 +43,7 @@ func inTx(t *testing.T, conn *pgx.Conn, opts pgx.TxOptions, fn func(pgx.Tx)) {
 }
 
 func TestCleanRoleCanSelectButNotWrite(t *testing.T) {
-	conn := connect(t, RoleClean, DBApp)
+	conn := Conn(t, RoleClean, DBApp)
 
 	if n := queryValue[int](t, conn, "SELECT count(*) FROM app.customers"); n != 50 {
 		t.Errorf("customers = %d, want 50", n)
@@ -75,7 +64,7 @@ func TestCleanRoleCanSelectButNotWrite(t *testing.T) {
 }
 
 func TestLeakyRoleHasItsLeaks(t *testing.T) {
-	conn := connect(t, RoleLeaky, DBApp)
+	conn := Conn(t, RoleLeaky, DBApp)
 
 	if n := queryValue[int](t, conn, "SELECT count(*) FROM app.events"); n != 20000 {
 		t.Errorf("events = %d, want 20000", n)
@@ -98,7 +87,7 @@ func TestLeakyRoleHasItsLeaks(t *testing.T) {
 }
 
 func TestSupabaseHazardExists(t *testing.T) {
-	conn := connect(t, RoleSupabase, DBSupabase)
+	conn := Conn(t, RoleSupabase, DBSupabase)
 
 	if n := queryValue[int](t, conn, "SELECT count(*) FROM public.profiles"); n != 5 {
 		t.Errorf("profiles = %d, want 5", n)
@@ -129,7 +118,7 @@ func TestSupabaseHazardExists(t *testing.T) {
 }
 
 func TestAppFixtureHasEveryObjectKind(t *testing.T) {
-	conn := connect(t, Superuser, DBApp)
+	conn := Conn(t, Superuser, DBApp)
 
 	types := queryValue[[]string](t, conn, `
 		SELECT array_agg(DISTINCT t.typname::text)
@@ -184,7 +173,7 @@ func TestCreateDatabase(t *testing.T) {
 	const name = "scratch_fixture"
 	t.Run("create", func(t *testing.T) {
 		CreateDatabase(t, name, "CREATE TABLE t (id int); INSERT INTO t VALUES (1), (2);")
-		conn := connect(t, RoleClean, name)
+		conn := Conn(t, RoleClean, name)
 		if n := queryValue[int](t, conn, "SELECT count(*) FROM pg_class WHERE relname = 't'"); n != 1 {
 			t.Errorf("fixture table missing")
 		}
@@ -192,7 +181,7 @@ func TestCreateDatabase(t *testing.T) {
 		wantSQLState(t, err, sqlStateInsufficientPrivilege)
 	})
 
-	conn := connect(t, Superuser, DBApp)
+	conn := Conn(t, Superuser, DBApp)
 	if queryValue[bool](t, conn, "SELECT EXISTS (SELECT FROM pg_database WHERE datname = $1)", name) {
 		t.Errorf("database %s still exists after its test finished", name)
 	}

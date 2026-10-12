@@ -2,13 +2,11 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -18,24 +16,6 @@ import (
 )
 
 func TestMain(m *testing.M) { testdb.Main(m) }
-
-// lockedBuffer collects the server's stderr.
-type lockedBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (b *lockedBuffer) Write(p []byte) (int, error) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.Write(p)
-}
-
-func (b *lockedBuffer) String() string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.buf.String()
-}
 
 // The built binary, configured by a config.json next to it, serves the tools
 // over stdio, logs to stderr only, and removes stale spill files on start.
@@ -50,12 +30,20 @@ func TestStdioServer(t *testing.T) {
 
 	cmd := exec.Command(bin) //nolint:gosec // the binary this test just built
 	cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
-	stderr := &lockedBuffer{}
-	cmd.Stderr = stderr
+	stderr, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stderr.Close() }()
+	cmd.Stderr = stderr // the server writes to the file itself, so it can be read at any time
+	logs := func() string {
+		data, _ := os.ReadFile(stderr.Name()) //nolint:gosec // the file this test created
+		return string(data)
+	}
 	client := mcp.NewClient(&mcp.Implementation{Name: "smoke", Version: "test"}, nil)
 	session, err := client.Connect(t.Context(), &mcp.CommandTransport{Command: cmd}, nil)
 	if err != nil {
-		t.Fatalf("connect: %v\nstderr:\n%s", err, stderr)
+		t.Fatalf("connect: %v\nstderr:\n%s", err, logs())
 	}
 	checkTools(t, session)
 	res, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "pg_query", Arguments: map[string]any{
@@ -68,13 +56,13 @@ func TestStdioServer(t *testing.T) {
 		t.Errorf("pg_query = %+v", res.Content[0])
 	}
 	if err := session.Close(); err != nil {
-		t.Errorf("close: %v\nstderr:\n%s", err, stderr)
+		t.Errorf("close: %v\nstderr:\n%s", err, logs())
 	}
 
 	if _, err := os.Stat(stale); !os.IsNotExist(err) {
 		t.Errorf("stale spill file still there (%v)", err)
 	}
-	checkStderr(t, stderr.String(), dsn)
+	checkStderr(t, logs(), dsn)
 }
 
 // buildServer builds the server into a new directory, next to a config.json
