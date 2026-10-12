@@ -2,7 +2,8 @@
 // the Postgres parser (libpg_query via github.com/wasilibs/go-pgquery, pure
 // Go) rather than keyword matching. The engine's READ ONLY transaction stops
 // writes; the guard also rejects what would act outside that transaction or
-// survive its rollback, which READ ONLY cannot stop.
+// survive its rollback, which READ ONLY cannot stop, and reads of the
+// catalogs that hold server configuration files or credentials.
 //
 // The parser lexes SQL like a server with standard_conforming_strings on, the
 // default since PostgreSQL 9.1. With it off, a backslash in a plain '...'
@@ -322,8 +323,8 @@ var deniedSchemas = map[string]bool{
 
 // deniedFunctions reach outside the read-only transaction (server files,
 // other sessions, settings, sequences, the network), leave state behind that
-// its rollback does not undo, or run SQL passed as a string, which the guard
-// cannot see.
+// its rollback does not undo, run SQL passed as a string, which the guard
+// cannot see, or read a relation passed by name, past deniedRelations.
 var deniedFunctions = map[string]bool{
 	// Server files.
 	"pg_read_file":        true,

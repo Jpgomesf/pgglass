@@ -24,8 +24,8 @@ const (
 	// out, or write server files.
 	SeverityCritical = "critical"
 	// Risky, but no way out of the read-only transaction on its own: role
-	// attributes, table write privileges, which the transaction refuses to
-	// use, reading server files and signalling other sessions.
+	// attributes, table write privileges (the transaction refuses the
+	// writes), reading server files and signalling other sessions.
 	SeverityWarning = "warning"
 )
 

@@ -259,13 +259,13 @@ var Rejected = []Case{
 
 	// --- Denied relations read by name, with no reference to check ---
 
-	// [redteam] table_to_xml takes a regclass: it returned pg_hba.conf as the superuser.
+	// [review] table_to_xml takes a regclass: it returned pg_hba.conf as the superuser.
 	{`SELECT table_to_xml('pg_catalog.pg_hba_file_rules', true, false, '')`, "table_to_xml"},
-	// [redteam] Its sibling, for postgresql.conf with its paths.
+	// [review] Its sibling, for postgresql.conf with its paths.
 	{`SELECT table_to_xml_and_xmlschema('pg_file_settings', true, false, '')`, "table_to_xml_and_xmlschema"},
-	// [policy] xpath() extracts the whole document, past the inline output limit.
+	// [review] xpath() extracts the whole document, past the inline output limit.
 	{`SELECT xpath('//auth_method/text()', table_to_xml('pg_hba_file_rules', true, false, ''))`, "table_to_xml"},
-	// [redteam] xml2's xpath_table builds and runs SQL from its text arguments.
+	// [review] xml2's xpath_table builds and runs SQL from its text arguments.
 	{`SELECT * FROM xpath_table('k','d','pg_hba_file_rules','/x','true') AS t(k int, v text)`, "xpath_table"},
 	// [policy] pageinspect returns a relation's raw pages, its rows included.
 	{`SELECT encode(get_raw_page('pg_authid', 0), 'escape')`, "get_raw_page"},

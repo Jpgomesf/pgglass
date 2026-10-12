@@ -33,8 +33,8 @@ CREATE FUNCTION bg.pg_background_launch(command text) RETURNS int LANGUAGE sql A
 GRANT USAGE ON SCHEMA aws_s3, aws_lambda, bg TO pf_escapes;
 GRANT EXECUTE ON FUNCTION pg_read_binary_file(text), pg_log_backend_memory_contexts(integer) TO pf_escapes;
 
--- pf_climber: a member of the superuser pf_root. It does not inherit it, and
--- superuser never is, but SET ROLE still reaches it.
+-- pf_climber: a member of the superuser pf_root, without inheriting from it.
+-- Superuser is never inherited anyway, but SET ROLE reaches it.
 ALTER ROLE pf_root NOLOGIN SUPERUSER;
 ALTER ROLE pf_climber NOINHERIT;
 GRANT pf_root TO pf_climber;
