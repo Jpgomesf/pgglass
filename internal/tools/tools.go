@@ -2,8 +2,8 @@
 // pg_schema and pg_search.
 //
 // Every failure is a tool result with IsError set, never a protocol error,
-// and every call writes one JSON audit line that holds no SQL text, parameter
-// or value.
+// and every call writes one JSON audit line, or one per connection when
+// pg_query fans out, that holds no SQL text, parameter or value.
 package tools
 
 import (
@@ -36,7 +36,8 @@ type Handlers struct {
 
 // New returns the Handlers for cfg, whose defaults are filled in, as
 // config.Parse returns them. They query through eng, spill results too large
-// to return to store, and write one JSON audit line per call to auditLog.
+// to return to store, and write one JSON audit line per call, or per
+// connection when pg_query fans out, to auditLog.
 func New(cfg config.Config, eng *engine.Manager, store *spill.Store, auditLog io.Writer) *Handlers {
 	return &Handlers{
 		cfg:     cfg,
@@ -63,13 +64,15 @@ func NewServer(h *Handlers, version string) *mcp.Server {
 // line reports, and returns the text of the result.
 type toolFunc func(ctx context.Context, args json.RawMessage, c *call) (string, error)
 
-// handle adapts run to the SDK: it logs the call and turns an error into a
-// result with IsError set.
+// handle adapts run to the SDK: it logs the call, unless the call logged
+// itself, and turns an error into a result with IsError set.
 func (h *Handlers) handle(tool string, run toolFunc) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		c := &call{tool: tool, start: time.Now()}
 		text, err := run(ctx, req.Params.Arguments, c)
-		h.audit(c, err)
+		if !c.audited {
+			h.audit(c, err)
+		}
 		res := &mcp.CallToolResult{}
 		if err != nil {
 			text, res.IsError = errorText(err), true

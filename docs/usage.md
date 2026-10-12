@@ -50,6 +50,7 @@ Only what the connection's role can read shows up.
 | Argument | Description |
 |----------|-------------|
 | `connection` | Connection name |
+| `connections` | In place of `connection`: up to 10 connection names to run the statement on in parallel (see [Fan-out](#fan-out)) |
 | `sql` | One statement; `$1`, `$2`, ... take `params` |
 | `params` | Values for `$1`, `$2`, ...: strings, numbers (sent exactly as written), booleans or `null`. Pass arrays and objects as strings and cast them, e.g. `'{1,2}'` with `$1::int[]` |
 | `schema` | `search_path` for this query only; default: the connection's `default_schema`. `net`, `aws_s3` and `aws_lambda`, whose functions the guard denies, are refused |
@@ -119,7 +120,7 @@ A failed call returns a result with `isError` set and the reason as text:
 
 ## Audit log
 
-Each tool call writes one JSON line to stderr:
+Each tool call writes one JSON line to stderr, or one per connection for a [fan-out](#fan-out):
 
 ```json
 {"time":"2026-10-12T14:59:12.2-03:00","level":"INFO","msg":"tool call","tool":"pg_query","connection":"prod-app","sql_sha256":"46880a16e933","sql_len":30,"duration_ms":41,"rows":1,"truncated":false,"outcome":"ok","sqlstate":""}
@@ -140,3 +141,21 @@ Two `pg_query` calls run at the same time, one per connection.
 - **Start with `pg_schema` or `pg_search`.** Agents write better SQL when they know the exact names and types.
 - **Set `default_schema`** so unqualified names resolve without a `schema` argument.
 - **Aggregate in SQL.** A `count(*)` or `GROUP BY` answers in one row where reading rows spills a file.
+
+## Fan-out
+
+In place of `connection`, `pg_query` takes `connections`, up to 10 names, and runs the statement on each in parallel:
+
+> "Count the orders in staging and production"
+
+```
+connection	count
+staging-app	1204
+prod-app	98311
+(2 rows)
+```
+
+- The statement is checked once. Each connection then gets what a call on it alone would: the role check, its `search_path` (`schema`, or its own `default_schema`), the limits and one audit line.
+- Rows come in the order of `connections`, after a first column, `connection`. The footer names each connection a limit cut, `(1500 rows; truncated: prod-app max_rows=1000)`, and a result over 10 KB spills to one CSV file.
+- When the connections return different columns, by name or type, each gets its own section under its name, and the sections share the 10 KB.
+- A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The call fails only when every connection does.

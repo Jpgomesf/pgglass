@@ -56,20 +56,26 @@ type Store struct {
 //
 // Output runs Cleanup at most once an hour, ignoring its errors.
 func (s *Store) Output(tool, conn string, res *result.Result, f render.Format) (string, error) {
+	return s.OutputWithin(tool, conn, res, f, s.InlineMaxBytes)
+}
+
+// OutputWithin is Output with limit in place of InlineMaxBytes, for an
+// output that shares the inline space with others.
+func (s *Store) OutputWithin(tool, conn string, res *result.Result, f render.Format, limit int) (string, error) {
 	s.maybeCleanup()
 	body, err := render.Render(res, f, inlineMaxCell)
 	if err != nil {
 		return "", err
 	}
 	inline := body + footer(res)
-	if len(inline) <= s.InlineMaxBytes {
+	if len(inline) <= limit {
 		return inline, nil
 	}
 	path, err := s.write(tool, conn, res)
 	if err != nil {
-		return s.capped(res, f, err)
+		return capped(res, f, err, limit)
 	}
-	return summary(res, path, len(inline), s.InlineMaxBytes)
+	return summary(res, path, len(inline), limit)
 }
 
 // Cleanup removes the regular files in Dir that are named like spill files
@@ -179,11 +185,11 @@ func safeName(s string) string {
 	return name
 }
 
-// capped renders as many leading rows of res as fit in InlineMaxBytes, for
-// when the spill file could not be written.
-func (s *Store) capped(res *result.Result, f render.Format, cause error) (string, error) {
+// capped renders as many leading rows of res as fit in limit bytes, for when
+// the spill file could not be written.
+func capped(res *result.Result, f render.Format, cause error, limit int) (string, error) {
 	total := len(res.Rows)
-	budget := s.InlineMaxBytes - len(cappedNote(total, res, cause))
+	budget := limit - len(cappedNote(total, res, cause))
 	body, shown := "", 0
 	// Binary search for the most rows whose rendering fits in budget.
 	for lo, hi := 0, total; lo <= hi; {
