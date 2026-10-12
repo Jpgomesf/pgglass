@@ -258,10 +258,12 @@ const rowByteHeadroom = 1 << 20
 
 // open resolves the DSN of the connection named name and creates its pool,
 // which dials on first use. Each new database connection resolves the DSN
-// again and takes its server, TLS settings and credentials from it, so a
-// rotated password reaches it without a restart; the rest of the DSN, pool
-// settings included, is read once, here. maxBytes is the result byte budget,
-// used to bound one wire message.
+// again and takes its password and TLS settings from it, so rotated
+// credentials reach it without a restart. A DSN that names another user,
+// database or host than the first fails the connection instead, since the
+// role check audits a connection once. The rest of the DSN, pool settings
+// included, is read once, here. maxBytes is the result byte budget, used to
+// bound one wire message.
 func open(ctx context.Context, name string, conn config.Connection, maxBytes int) (*pgxpool.Pool, error) {
 	cfg, err := parseDSN(ctx, name, conn)
 	if err != nil {
@@ -273,8 +275,11 @@ func open(ctx context.Context, name string, conn config.Connection, maxBytes int
 			return err
 		}
 		f := fresh.ConnConfig
-		c.Host, c.Port, c.TLSConfig, c.Fallbacks = f.Host, f.Port, f.TLSConfig, f.Fallbacks
-		c.Database, c.User, c.Password = f.Database, f.User, f.Password
+		if target(&f.Config) != target(&c.Config) {
+			return fmt.Errorf("connection %q: the DSN now names another user, database or host; restart the server to use it, so that its role is checked", name)
+		}
+		// The same hosts, perhaps reordered, each with its TLS settings.
+		c.Host, c.Port, c.TLSConfig, c.Fallbacks, c.Password = f.Host, f.Port, f.TLSConfig, f.Fallbacks, f.Password
 		if conn.RequiresVPN {
 			return checkVPN(name, c.Host, int(c.Port))
 		}
@@ -286,6 +291,17 @@ func open(ctx context.Context, name string, conn config.Connection, maxBytes int
 		return nil, fmt.Errorf("connection %q: %w", name, err)
 	}
 	return p, nil
+}
+
+// target is whom a connection logs in as, and where: its user, its database
+// and the hosts it may dial, fallbacks included, in any order.
+func target(c *pgconn.Config) string {
+	hosts := []string{net.JoinHostPort(c.Host, strconv.Itoa(int(c.Port)))}
+	for _, f := range c.Fallbacks {
+		hosts = append(hosts, net.JoinHostPort(f.Host, strconv.Itoa(int(f.Port))))
+	}
+	slices.Sort(hosts)
+	return fmt.Sprintf("%q %q %q", c.User, c.Database, slices.Compact(hosts))
 }
 
 // parseDSN resolves the DSN of the connection named name and parses it.

@@ -95,6 +95,37 @@ func TestEachNewConnectionResolvesTheDSNAgain(t *testing.T) {
 	wantSQLState(t, err, "28P01") // invalid_password
 }
 
+// A DSN that comes to name another user, database or host fails each new
+// connection instead, until a restart: the role check audited the first.
+func TestNewConnectionRefusesAnotherUserDatabaseOrHost(t *testing.T) {
+	const envVar = "MCP_PG_ENGINE_TARGET_DSN"
+	oneUse := func(dsn string) string { return dsn + "&pool_max_conn_lifetime=1ms" }
+	first := oneUse(testdb.DSN(t, testdb.RoleClean, testdb.DBApp))
+	t.Setenv(envVar, first)
+	m := managerFor(t, config.Defaults{}, map[string]config.Connection{db: {Source: "env", DSNEnvVar: envVar}})
+	if got := value(t, m, "SELECT current_user"); got != testdb.RoleClean {
+		t.Fatalf("current_user = %s, want %s", got, testdb.RoleClean)
+	}
+
+	for what, dsn := range map[string]string{
+		"user":     testdb.DSN(t, testdb.Superuser, testdb.DBApp),
+		"database": testdb.DSN(t, testdb.RoleClean, testdb.DBSupabase),
+		"host":     "postgres://ro_clean:ro_clean@127.0.0.1:" + strconv.Itoa(closedPort(t)) + "/app?sslmode=disable",
+	} {
+		t.Setenv(envVar, oneUse(dsn))
+		_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT current_user"})
+		if err == nil || !strings.Contains(err.Error(), "names another user, database or host; restart the server") {
+			t.Errorf("another %s: err = %v, want the connection refused until a restart", what, err)
+		}
+	}
+
+	// Only those connections failed: the first DSN still connects.
+	t.Setenv(envVar, first)
+	if got := value(t, m, "SELECT current_user"); got != testdb.RoleClean {
+		t.Errorf("first DSN again: current_user = %s, want %s", got, testdb.RoleClean)
+	}
+}
+
 func TestUnknownConnection(t *testing.T) {
 	m := managerFor(t, config.Defaults{}, map[string]config.Connection{
 		"staging": {Source: "direct", DSN: "postgres://localhost/s"},

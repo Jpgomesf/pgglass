@@ -60,6 +60,34 @@ func TestLimitsForOnlyLowersMaxRows(t *testing.T) {
 	}
 }
 
+// A new connection may take another password or TLS settings, never another
+// user, database or host.
+func TestTargetIsUserDatabaseAndHosts(t *testing.T) {
+	parse := func(dsn string) string {
+		t.Helper()
+		c, err := pgconn.ParseConfig(dsn)
+		if err != nil {
+			t.Fatalf("parse %s: %v", dsn, err)
+		}
+		return target(c)
+	}
+	first := parse("postgres://u:old@a:5432,b:5433/d")
+	for dsn, same := range map[string]bool{
+		"postgres://u:new@a:5432,b:5433/d":                 true, // a rotated password
+		"postgres://u:old@a:5432,b:5433/d?sslmode=require": true, // other TLS settings, without plaintext fallbacks
+		"postgres://u:old@b:5433,a:5432/d":                 true, // the same hosts, reordered
+		"postgres://v:old@a:5432,b:5433/d":                 false,
+		"postgres://u:old@a:5432,b:5433/e":                 false,
+		"postgres://u:old@a:5432,c:5433/d":                 false,
+		"postgres://u:old@a:5432,b:5434/d":                 false,
+		"postgres://u:old@a:5432/d":                        false, // a host fewer
+	} {
+		if got := parse(dsn) == first; got != same {
+			t.Errorf("%s: same target = %t, want %t", dsn, got, same)
+		}
+	}
+}
+
 // rawRow builds a row as pgx returns it; "\x00" stands for NULL.
 func rawRow(values ...string) [][]byte {
 	row := make([][]byte, len(values))

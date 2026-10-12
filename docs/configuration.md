@@ -51,7 +51,7 @@ Read DSN from a `.env` file. Supports `KEY=VALUE`, quoted values, and comments.
 
 ### AWS Secrets Manager
 
-Fetch credentials from AWS Secrets Manager. Secrets are cached in memory for 24 hours: new database connections use the cached secret until it expires, so restart the server to pick up a rotated secret sooner.
+Fetch credentials from AWS Secrets Manager. Secrets are cached in memory for 24 hours: new database connections use the cached secret until it expires, so restart the server to pick up a rotated secret sooner. Alternating-users rotation changes the user, so new database connections fail after it until a restart (see [DSN Formats](#dsn-formats)).
 
 ```json
 {
@@ -100,7 +100,7 @@ host=localhost port=5432 dbname=mydb user=admin password=secret
 
 Whatever the DSN says, every session starts with `default_transaction_read_only=on` and `client_encoding=UTF8`, and each query sets `statement_timeout`, `lock_timeout` and `standard_conforming_strings=on` for its own transaction.
 
-Each connection's DSN is resolved on first use and again for every new database connection, which takes its host, port, database, user, password and TLS settings from it: a rotated password or an edited `.env` needs no restart. The rest of the DSN, such as `pool_max_conns`, is read on first use only.
+Each connection's DSN is resolved on first use and again for every new database connection, which takes its password and TLS settings from it: a rotated password needs no restart. A DSN that comes to name another user, database or host fails new database connections until the server restarts, since the [role check](#role-check) audited the first one. The rest of the DSN, such as `pool_max_conns`, is read on first use only.
 
 ### PgBouncer
 
@@ -174,6 +174,7 @@ If the audit itself fails, it is retried on the next call; meanwhile `strict` re
 | Connect | `dotenv`: file must exist, key must be present | `"X" not found in .env` |
 | Connect | `aws_secrets_manager`: secret must contain required fields | `missing required fields: host, db_name` |
 | Connect | VPN check (if `requires_vpn: true`) | `host unreachable — is VPN active?` |
+| Connect | The DSN must keep the user, database and host it had on first use | `the DSN now names another user, database or host; restart the server to use it` |
 | First use | `role_check: strict` and a critical finding | `connection "x" refused (role_check strict): its role can do more than read.` |
 
 ## Naming Conventions
