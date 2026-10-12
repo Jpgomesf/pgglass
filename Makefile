@@ -5,8 +5,9 @@ MODULE := github.com/jpgomesf/mcp-postgres
 
 all: lint build
 
+# Without cgo, like the release binaries (.goreleaser.yml).
 build:
-	go build -o $(BINARY) .
+	CGO_ENABLED=0 go build -o $(BINARY) .
 
 lint:
 	golangci-lint run ./...

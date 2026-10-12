@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"sync"
 	"time"
 
@@ -16,7 +18,7 @@ import (
 func init() { RegisterSource(&AWSSecretsSource{}) }
 
 // AWSSecretsSource resolves credentials from AWS Secrets Manager.
-// Secrets are cached in-memory for the lifetime of the process.
+// Secrets are cached in memory for secretCacheTTL.
 type AWSSecretsSource struct{}
 
 func (AWSSecretsSource) Type() string { return "aws_secrets_manager" }
@@ -47,11 +49,15 @@ func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn confi
 		port = "5432"
 	}
 
-	dsn := fmt.Sprintf(
-		"host=%s port=%s dbname=%s user=%s password=%s",
-		host, port, dbName, user, password,
-	)
-	return dsn, nil
+	// A URL escapes every value, so a password holding a space or a quote
+	// can neither break the DSN nor set another of its parameters.
+	dsn := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(user, password),
+		Host:   net.JoinHostPort(host, port),
+		Path:   "/" + dbName,
+	}
+	return dsn.String(), nil
 }
 
 // Status returns whether the AWS secret has been cached.
@@ -118,15 +124,27 @@ func (sc *awsSecretsCache) Get(ctx context.Context, awsProfile, secretName strin
 	if err != nil {
 		return nil, fmt.Errorf("get secret %q: %w", secretName, err)
 	}
-
-	var secret map[string]string
-	if err := json.Unmarshal([]byte(*result.SecretString), &secret); err != nil {
-		return nil, fmt.Errorf("parse secret %q: %w", secretName, err)
+	secret, err := secretValue(secretName, result)
+	if err != nil {
+		return nil, err
 	}
 
 	sc.mu.Lock()
 	sc.cache[secretName] = &secretEntry{value: secret, fetchedAt: time.Now()}
 	sc.mu.Unlock()
 
+	return secret, nil
+}
+
+// secretValue decodes the JSON object a secret holds as its string value. A
+// binary secret has none.
+func secretValue(secretName string, out *secretsmanager.GetSecretValueOutput) (map[string]string, error) {
+	if out.SecretString == nil {
+		return nil, fmt.Errorf("secret %q has no string value: binary secrets are not supported", secretName)
+	}
+	var secret map[string]string
+	if err := json.Unmarshal([]byte(*out.SecretString), &secret); err != nil {
+		return nil, fmt.Errorf("parse secret %q: %w", secretName, err)
+	}
 	return secret, nil
 }

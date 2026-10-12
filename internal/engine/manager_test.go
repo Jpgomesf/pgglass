@@ -1,8 +1,10 @@
 package engine_test
 
 import (
+	"context"
 	"errors"
 	"net"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -37,16 +39,60 @@ func TestNewResolvesNothingUntilFirstUse(t *testing.T) {
 		t.Fatalf("New resolved the DSN %d times, want 0", n)
 	}
 
-	for range 2 {
+	// The first query opens the pool, which resolves once, and each attempt
+	// to connect resolves again; the second query reuses the pool.
+	for _, want := range []int{2, 3} {
 		_, err := m.Query(t.Context(), name, engine.Query{SQL: "SELECT 1"})
 		var qe *engine.QueryError
 		if err == nil || errors.As(err, &qe) {
 			t.Errorf("Query on a closed port: err = %v, want a plain connection error", err)
 		}
+		if n := stub.callCount(name); n != want {
+			t.Errorf("resolved %d times, want %d", n, want)
+		}
 	}
-	if n := stub.callCount(name); n != 1 {
-		t.Errorf("resolved %d times over two queries, want once: the pool is kept", n)
+}
+
+// Each new database connection resolves the DSN again, so a rotated password
+// reaches it without a restart. pool_max_conn_lifetime=1ms retires every
+// connection after one use.
+func TestEachNewConnectionResolvesTheDSNAgain(t *testing.T) {
+	const role, envVar = "engine_rotating", "MCP_PG_ENGINE_ROTATING_DSN"
+	admin := observer(t, testdb.DBApp)
+	exec := func(sql string) {
+		t.Helper()
+		if _, err := admin.Exec(t.Context(), sql); err != nil {
+			t.Fatal(err)
+		}
 	}
+	exec("DROP ROLE IF EXISTS " + role)
+	exec("CREATE ROLE " + role + " LOGIN PASSWORD 'first'")
+	t.Cleanup(func() { _, _ = admin.Exec(context.Background(), "DROP ROLE "+role) })
+	dsn := func(password string) string {
+		u, err := url.Parse(testdb.DSN(t, testdb.RoleClean, testdb.DBApp) + "&pool_max_conn_lifetime=1ms")
+		if err != nil {
+			t.Fatal(err)
+		}
+		u.User = url.UserPassword(role, password)
+		return u.String()
+	}
+
+	t.Setenv(envVar, dsn("first"))
+	m := managerFor(t, config.Defaults{}, map[string]config.Connection{db: {Source: "env", DSNEnvVar: envVar}})
+	if got := value(t, m, "SELECT current_user"); got != role {
+		t.Fatalf("current_user = %s, want %s", got, role)
+	}
+
+	exec("ALTER ROLE " + role + " PASSWORD 'second'")
+	t.Setenv(envVar, dsn("second"))
+	if got := value(t, m, "SELECT current_user"); got != role {
+		t.Errorf("after the rotation: current_user = %s, want %s", got, role)
+	}
+
+	// The old password now fails: that query did connect anew.
+	t.Setenv(envVar, dsn("first"))
+	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
+	wantSQLState(t, err, "28P01") // invalid_password
 }
 
 func TestUnknownConnection(t *testing.T) {
@@ -121,6 +167,43 @@ func TestQueryWaitingOnOpenDoesNotOpenAfterClose(t *testing.T) {
 	}
 	if n := stub.callCount(name); n != 1 {
 		t.Errorf("resolved %d times, want 1: the waiting query opened after Close", n)
+	}
+}
+
+// A query waiting for another to open the connection gives up when its own
+// context ends, instead of waiting out a slow resolve.
+func TestQueryWaitingOnOpenGivesUpWithItsContext(t *testing.T) {
+	name := stub.reset("open-wait-cancel")
+	release := stub.hold(name)
+	defer release()
+	m := managerFor(t, config.Defaults{}, map[string]config.Connection{name: {Source: "stub", DSN: "postgres://u:p@localhost:notaport/db"}})
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := m.Query(t.Context(), name, engine.Query{SQL: "SELECT 1"})
+		first <- err
+	}()
+	eventually(t, "the first query to start opening", func() bool { return stub.callCount(name) == 1 })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	waiting := make(chan error, 1)
+	go func() {
+		_, err := m.Query(ctx, name, engine.Query{SQL: "SELECT 1"})
+		waiting <- err
+	}()
+	select {
+	case err := <-waiting:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("waiting query: err = %v, want its context's deadline", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the waiting query ignored its context")
+	}
+
+	release()
+	if err := <-first; err == nil || !strings.Contains(err.Error(), "notaport") {
+		t.Errorf("first query: err = %v, want the DSN error", err)
 	}
 }
 
@@ -209,10 +292,11 @@ func TestOpeningOneConnectionBlocksNoOther(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Errorf("query on %s waited for %s to open", fast, slow)
 	}
+	// The other first uses wait for that open instead of opening too.
+	if n := stub.callCount(slow); n != 1 {
+		t.Errorf("concurrent first uses resolved %s %d times while it was opening, want once", slow, n)
+	}
 
 	release()
 	wg.Wait()
-	if n := stub.callCount(slow); n != 1 {
-		t.Errorf("%s resolved %d times by concurrent first uses, want once", slow, n)
-	}
 }

@@ -341,6 +341,8 @@ var deniedFunctions = map[string]bool{
 	"ts_stat":                    true,
 	"ts_rewrite":                 true, // ts_rewrite(query, select text) runs the select
 	"connectby":                  true, // tablefunc: builds SQL from its text arguments
+	// Writes in place, which neither READ ONLY nor the rollback stops.
+	"pg_truncate_visibility_map": true, // pg_visibility: truncates a visibility map
 }
 
 // deniedRelations are system views that parse and return the server's
@@ -358,6 +360,7 @@ var deniedPrefixes = []string{
 	"dblink",          // dblink, dblink_exec, ...: a second connection, outside the transaction
 	"lo_",             // large objects; lo_import and lo_export reach server files
 	"pg_logical_",     // logical decoding messages and slots
+	"pg_log_",         // pg_log_standby_snapshot writes WAL; pg_log_backend_memory_contexts makes another backend log
 	"pg_replication_", // replication origins and slots
 	"pg_create_",      // replication slots and restore points
 	"pg_drop_",        // replication slots
@@ -376,4 +379,5 @@ var deniedPrefixes = []string{
 	"database_to_xml", // database_to_xml*: runs a query per table of the database
 	"schema_to_xml",   // schema_to_xml*: runs a query per table of the schema
 	"crosstab",        // tablefunc: crosstab and its wrappers run SQL passed as a string
+	"heap_force_",     // pg_surgery: kills or freezes rows in place, past READ ONLY and the rollback
 }

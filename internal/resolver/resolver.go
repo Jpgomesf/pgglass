@@ -15,6 +15,8 @@ type CredentialSource interface {
 	Type() string
 
 	// Resolve returns a libpq-compatible DSN string for the given connection.
+	// The engine calls it when the connection is first used and again for each
+	// new database connection, so a source should cache what is slow to fetch.
 	Resolve(ctx context.Context, connName string, conn config.Connection) (string, error)
 
 	// Status returns a short status hint for display in pg_list_connections.

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseAppliesDefaults(t *testing.T) {
@@ -56,6 +57,17 @@ func TestParseKeepsExplicitValues(t *testing.T) {
 	}
 }
 
+func TestParseAcceptsTheLargestValues(t *testing.T) {
+	cfg, err := Parse([]byte(`{"defaults": {"statement_timeout_seconds": 2147483, "lock_timeout_seconds": 2147483,
+		"max_rows": 9223372036854775807, "max_bytes": 9223372036854775807, "spill_ttl_hours": 2562047}}`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if ttl := time.Duration(cfg.Defaults.SpillTTLHours) * time.Hour; ttl <= 0 {
+		t.Errorf("spill_ttl_hours %d overflows a Duration: %v", cfg.Defaults.SpillTTLHours, ttl)
+	}
+}
+
 func TestParseAcceptsEveryFormatAndRoleCheck(t *testing.T) {
 	for _, format := range []string{"tsv", "json", "markdown"} {
 		for _, mode := range []string{"strict", "warn", "off"} {
@@ -78,6 +90,11 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 		{"negative max rows", `"max_rows": -1`, "defaults.max_rows must be positive, got -1"},
 		{"negative max bytes", `"max_bytes": -1024`, "defaults.max_bytes must be positive, got -1024"},
 		{"negative spill ttl", `"spill_ttl_hours": -24`, "defaults.spill_ttl_hours must be positive, got -24"},
+		// Postgres takes timeouts as an int of milliseconds.
+		{"statement timeout past int milliseconds", `"statement_timeout_seconds": 2147484`, "defaults.statement_timeout_seconds must be at most 2147483, got 2147484"},
+		{"lock timeout past int milliseconds", `"lock_timeout_seconds": 2147484`, "defaults.lock_timeout_seconds must be at most 2147483, got 2147484"},
+		// The spill TTL becomes a time.Duration.
+		{"spill ttl past a duration", `"spill_ttl_hours": 2562048`, "defaults.spill_ttl_hours must be at most 2562047, got 2562048"},
 		{"unknown format", `"format": "xml"`, `defaults.format must be one of tsv, json, markdown, got "xml"`},
 		{"csv is not a config format", `"format": "csv"`, `defaults.format must be one of tsv, json, markdown, got "csv"`},
 		{"format is case sensitive", `"format": "TSV"`, `defaults.format must be one of tsv, json, markdown, got "TSV"`},
@@ -109,9 +126,29 @@ func TestParseReportsEveryInvalidSetting(t *testing.T) {
 }
 
 func TestParseRejectsMalformedJSON(t *testing.T) {
-	_, err := Parse([]byte(`{"defaults": `))
-	if err == nil || !strings.Contains(err.Error(), "parse config.json") {
-		t.Errorf("error = %v, want a parse error", err)
+	for _, doc := range []string{
+		`{"defaults": `,
+		`{"defaults": {}} {"connections": {}}`, // json.Unmarshal refused trailing data too
+		`{"defaults": {}}}`,
+	} {
+		if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "parse config.json") {
+			t.Errorf("Parse(%s): error = %v, want a parse error", doc, err)
+		}
+	}
+}
+
+// A misspelled key must fail, not quietly leave its setting at the default:
+// "role_chek": "strict" would otherwise run with role_check warn.
+func TestParseRejectsUnknownKeys(t *testing.T) {
+	for _, tc := range []struct{ doc, key string }{
+		{`{"defaults": {"role_chek": "strict"}}`, "role_chek"},
+		{`{"connections": {"db": {"source": "direct", "dsn": "postgres://x", "requires_vpm": true}}}`, "requires_vpm"},
+		{`{"default": {"max_rows": 10}}`, "default"},
+	} {
+		_, err := Parse([]byte(tc.doc))
+		if err == nil || !strings.Contains(err.Error(), `unknown field "`+tc.key+`"`) {
+			t.Errorf("Parse(%s): error = %v, want unknown field %q", tc.doc, err, tc.key)
+		}
 	}
 }
 

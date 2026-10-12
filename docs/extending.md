@@ -9,7 +9,8 @@ type CredentialSource interface {
     // Type returns the source identifier used in config.json.
     Type() string
 
-    // Resolve returns a libpq-compatible DSN string.
+    // Resolve returns a libpq-compatible DSN string. It runs when a connection
+    // is first used and again for each new database connection.
     Resolve(ctx context.Context, connName string, conn config.Connection) (string, error)
 
     // Status returns a short hint for pg_list_connections (e.g., "loaded").
@@ -45,7 +46,7 @@ func (VaultSource) Resolve(ctx context.Context, connName string, conn config.Con
 func (VaultSource) Status(conn config.Connection) string { return "" }
 ```
 
-4. If your source needs new fields, add them to `Connection` in `internal/config/config.go`
+4. If your source needs new fields, add them to `Connection` in `internal/config/config.go`: `config.json` rejects unknown keys
 5. Add tests in `internal/resolver/source_yourname_test.go`
 6. Use it in `config.json`:
 
@@ -57,6 +58,8 @@ func (VaultSource) Status(conn config.Connection) string { return "" }
 ```
 
 No changes to `resolver.go`, `main.go`, or any other source files are needed. The server validates source types at startup, so an unregistered source fails fast with a clear error.
+
+Since `Resolve` runs for each new database connection, a source can return short-lived credentials, such as the leases Vault issues under `database/creds/readonly`. Cache them while they are valid, as the AWS source caches its secrets, and keep `pool_max_conn_lifetime` in the DSN (one hour by default) shorter than the lease: a pooled connection keeps the credentials it was opened with.
 
 ## Validation
 

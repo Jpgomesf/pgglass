@@ -51,7 +51,7 @@ Read DSN from a `.env` file. Supports `KEY=VALUE`, quoted values, and comments.
 
 ### AWS Secrets Manager
 
-Fetch credentials from AWS Secrets Manager. Secrets are cached in-memory with a 24-hour TTL.
+Fetch credentials from AWS Secrets Manager. Secrets are cached in memory for 24 hours: new database connections use the cached secret until it expires, so restart the server to pick up a rotated secret sooner.
 
 ```json
 {
@@ -88,19 +88,19 @@ Example:
 
 The server accepts two PostgreSQL DSN formats, both passed directly to `pgx`:
 
-**URI format** (recommended for `direct`, `env`, `dotenv`):
+**URI format** (recommended for `direct`, `env`, `dotenv`; `aws_secrets_manager` builds one from the secret, escaping each value):
 ```
 postgres://user:password@host:5432/dbname?sslmode=require
 ```
 
-**Keyword/value format** (used internally by `aws_secrets_manager`):
+**Keyword/value format**:
 ```
 host=localhost port=5432 dbname=mydb user=admin password=secret
 ```
 
 Whatever the DSN says, every session starts with `default_transaction_read_only=on` and `client_encoding=UTF8`, and each query sets `statement_timeout`, `lock_timeout` and `standard_conforming_strings=on` for its own transaction.
 
-Each connection's DSN is resolved once, on first use, and kept for the life of the process: restart the server after rotating a password or secret.
+Each connection's DSN is resolved on first use and again for every new database connection, which takes its host, port, database, user, password and TLS settings from it: a rotated password or an edited `.env` needs no restart. The rest of the DSN, such as `pool_max_conns`, is read on first use only.
 
 ### PgBouncer
 
@@ -117,7 +117,7 @@ track_extra_parameters = default_transaction_read_only
 | `source` | string | *required* | `direct`, `env`, `dotenv`, or `aws_secrets_manager` |
 | `readonly` | bool | — | Deprecated and ignored: the server is always read-only. Logs a warning at startup |
 | `requires_vpn` | bool | `false` | TCP reachability check before each new database connection |
-| `default_schema` | string | `""` | `search_path` for `pg_query` when the call names no `schema`, and the schema `pg_schema` looks a `table` up in |
+| `default_schema` | string | `""` | `search_path` for `pg_query` when the call names no `schema`, and the schema `pg_schema` looks a `table` up in. A schema whose functions the guard denies, such as `net`, cannot be the `search_path` |
 
 ## Defaults
 
@@ -135,14 +135,14 @@ track_extra_parameters = default_transaction_read_only
 }
 ```
 
-Every field is optional: a missing or zero value takes the default. Numbers must be positive.
+Every field is optional: a missing or zero value takes the default. Numbers must be positive. The timeouts can be at most 2147483 seconds, since Postgres takes them as an int of milliseconds, and `spill_ttl_hours` at most 2562047.
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `statement_timeout_seconds` | `30` | Max query execution time |
 | `lock_timeout_seconds` | `5` | Max time a query waits for a lock |
 | `max_rows` | `1000` | Rows a query returns before its result is truncated. A `pg_query` call can lower it with `max_rows`, never raise it. Also caps `pg_search` |
-| `max_bytes` | `1048576` (1 MiB) | Bytes of values a query returns before its result is truncated |
+| `max_bytes` | `1048576` (1 MiB) | Bytes a query's result holds before it is truncated: each value counts its length plus 24, so empty and NULL values count too. A server message larger than `max_bytes` plus 1 MiB is not read: the connection is reset, and the result is truncated there if it was a row, or the query fails if it was an error |
 | `spill_ttl_hours` | `24` | How long spill files of large results are kept |
 | `format` | `tsv` | Default result format of `pg_query`: `tsv`, `json` or `markdown` |
 | `role_check` | `warn` | What to do when a connection's role can do more than read (see below) |
@@ -166,6 +166,7 @@ If the audit itself fails, it is retried on the next call; meanwhile `strict` re
 
 | When | What | Error |
 |------|------|-------|
+| Startup | Every key must be known: a misspelled one is not ignored | `json: unknown field "role_chek"` |
 | Startup | `defaults` values must be valid | `defaults.max_rows must be positive, got -1` |
 | Startup | `source` must be a registered type | `unknown source "foo" (registered: ...)` |
 | Connect | `direct`: `dsn` must be non-empty | `missing required fields: dsn` |

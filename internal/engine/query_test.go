@@ -13,6 +13,7 @@ import (
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
+	"github.com/jpgomesf/mcp-postgres/internal/guard"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
 
@@ -118,6 +119,30 @@ func TestSearchPathAppliesToOneQuery(t *testing.T) {
 	}
 }
 
+// The guard denies every function in schema net, but sees only the names a
+// statement spells: with net as the search_path, an unqualified call would
+// resolve into it (red-team F2). The engine refuses that search_path.
+func TestSearchPathCannotBeADeniedSchema(t *testing.T) {
+	t.Parallel()
+	const name = "engine_net_search_path"
+	testdb.CreateDatabase(t, name, `CREATE SCHEMA net;
+		CREATE FUNCTION net._encode_url_with_params_array(u text, p text) RETURNS text
+		LANGUAGE sql IMMUTABLE AS $$ SELECT 'REACHED_NET:' || u $$;`)
+	m := newManager(t, config.Defaults{}, testdb.DSN(t, testdb.Superuser, name))
+	const call = "SELECT _encode_url_with_params_array('https://attacker.invalid/', '{}')"
+
+	for _, schema := range []string{"net", "NET"} {
+		res, err := m.Query(t.Context(), db, engine.Query{SQL: call, SearchPath: schema})
+		var v *guard.Violation
+		if !errors.As(err, &v) {
+			t.Errorf("search_path %s: result %+v, err %v; want a *guard.Violation", schema, res, err)
+		}
+	}
+	// Under any other search_path the name does not resolve.
+	_, err := m.Query(t.Context(), db, engine.Query{SQL: call, SearchPath: "public"})
+	wantSQLState(t, err, "42883") // undefined_function
+}
+
 func TestLimitsAreSetPerTransaction(t *testing.T) {
 	t.Parallel()
 	m := cleanApp(t, config.Defaults{StatementTimeoutSeconds: 7, LockTimeoutSeconds: 3})
@@ -128,6 +153,25 @@ func TestLimitsAreSetPerTransaction(t *testing.T) {
 			t.Errorf("setting %d = %s, want %s", i, got, want)
 		}
 	}
+}
+
+// config.MaxTimeoutSeconds is the largest timeout Postgres accepts; one
+// second more fails every query in its setup.
+func TestLargestTimeoutsAreAccepted(t *testing.T) {
+	t.Parallel()
+	const largest = config.MaxTimeoutSeconds
+	m := cleanApp(t, config.Defaults{StatementTimeoutSeconds: largest, LockTimeoutSeconds: largest})
+	res := mustQuery(t, m, engine.Query{SQL: `SELECT current_setting('statement_timeout'), current_setting('lock_timeout'),
+		current_setting('idle_in_transaction_session_timeout')`})
+	for i := range 3 {
+		if got := deref(res.Rows[0][i]); got != "2147483s" {
+			t.Errorf("setting %d = %s, want 2147483s", i, got)
+		}
+	}
+
+	over := cleanApp(t, config.Defaults{StatementTimeoutSeconds: largest + 1})
+	_, err := over.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
+	wantSQLState(t, err, "22023") // invalid_parameter_value
 }
 
 func TestDSNCannotTurnOffReadOnlyDefault(t *testing.T) {
@@ -250,18 +294,25 @@ func TestServerDefaultsCannotChangeHowSQLIsRead(t *testing.T) {
 	}
 }
 
+// A value counts its length plus 24 bytes against max_bytes.
 func TestMaxBytesTruncates(t *testing.T) {
 	t.Parallel()
 	m := cleanApp(t, config.Defaults{MaxBytes: 100})
 
-	res := mustQuery(t, m, engine.Query{SQL: "SELECT repeat('x', 30) FROM generate_series(1, 10)"})
-	if len(res.Rows) != 3 || !res.Truncated || res.TruncatedReason != "max_bytes=100" {
-		t.Errorf("%d rows, truncated %v %q; want 3 rows, max_bytes=100", len(res.Rows), res.Truncated, res.TruncatedReason)
+	res := mustQuery(t, m, engine.Query{SQL: "SELECT repeat('x', 26) FROM generate_series(1, 10)"})
+	if len(res.Rows) != 2 || !res.Truncated || res.TruncatedReason != "max_bytes=100" {
+		t.Errorf("%d rows, truncated %v %q; want 2 rows, max_bytes=100", len(res.Rows), res.Truncated, res.TruncatedReason)
 	}
 
-	res = mustQuery(t, m, engine.Query{SQL: "SELECT repeat('x', 25) FROM generate_series(1, 4)"})
-	if len(res.Rows) != 4 || res.Truncated {
-		t.Errorf("exactly max_bytes: %d rows, truncated %v; want 4, not truncated", len(res.Rows), res.Truncated)
+	res = mustQuery(t, m, engine.Query{SQL: "SELECT repeat('x', 26) FROM generate_series(1, 2)"})
+	if len(res.Rows) != 2 || res.Truncated {
+		t.Errorf("exactly max_bytes: %d rows, truncated %v; want 2, not truncated", len(res.Rows), res.Truncated)
+	}
+
+	// Empty and NULL values are not free.
+	res = mustQuery(t, m, engine.Query{SQL: "SELECT '', NULL::text FROM generate_series(1, 10)"})
+	if len(res.Rows) != 2 || res.TruncatedReason != "max_bytes=100" {
+		t.Errorf("empty values: %d rows, truncated %q; want 2 rows, max_bytes=100", len(res.Rows), res.TruncatedReason)
 	}
 }
 

@@ -21,7 +21,7 @@ import (
 const typeNamesSQL = "SELECT oid, typname FROM pg_catalog.pg_type WHERE oid = ANY($1::pg_catalog.oid[])"
 
 // run executes q alone in a READ ONLY transaction that it always rolls back.
-func run(ctx context.Context, p *pgxpool.Pool, q Query, l Limits) (*result.Result, error) {
+func run(ctx context.Context, p *pgxpool.Pool, q Query, l limits) (*result.Result, error) {
 	tx, err := p.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func run(ctx context.Context, p *pgxpool.Pool, q Query, l Limits) (*result.Resul
 // It also turns standard_conforming_strings on, whatever the role or database
 // default: the guard parses SQL as Postgres does with it on, and with it off
 // a backslash in a '...' literal could move where the literal ends.
-func setup(l Limits, searchPath string) (string, []any) {
+func setup(l limits, searchPath string) (string, []any) {
 	sql := "SELECT pg_catalog.set_config('statement_timeout', $1, true)," +
 		" pg_catalog.set_config('lock_timeout', $2, true)," +
 		" pg_catalog.set_config('idle_in_transaction_session_timeout', $3, true)," +
@@ -62,7 +62,7 @@ func millis(d time.Duration) string {
 
 // collect runs q in tx and keeps its rows, as Postgres text, until one would
 // exceed a limit. It then cancels the rest of the query instead of reading it.
-func collect(ctx context.Context, tx pgx.Tx, q Query, l Limits) (*result.Result, error) {
+func collect(ctx context.Context, tx pgx.Tx, q Query, l limits) (*result.Result, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -83,38 +83,43 @@ func collect(ctx context.Context, tx pgx.Tx, q Query, l Limits) (*result.Result,
 		}
 	}
 	if err := rows.Err(); err != nil {
-		// A row wider than the per-message cap is a byte-budget overrun that
-		// pgx caught before buffering it, so truncate rather than error, like
-		// the collector's own MaxBytes cut.
-		if oversizedRow(err) {
-			c.truncate("max_bytes", c.limits.MaxBytes)
-			return c.res, nil
+		var tooBig *pgproto3.ExceededMaxBodyLenErr
+		if !errors.As(err, &tooBig) {
+			return nil, err
 		}
-		return nil, err
+		// pgx refused a message over the per-message cap harden set, after
+		// reading only its header, and closed the connection. Once the columns
+		// are described, that message is almost always a row: a byte-budget
+		// overrun, cut like the collector's own. Before, it can only be an
+		// error or a notice, such as one quoting a huge invalid value.
+		if len(c.res.Columns) == 0 {
+			return nil, fmt.Errorf("the server sent a %d-byte message, over the %d-byte limit (max_bytes plus 1 MiB); the connection was reset",
+				tooBig.ActualBodyLen, tooBig.MaxExpectedBodyLen)
+		}
+		c.truncate("max_bytes", c.limits.MaxBytes)
+		return c.res, nil
 	}
 	return c.res, nil
 }
 
-// oversizedRow reports whether err is pgx rejecting a protocol message larger
-// than the per-message cap harden set from max_bytes.
-func oversizedRow(err error) bool {
-	var e *pgproto3.ExceededMaxBodyLenErr
-	return errors.As(err, &e)
-}
-
 // collector keeps rows until one would exceed a limit.
 type collector struct {
-	limits Limits
+	limits limits
 	res    *result.Result
 	bytes  int
 }
+
+// valueCost is the memory a kept value takes beyond its bytes: its slot in
+// the row and its string header. Counting it against max_bytes bounds memory
+// even for a result of many empty or NULL values.
+const valueCost = 24
 
 // add keeps one row of raw text values and reports whether it fit. A row that
 // does not fit truncates the result.
 func (c *collector) add(raw [][]byte) bool {
 	size := 0
 	for _, v := range raw {
-		size += len(v)
+		size += len(v) + valueCost
 	}
 	switch {
 	case len(c.res.Rows) >= c.limits.MaxRows:
