@@ -13,6 +13,7 @@ package guardtest
 //	[v1]         bypasses of this server's v1 first-word blocklist
 //	[lexer]      statement smuggling past a lexer that is not Postgres's own
 //	[policy]     the guard's own rules
+//	[redteam]    bypasses found by this server's red-team review
 
 // Case is SQL the guard must reject. Want is part of the reason, naming the
 // statement type or function where there is one.
@@ -364,6 +365,10 @@ var Rejected = []Case{
 	{`SELECT pg_logical_emit_message(true, 'p', 'x')`, "pg_logical_emit_message"},
 	// [policy] pg_logical_*: consumes a replication slot.
 	{`SELECT * FROM pg_logical_slot_get_changes('s', NULL, NULL)`, "pg_logical_slot_get_changes"},
+	// [redteam] pg_log_*: writes WAL, which READ ONLY does not stop and rollback does not undo.
+	{`SELECT pg_log_standby_snapshot()`, "pg_log_standby_snapshot"},
+	// [policy] pg_log_*: makes another backend write to the server log.
+	{`SELECT pg_log_backend_memory_contexts(pg_backend_pid())`, "pg_log_backend_memory_contexts"},
 	// [policy] pg_replication_*.
 	{`SELECT pg_replication_origin_create('o')`, "pg_replication_origin_create"},
 	// [policy] pg_create_*.

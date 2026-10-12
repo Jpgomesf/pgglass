@@ -358,6 +358,7 @@ var deniedPrefixes = []string{
 	"dblink",          // dblink, dblink_exec, ...: a second connection, outside the transaction
 	"lo_",             // large objects; lo_import and lo_export reach server files
 	"pg_logical_",     // logical decoding messages and slots
+	"pg_log_",         // pg_log_standby_snapshot writes WAL; pg_log_backend_memory_contexts makes another backend log
 	"pg_replication_", // replication origins and slots
 	"pg_create_",      // replication slots and restore points
 	"pg_drop_",        // replication slots
