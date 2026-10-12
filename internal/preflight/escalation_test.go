@@ -106,7 +106,7 @@ func TestAuditSuperuserSessionUserStopsAtItsAttributes(t *testing.T) {
 func TestAuditFailsClosedOnTheSessionUser(t *testing.T) {
 	boom := errors.New("connection reset")
 	replies := sessionUser()
-	replies[len(clean())+3] = reply{err: boom} // the session user's table writes
+	replies[len(clean())+tableWritesQuery-attributesQuery] = reply{err: boom} // the session user's
 	report, err := preflight.Audit(t.Context(), &script{replies: replies})
 	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "preflight: table writes: ") {
 		t.Errorf("error = %v, want one wrapping %v from the table writes", err, boom)
