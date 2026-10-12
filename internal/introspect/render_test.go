@@ -7,7 +7,8 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/introspect"
 )
 
-// renderer is declared in contract_test.go.
+type renderer interface{ Render() string }
+
 func wantRender(t *testing.T, name string, r renderer, want string) {
 	t.Helper()
 	if got := r.Render(); got != want {

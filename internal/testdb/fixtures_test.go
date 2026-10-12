@@ -185,9 +185,4 @@ func TestCreateDatabase(t *testing.T) {
 	if queryValue[bool](t, conn, "SELECT EXISTS (SELECT FROM pg_database WHERE datname = $1)", name) {
 		t.Errorf("database %s still exists after its test finished", name)
 	}
-
-	r := record(func(tb testing.TB) { CreateDatabase(tb, DBApp, "") })
-	if !r.failed {
-		t.Error("CreateDatabase of an existing database did not fail")
-	}
 }

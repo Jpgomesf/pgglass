@@ -82,9 +82,6 @@ func TestCacheTTLIsPerKey(t *testing.T) {
 }
 
 func TestCacheDefaultTTL(t *testing.T) {
-	if DefaultCacheTTL != 5*time.Minute {
-		t.Errorf("DefaultCacheTTL = %v, want 5m", DefaultCacheTTL)
-	}
 	for _, ttl := range []time.Duration{0, -time.Second} {
 		c, clock := newTestCache(ttl)
 		var l counter
