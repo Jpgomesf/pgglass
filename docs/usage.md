@@ -52,7 +52,7 @@ Only what the connection's role can read shows up.
 | `connection` | Connection name |
 | `sql` | One statement; `$1`, `$2`, ... take `params` |
 | `params` | Values for `$1`, `$2`, ...: strings, numbers (sent exactly as written), booleans or `null`. Pass arrays and objects as strings and cast them, e.g. `'{1,2}'` with `$1::int[]` |
-| `schema` | `search_path` for this query only; default: the connection's `default_schema` |
+| `schema` | `search_path` for this query only; default: the connection's `default_schema`. `net`, `aws_s3` and `aws_lambda`, whose functions the guard denies, are refused |
 | `format` | `tsv`, `json` or `markdown`; default: `format` in config (`tsv`) |
 | `max_rows` | Row cap for this query; it can only lower the configured `max_rows` |
 
@@ -106,6 +106,7 @@ Spill files live in `mcp-postgres` under your user cache directory (`~/Library/C
 A failed call returns a result with `isError` set and the reason as text:
 
 - `query rejected: DeleteStmt is not allowed: only SELECT, EXPLAIN SELECT and SHOW are` when the statement is not read-only
+- `query rejected: schema net is not allowed as the search_path: its functions are denied` when `schema`, or `default_schema` without it, names a schema whose functions the guard denies
 - Postgres errors as psql prints them, with SQLSTATE and position, then detail and hint:
 
   ```

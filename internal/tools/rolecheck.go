@@ -11,10 +11,10 @@ import (
 )
 
 // roleChecks audits the role of each connection once, on first use, and
-// applies role_check: strict refuses a role with a critical finding
-// (superuser, server program or file roles, dblink, http, net or lo_export)
-// and shows warnings, such as table writes, once; warn shows the findings
-// once; off skips the audit.
+// applies role_check: strict refuses a role with a critical finding, a way
+// out of the read-only transaction such as superuser or EXECUTE on dblink
+// (see preflight.SeverityCritical), and shows warnings, such as table writes,
+// once; warn shows the findings once; off skips the audit.
 type roleChecks struct {
 	mode  string // config.RoleCheck*
 	audit func(ctx context.Context, conn string) (preflight.Report, error)

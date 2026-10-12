@@ -117,7 +117,7 @@ track_extra_parameters = default_transaction_read_only
 | `source` | string | *required* | `direct`, `env`, `dotenv`, or `aws_secrets_manager` |
 | `readonly` | bool | — | Deprecated and ignored: the server is always read-only. Logs a warning at startup |
 | `requires_vpn` | bool | `false` | TCP reachability check before each new database connection |
-| `default_schema` | string | `""` | `search_path` for `pg_query` when the call names no `schema`, and the schema `pg_schema` looks a `table` up in. A schema whose functions the guard denies, such as `net`, cannot be the `search_path` |
+| `default_schema` | string | `""` | `search_path` for `pg_query` when the call names no `schema`, and the schema `pg_schema` looks a `table` up in. `net`, `aws_s3` and `aws_lambda`, whose functions the guard denies, are refused as the `search_path`: with one of them here, `pg_query` calls that name no `schema` fail |
 
 ## Defaults
 
@@ -142,15 +142,15 @@ Every field is optional: a missing or zero value takes the default. Numbers must
 | `statement_timeout_seconds` | `30` | Max query execution time |
 | `lock_timeout_seconds` | `5` | Max time a query waits for a lock |
 | `max_rows` | `1000` | Rows a query returns before its result is truncated. A `pg_query` call can lower it with `max_rows`, never raise it. Also caps `pg_search` |
-| `max_bytes` | `1048576` (1 MiB) | Bytes a query's result holds before it is truncated: each value counts its length plus 24, so empty and NULL values count too. A server message larger than `max_bytes` plus 1 MiB is not read: the connection is reset, and the result is truncated there if it was a row, or the query fails if it was an error |
-| `spill_ttl_hours` | `24` | How long spill files of large results are kept |
+| `max_bytes` | `1048576` (1 MiB) | Bytes a query's result holds before it is truncated: each value counts its length plus 24, so empty and NULL values count too. A server message larger than `max_bytes` plus 1 MiB is not read: the connection is reset and, once the columns are described, the result is truncated there; before, the query fails |
+| `spill_ttl_hours` | `24` | How long spill files of large results are kept. They live in `mcp-postgres` under the user cache directory, and cleanup removes every spill file there older than this, including those of other server instances that share the directory |
 | `format` | `tsv` | Default result format of `pg_query`: `tsv`, `json` or `markdown` |
 | `role_check` | `warn` | What to do when a connection's role can do more than read (see below) |
 | `readonly` | — | Deprecated and ignored: the server is always read-only. Logs a warning at startup |
 
 ### Role check
 
-On a connection's first use, the server audits the role it connects as, once, and keeps the report. `pg_list_connections` shows it.
+On a connection's first use, the server audits the role it connects as, once, and keeps the report. `pg_list_connections` shows it. When the connection sets another role, with `options=-c role=...` in the DSN or `ALTER ROLE ... SET role`, the session user it logged in as is audited too, since `RESET ROLE` returns to it; those findings start with `session user <name>: `.
 
 | `role_check` | Effect |
 |--------------|--------|
@@ -158,7 +158,7 @@ On a connection's first use, the server audits the role it connects as, once, an
 | `warn` | Findings are shown once, at the top of the first response on the connection |
 | `off` | No audit |
 
-Critical findings: superuser; membership in `pg_execute_server_program` or `pg_write_server_files`; `EXECUTE` on `dblink*`, `http*`, `net.*` or `lo_export`. Warnings: `BYPASSRLS`, `CREATEROLE`, `CREATEDB`; membership in `pg_read_server_files` or `pg_signal_backend`; `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on a relation; `EXECUTE` on `lo_import` or `pg_read_file`. Only objects in schemas the role can use count.
+Critical findings, each a way out of the read-only transaction: superuser; membership in a superuser role, which `SET ROLE` reaches; membership in `pg_execute_server_program` or `pg_write_server_files`; `EXECUTE` on `dblink*`, `pg_background*`, `http*`, `net.*`, `aws_s3.*`, `aws_lambda.*` or `lo_export`. Warnings: `BYPASSRLS`, `CREATEROLE`, `CREATEDB`; membership in `pg_read_server_files` or `pg_signal_backend`; `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on a relation; `EXECUTE` on `lo_import`, `pg_read_file`, `pg_read_binary_file` or `pg_log_backend_memory_contexts`. Only objects in schemas the role can use count.
 
 If the audit itself fails, it is retried on the next call; meanwhile `strict` refuses the connection and `warn` lets calls through with a note.
 

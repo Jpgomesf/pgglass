@@ -83,7 +83,7 @@ This is the most common type of contribution. The process:
    ```
 4. If your source needs new fields on `Connection`, add them to `internal/config/config.go`
 5. Add tests in `internal/resolver/source_yourname_test.go`
-6. Document the source in `README.md` under Configuration Reference
+6. Document the source in `docs/configuration.md` under Credential Sources
 
 No changes to `resolver.go`, `main.go`, or any other source files should be needed.
 
@@ -128,8 +128,11 @@ go test ./internal/resolver/...  # single package
 
 Integration tests run a throwaway Postgres container through `internal/testdb`
 (one per test package; set `MCP_PG_IMAGE` to pick the image, default
-`postgres:17-alpine`). Without Docker they fail rather than skip. A package that
-uses `testdb` needs `func TestMain(m *testing.M) { testdb.Main(m) }`.
+`postgres:17-alpine`, which `testdb.Image()` returns). Without Docker they fail
+rather than skip. A package that uses `testdb` needs
+`func TestMain(m *testing.M) { testdb.Main(m) }`. Read through the engine, as
+the server does, with `testdb.Querier(t, role, db)`; set up or observe from
+outside it with `testdb.Conn(t, role, db)` and `testdb.Value`.
 
 ## Releases
 
