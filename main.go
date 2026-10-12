@@ -1,88 +1,64 @@
+// Command mcp-postgres is a stdio MCP server that gives AI agents read-only
+// access to the PostgreSQL connections in config.json.
 package main
 
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/pool"
+	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/resolver"
+	"github.com/jpgomesf/mcp-postgres/internal/spill"
 	"github.com/jpgomesf/mcp-postgres/internal/tools"
 )
 
+// version is set at release time (goreleaser's -X main.version).
+var version = "dev"
+
 func main() {
+	// stdout carries the protocol: every log line goes to stderr.
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	if err := run(context.Background(), logger); err != nil {
+		logger.Error("mcp-postgres stopped", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
+}
+
+// run loads config.json and serves the tools over stdin and stdout until the
+// client disconnects.
+func run(ctx context.Context, logger *slog.Logger) error {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("failed to load config: %v", err)
+		return err
 	}
-
 	if err := validateSources(cfg); err != nil {
-		log.Fatalf("config validation: %v", err)
+		return err
+	}
+	if cfg.UsesReadonly() {
+		logger.Warn("config: readonly is deprecated and ignored: the server is always read-only")
 	}
 
-	connPool := pool.New(config.DefaultConnectionTTL)
-	h := &tools.Handlers{Config: cfg, Pool: connPool}
-
-	server := mcp.NewServer(
-		&mcp.Implementation{
-			Name:    "mcp-postgres",
-			Version: "1.0.0",
-		},
-		nil,
-	)
-
-	server.AddTool(&mcp.Tool{
-		Name: "pg_list_connections",
-		Description: "List all configured database connections and their status. " +
-			"Use pg_schema to discover live schemas for a specific connection.",
-		InputSchema: map[string]any{
-			"type":       "object",
-			"properties": map[string]any{},
-		},
-	}, h.HandleListConnections)
-
-	server.AddTool(&mcp.Tool{
-		Name: "pg_query",
-		Description: "Execute a read-only SQL query against a named database connection. " +
-			"Always runs inside a READ ONLY transaction. " +
-			"Use pg_schema to inspect available tables first. " +
-			"Pass 'schema' to set the search_path before executing. " +
-			"Multiple pg_query calls can run in parallel against different connections for faster results.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"connection": map[string]any{"type": "string", "description": "Connection name from config.json."},
-				"sql":        map[string]any{"type": "string", "description": "SQL SELECT statement to execute. Must be read-only."},
-				"schema":     map[string]any{"type": "string", "description": "Optional schema to set as search_path."},
-			},
-			"required": []string{"connection", "sql"},
-		},
-	}, h.HandleQuery)
-
-	server.AddTool(&mcp.Tool{
-		Name: "pg_schema",
-		Description: "List tables and their columns for a named database connection. " +
-			"Auto-discovers all available schemas unless 'schema' is specified. " +
-			"Use this before pg_query to understand what is available. " +
-			"Can be called in parallel across multiple connections.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"connection": map[string]any{"type": "string", "description": "Connection name from config.json."},
-				"schema":     map[string]any{"type": "string", "description": "Optional schema filter."},
-				"table":      map[string]any{"type": "string", "description": "Optional table name filter."},
-			},
-			"required": []string{"connection"},
-		},
-	}, h.HandleSchema)
-
-	if err := server.Run(context.Background(), &mcp.StdioTransport{}); err != nil {
-		log.Fatalf("server error: %v", err)
+	store := &spill.Store{
+		Dir:            filepath.Join(os.TempDir(), "mcp-postgres"),
+		TTL:            time.Duration(cfg.Defaults.SpillTTLHours) * time.Hour,
+		InlineMaxBytes: config.InlineMaxBytes,
 	}
+	if err := store.Cleanup(); err != nil {
+		logger.Warn("spill cleanup failed", slog.String("error", err.Error()))
+	}
+
+	eng := engine.New(&cfg)
+	defer eng.Close()
+	server := tools.NewServer(tools.New(cfg, eng, store, os.Stderr), version)
+	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
 func validateSources(cfg config.Config) error {

@@ -1,18 +1,13 @@
 package preflight_test
 
 import (
-	"context"
 	_ "embed" // fixture SQL
-	"errors"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-
+	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/engine/enginetest"
 	"github.com/jpgomesf/mcp-postgres/internal/preflight"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
 
@@ -24,13 +19,22 @@ var fixtureSQL string
 // dbFixture holds testdata/fixture.sql: the roles pf_powers, pf_writer and pf_caller.
 const dbFixture = "preflight"
 
-// The engine may use either pgx protocol, so every audit runs under both.
+// Every audit runs through the engine the server uses, and through the
+// simple protocol.
 var queriers = []struct {
 	name string
 	new  func(testing.TB, string) engine.Querier
 }{
+	{"engine", engineQuerier},
 	{"simple protocol", enginetest.Querier},
-	{"extended protocol", extendedQuerier},
+}
+
+// engineQuerier queries dsn through an engine.Manager, as the server does.
+func engineQuerier(t testing.TB, dsn string) engine.Querier {
+	t.Helper()
+	m := engine.New(&config.Config{Connections: map[string]config.Connection{"db": {Source: "direct", DSN: dsn}}})
+	t.Cleanup(m.Close)
+	return m.Querier("db")
 }
 
 func TestAudit(t *testing.T) {
@@ -93,67 +97,5 @@ func TestAudit(t *testing.T) {
 				}
 			})
 		}
-	}
-}
-
-// extendedQuerier is a test-only engine.Querier like enginetest.Querier, but
-// over pgx's default extended protocol, asking for text results. Each query
-// runs in its own READ ONLY transaction, always rolled back.
-func extendedQuerier(t testing.TB, dsn string) engine.Querier {
-	t.Helper()
-	conn, err := pgx.Connect(t.Context(), dsn)
-	if err != nil {
-		t.Fatalf("connect: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return extended{conn: conn}
-}
-
-type extended struct {
-	conn *pgx.Conn
-}
-
-func (e extended) Query(ctx context.Context, query engine.Query) (*result.Result, error) {
-	tx, err := e.conn.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = tx.Rollback(context.Background()) }()
-
-	args := append([]any{pgx.QueryResultFormats{pgx.TextFormatCode}}, query.Params...)
-	rows, err := tx.Query(ctx, query.SQL, args...)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	res := &result.Result{Columns: make([]result.Column, len(rows.FieldDescriptions()))}
-	for rows.Next() {
-		values := make([]*string, len(rows.RawValues()))
-		for i, v := range rows.RawValues() {
-			if v != nil {
-				s := string(v)
-				values[i] = &s
-			}
-		}
-		res.Rows = append(res.Rows, values)
-	}
-	return res, rows.Err()
-}
-
-// The test-only querier must hold the line the engine holds: read only.
-func TestExtendedQuerierIsReadOnly(t *testing.T) {
-	q := extendedQuerier(t, testdb.DSN(t, testdb.RoleLeaky, testdb.DBApp)) // may INSERT into app.audit_log
-	_, err := q.Query(t.Context(), engine.Query{SQL: "INSERT INTO app.audit_log (message) VALUES ($1)", Params: []any{"nope"}})
-	var pgErr *pgconn.PgError
-	if !errors.As(err, &pgErr) || pgErr.Code != "25006" {
-		t.Fatalf("INSERT error = %v, want read_only_sql_transaction (25006)", err)
-	}
-	res, err := q.Query(t.Context(), engine.Query{SQL: "SELECT count(*) FROM app.audit_log WHERE message = $1", Params: []any{"nope"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := res.Rows[0][0]; got == nil || *got != "0" {
-		t.Errorf("count = %v, want text 0", got)
 	}
 }

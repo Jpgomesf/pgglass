@@ -8,13 +8,13 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"time"
 )
 
 const (
 	DefaultStatementTimeoutS = 30
-	DefaultConnectionTTL     = 5 * time.Minute
-	InlineMaxChars           = 10_000
+	// InlineMaxBytes caps a query result returned inline; a larger one is
+	// written to a spill file and summarized.
+	InlineMaxBytes = 10_000
 
 	DefaultLockTimeoutSeconds = 5
 	DefaultMaxRows            = 1000
@@ -44,24 +44,6 @@ var (
 	formats        = []string{FormatTSV, FormatJSON, FormatMarkdown}
 )
 
-// BlockedSQL contains SQL keywords that are never allowed.
-var BlockedSQL = map[string]bool{
-	"INSERT":   true,
-	"UPDATE":   true,
-	"DELETE":   true,
-	"DROP":     true,
-	"ALTER":    true,
-	"TRUNCATE": true,
-	"CREATE":   true,
-}
-
-// SystemSchemas are excluded from schema discovery.
-var SystemSchemas = map[string]bool{
-	"pg_catalog":         true,
-	"information_schema": true,
-	"pg_toast":           true,
-}
-
 // Config is the top-level configuration structure.
 type Config struct {
 	Defaults    Defaults              `json:"defaults"`
@@ -73,7 +55,7 @@ type Config struct {
 // before validating.
 type Defaults struct {
 	// Deprecated: ignored. The server is always read-only.
-	Readonly bool `json:"readonly"`
+	Readonly *bool `json:"readonly,omitempty"`
 
 	StatementTimeoutSeconds int    `json:"statement_timeout_seconds"`
 	LockTimeoutSeconds      int    `json:"lock_timeout_seconds"`
@@ -106,12 +88,6 @@ type Connection struct {
 	// Per-connection settings
 	RequiresVPN   bool   `json:"requires_vpn,omitempty"`
 	DefaultSchema string `json:"default_schema,omitempty"`
-}
-
-// IsReadonly always returns true: the server is always read-only and the
-// deprecated readonly settings are ignored.
-func (Connection) IsReadonly(Defaults) bool {
-	return true
 }
 
 // WithDefaults returns d with every unset (zero) setting replaced by its default.
@@ -165,21 +141,18 @@ func oneOf(key, value string, allowed []string) error {
 	return fmt.Errorf("defaults.%s must be one of %s, got %q", key, strings.Join(allowed, ", "), value)
 }
 
-// StatementTimeoutMS returns the statement timeout in milliseconds.
-func (cfg Config) StatementTimeoutMS() int {
-	if cfg.Defaults.StatementTimeoutSeconds > 0 {
-		return cfg.Defaults.StatementTimeoutSeconds * 1000
+// UsesReadonly reports whether the deprecated readonly key is set, in
+// defaults or in any connection.
+func (cfg Config) UsesReadonly() bool {
+	if cfg.Defaults.Readonly != nil {
+		return true
 	}
-	return DefaultStatementTimeoutS * 1000
-}
-
-// ConnNames returns the list of configured connection names.
-func (cfg Config) ConnNames() []string {
-	names := make([]string, 0, len(cfg.Connections))
-	for k := range cfg.Connections {
-		names = append(names, k)
+	for _, conn := range cfg.Connections {
+		if conn.Readonly != nil {
+			return true
+		}
 	}
-	return names
+	return false
 }
 
 // Parse decodes a config.json document, fills unset defaults and validates them.

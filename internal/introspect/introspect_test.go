@@ -11,8 +11,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/engine/enginetest"
 	"github.com/jpgomesf/mcp-postgres/internal/introspect"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
@@ -31,10 +31,15 @@ func loadLab(t *testing.T) {
 	testdb.CreateDatabase(t, labDB, labSQL)
 }
 
-// connect returns a Querier that reads database as role.
+// connect returns a Querier that reads database as role through the engine,
+// as the server does.
 func connect(t *testing.T, role, database string) engine.Querier {
 	t.Helper()
-	return enginetest.Querier(t, testdb.DSN(t, role, database))
+	m := engine.New(&config.Config{Connections: map[string]config.Connection{
+		"db": {Source: "direct", DSN: testdb.DSN(t, role, database)},
+	}})
+	t.Cleanup(m.Close)
+	return m.Querier("db")
 }
 
 // superuser opens a plain connection to database, for setup and for

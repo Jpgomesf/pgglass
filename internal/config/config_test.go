@@ -115,24 +115,22 @@ func TestParseRejectsMalformedJSON(t *testing.T) {
 	}
 }
 
-func TestParseAcceptsDeprecatedReadonly(t *testing.T) {
-	cfg, err := Parse([]byte(`{"defaults": {"readonly": false}, "connections": {"db": {"source": "direct", "readonly": false}}}`))
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if !cfg.Connections["db"].IsReadonly(cfg.Defaults) {
-		t.Error("IsReadonly = false, want true: the server is always read-only")
-	}
-}
-
-func TestIsReadonlyIgnoresDeprecatedSettings(t *testing.T) {
-	off := false
-	on := true
-	for _, conn := range []Connection{{}, {Readonly: &off}, {Readonly: &on}} {
-		for _, defaults := range []Defaults{{}, {Readonly: false}, {Readonly: true}} {
-			if !conn.IsReadonly(defaults) {
-				t.Errorf("IsReadonly(%+v, %+v) = false, want true", conn, defaults)
-			}
+func TestParseAcceptsAndReportsDeprecatedReadonly(t *testing.T) {
+	for _, tc := range []struct {
+		doc  string
+		uses bool
+	}{
+		{`{"connections": {"db": {"source": "direct"}}}`, false},
+		{`{"defaults": {"readonly": false}}`, true},
+		{`{"defaults": {"readonly": true}}`, true},
+		{`{"connections": {"a": {"source": "direct"}, "b": {"source": "direct", "readonly": false}}}`, true},
+	} {
+		cfg, err := Parse([]byte(tc.doc))
+		if err != nil {
+			t.Fatalf("Parse(%s): %v", tc.doc, err)
+		}
+		if got := cfg.UsesReadonly(); got != tc.uses {
+			t.Errorf("UsesReadonly() for %s = %v, want %v", tc.doc, got, tc.uses)
 		}
 	}
 }
@@ -156,15 +154,6 @@ func TestValidateRejectsUnsetValues(t *testing.T) {
 	}
 	if err := (Defaults{}).WithDefaults().Validate(); err != nil {
 		t.Errorf("Validate after WithDefaults: %v", err)
-	}
-}
-
-func TestStatementTimeoutMS(t *testing.T) {
-	if got := (Config{}).StatementTimeoutMS(); got != 30_000 {
-		t.Errorf("default = %d, want 30000", got)
-	}
-	if got := (Config{Defaults: Defaults{StatementTimeoutSeconds: 2}}).StatementTimeoutMS(); got != 2000 {
-		t.Errorf("explicit = %d, want 2000", got)
 	}
 }
 
