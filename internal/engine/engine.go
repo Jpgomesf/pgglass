@@ -48,7 +48,7 @@ type Limits struct {
 	StatementTimeout time.Duration // SET LOCAL statement_timeout
 	LockTimeout      time.Duration // SET LOCAL lock_timeout
 	MaxRows          int           // rows kept before the result is truncated
-	MaxBytes         int           // total bytes of cell values kept before the result is truncated
+	MaxBytes         int           // bytes kept before the result is truncated: each value's length plus valueCost
 }
 
 // Query is one SQL statement to run.

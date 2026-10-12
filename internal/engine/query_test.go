@@ -269,18 +269,25 @@ func TestServerDefaultsCannotChangeHowSQLIsRead(t *testing.T) {
 	}
 }
 
+// A value counts its length plus 24 bytes against max_bytes.
 func TestMaxBytesTruncates(t *testing.T) {
 	t.Parallel()
 	m := cleanApp(t, config.Defaults{MaxBytes: 100})
 
-	res := mustQuery(t, m, engine.Query{SQL: "SELECT repeat('x', 30) FROM generate_series(1, 10)"})
-	if len(res.Rows) != 3 || !res.Truncated || res.TruncatedReason != "max_bytes=100" {
-		t.Errorf("%d rows, truncated %v %q; want 3 rows, max_bytes=100", len(res.Rows), res.Truncated, res.TruncatedReason)
+	res := mustQuery(t, m, engine.Query{SQL: "SELECT repeat('x', 26) FROM generate_series(1, 10)"})
+	if len(res.Rows) != 2 || !res.Truncated || res.TruncatedReason != "max_bytes=100" {
+		t.Errorf("%d rows, truncated %v %q; want 2 rows, max_bytes=100", len(res.Rows), res.Truncated, res.TruncatedReason)
 	}
 
-	res = mustQuery(t, m, engine.Query{SQL: "SELECT repeat('x', 25) FROM generate_series(1, 4)"})
-	if len(res.Rows) != 4 || res.Truncated {
-		t.Errorf("exactly max_bytes: %d rows, truncated %v; want 4, not truncated", len(res.Rows), res.Truncated)
+	res = mustQuery(t, m, engine.Query{SQL: "SELECT repeat('x', 26) FROM generate_series(1, 2)"})
+	if len(res.Rows) != 2 || res.Truncated {
+		t.Errorf("exactly max_bytes: %d rows, truncated %v; want 2, not truncated", len(res.Rows), res.Truncated)
+	}
+
+	// Empty and NULL values are not free.
+	res = mustQuery(t, m, engine.Query{SQL: "SELECT '', NULL::text FROM generate_series(1, 10)"})
+	if len(res.Rows) != 2 || res.TruncatedReason != "max_bytes=100" {
+		t.Errorf("empty values: %d rows, truncated %q; want 2 rows, max_bytes=100", len(res.Rows), res.TruncatedReason)
 	}
 }
 

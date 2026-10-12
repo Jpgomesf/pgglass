@@ -84,7 +84,7 @@ func collectAll(limits Limits, rows ...[][]byte) (*result.Result, int) {
 }
 
 func TestCollectorLimits(t *testing.T) {
-	four := rawRow("ab", "cd") // 4 bytes
+	row := rawRow("ab", "cd") // 4 bytes of values, 52 with their valueCost
 	for _, tc := range []struct {
 		name      string
 		limits    Limits
@@ -92,18 +92,18 @@ func TestCollectorLimits(t *testing.T) {
 		wantKept  int
 		wantTrunc string
 	}{
-		{"under both limits", Limits{MaxRows: 5, MaxBytes: 100}, 3, 3, ""},
-		{"exactly max_rows", Limits{MaxRows: 3, MaxBytes: 100}, 3, 3, ""},
-		{"one past max_rows", Limits{MaxRows: 3, MaxBytes: 100}, 4, 3, "max_rows=3"},
-		{"exactly max_bytes", Limits{MaxRows: 100, MaxBytes: 12}, 3, 3, ""},
-		{"one byte short", Limits{MaxRows: 100, MaxBytes: 11}, 3, 2, "max_bytes=11"},
-		{"first row too big", Limits{MaxRows: 100, MaxBytes: 3}, 1, 0, "max_bytes=3"},
-		{"max_rows checked first", Limits{MaxRows: 1, MaxBytes: 4}, 2, 1, "max_rows=1"},
+		{"under both limits", Limits{MaxRows: 5, MaxBytes: 1000}, 3, 3, ""},
+		{"exactly max_rows", Limits{MaxRows: 3, MaxBytes: 1000}, 3, 3, ""},
+		{"one past max_rows", Limits{MaxRows: 3, MaxBytes: 1000}, 4, 3, "max_rows=3"},
+		{"exactly max_bytes", Limits{MaxRows: 100, MaxBytes: 156}, 3, 3, ""},
+		{"one byte short", Limits{MaxRows: 100, MaxBytes: 155}, 3, 2, "max_bytes=155"},
+		{"first row too big", Limits{MaxRows: 100, MaxBytes: 51}, 1, 0, "max_bytes=51"},
+		{"max_rows checked first", Limits{MaxRows: 1, MaxBytes: 52}, 2, 1, "max_rows=1"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			rows := make([][][]byte, tc.rows)
 			for i := range rows {
-				rows[i] = four
+				rows[i] = row
 			}
 			res, kept := collectAll(tc.limits, rows...)
 			if kept != tc.wantKept || len(res.Rows) != tc.wantKept {
@@ -116,9 +116,28 @@ func TestCollectorLimits(t *testing.T) {
 	}
 }
 
+// Empty and NULL values take memory too: 1,600 empty columns once weighed
+// nothing, so 1,000 such rows fit any byte budget.
+func TestCollectorCountsEmptyAndNullValues(t *testing.T) {
+	empty := make([][]byte, 1600)
+	for i := range empty {
+		if i%2 == 0 {
+			empty[i] = []byte{} // the other half stays NULL
+		}
+	}
+	rows := make([][][]byte, 1000)
+	for i := range rows {
+		rows[i] = empty
+	}
+	res, kept := collectAll(Limits{MaxRows: 1000, MaxBytes: 1 << 20}, rows...)
+	if want := (1 << 20) / (1600 * valueCost); kept != want || res.TruncatedReason != "max_bytes=1048576" {
+		t.Errorf("kept %d rows, truncated %q; want %d, max_bytes=1048576", kept, res.TruncatedReason, want)
+	}
+}
+
 func TestCollectorKeepsNullDistinctAndCopiesValues(t *testing.T) {
 	raw := rawRow("\x00", "", "abc")
-	res, _ := collectAll(Limits{MaxRows: 10, MaxBytes: 3}, raw) // NULL and "" weigh nothing
+	res, _ := collectAll(Limits{MaxRows: 10, MaxBytes: 3 + 3*valueCost}, raw)
 	if len(res.Rows) != 1 {
 		t.Fatalf("rows = %v, want one", res.Rows)
 	}

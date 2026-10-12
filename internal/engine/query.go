@@ -109,12 +109,17 @@ type collector struct {
 	bytes  int
 }
 
+// valueCost is the memory a kept value takes beyond its bytes: its slot in
+// the row and its string header. Counting it against max_bytes bounds memory
+// even for a result of many empty or NULL values.
+const valueCost = 24
+
 // add keeps one row of raw text values and reports whether it fit. A row that
 // does not fit truncates the result.
 func (c *collector) add(raw [][]byte) bool {
 	size := 0
 	for _, v := range raw {
-		size += len(v)
+		size += len(v) + valueCost
 	}
 	switch {
 	case len(c.res.Rows) >= c.limits.MaxRows:
