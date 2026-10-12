@@ -95,9 +95,15 @@ No changes to `resolver.go`, `main.go`, or any other source files should be need
 ├── internal/
 │   ├── config/                          # types, constants, config loader
 │   ├── resolver/                        # CredentialSource interface + implementations
-│   ├── pool/                            # connection pool, DSN helpers
-│   ├── output/                          # result formatting
-│   └── tools/                           # MCP tool handlers
+│   ├── guard/                           # parses SQL, rejects anything but one read-only statement
+│   ├── preflight/                       # audits what a connection's role can do beyond reading
+│   ├── engine/                          # connection pools, READ ONLY rolled-back queries, limits
+│   ├── result/                          # a query result as Postgres text
+│   ├── render/                          # tsv, csv, json and markdown output
+│   ├── spill/                           # writes large results to files and summarizes them
+│   ├── introspect/                      # schema descriptions from the system catalogs
+│   ├── tools/                           # MCP tool handlers and audit log
+│   └── testdb/                          # disposable Postgres for integration tests
 ```
 
 - `internal/` prevents external import — all packages are internal by design

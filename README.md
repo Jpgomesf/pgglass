@@ -1,16 +1,17 @@
 # mcp-postgres
 
-An [MCP](https://modelcontextprotocol.io) server that gives AI assistants read-only access to PostgreSQL databases.
+An [MCP](https://modelcontextprotocol.io) server that gives AI agents read-only access to PostgreSQL databases, built to be pointed at production: the server, not the model, holds the line.
 
-## Exposed Tools
+## Tools
 
 | Tool | Description |
 |------|-------------|
-| `pg_list_connections` | List all configured connections and their status |
-| `pg_schema` | Discover tables, columns, and types for a connection |
-| `pg_query` | Execute a read-only SQL query |
+| `pg_list_connections` | List the configured connections and their role-check status |
+| `pg_schema` | Describe a database step by step: schemas, then relations, then one relation in detail |
+| `pg_search` | Find relations, columns and functions by name |
+| `pg_query` | Run one read-only statement and return its rows as TSV, JSON or Markdown |
 
-All tools support **parallel execution** — query multiple databases simultaneously.
+Calls run in parallel, across connections and on the same one. See the [usage guide](docs/usage.md).
 
 ## Install
 
@@ -33,19 +34,19 @@ Create `config.json` next to the binary:
 ```json
 {
   "defaults": {
-    "readonly": true,
-    "statement_timeout_seconds": 30
+    "statement_timeout_seconds": 30,
+    "role_check": "strict"
   },
   "connections": {
     "my-db": {
       "source": "direct",
-      "dsn": "postgres://user:password@localhost:5432/mydb"
+      "dsn": "postgres://readonly_user:password@localhost:5432/mydb"
     }
   }
 }
 ```
 
-Four credential sources are supported: `direct`, `env`, `dotenv`, and `aws_secrets_manager`. See [Configuration](docs/configuration.md) for details.
+Credentials come from `direct`, `env`, `dotenv` or `aws_secrets_manager`. See [Configuration](docs/configuration.md) for every setting.
 
 ## Add to Claude Code
 
@@ -62,22 +63,32 @@ Four credential sources are supported: `direct`, `env`, `dotenv`, and `aws_secre
 
 Add to `~/.claude.json` (global) or `.claude/settings.json` (per-project).
 
+## Safety model
+
+The calling agent is treated as untrusted: instructions can reach it through the data it reads (prompt injection). These layers hold whatever SQL it sends.
+
+1. **The database role is the real boundary.** The server never gives the agent more than the role it connects as, so connect as a role that can read only what the agent should see. Row-level security applies as usual.
+2. **The role is checked.** On a connection's first use, the server audits its role: superuser; `BYPASSRLS`, `CREATEROLE`, `CREATEDB`; membership in `pg_execute_server_program`, `pg_write_server_files`, `pg_read_server_files` or `pg_signal_backend`; write privileges on tables and views; `EXECUTE` on `dblink*`, `http*`, `net.*`, `lo_export`, `lo_import` and `pg_read_file`. With `role_check: strict`, a connection with a critical finding is refused. With `warn` (the default), the findings come with the first response and in `pg_list_connections`.
+3. **SQL is parsed, not pattern-matched.** `pg_query` parses each statement with the Postgres parser (libpg_query) and accepts exactly one `SELECT` (with `VALUES`, `TABLE` and set operations), `EXPLAIN [ANALYZE]` of one, or `SHOW`. Everything else is rejected: DML, DDL, `SET`, `COPY`, `DO`, `CALL`, `MERGE`, `PREPARE`, `LOCK`, transaction control, data-modifying `WITH`, `SELECT INTO` and `FOR UPDATE`/`FOR SHARE`. So are calls, anywhere in the statement and however spelled (`(x).f` included), to functions that reach outside the transaction or run SQL passed as text: `dblink*`, `lo_*`, server-file functions such as `pg_read_file`, `pg_terminate_backend`, `set_config`, `nextval`/`setval`, session advisory locks, replication-slot and backup functions, statistics resets, `http*`, `net.*`, `query_to_xml` and others.
+4. **Every statement runs read-only and is rolled back.** Each one runs alone, over the extended protocol, in a `READ ONLY` transaction that is always rolled back, with `statement_timeout` and `lock_timeout` set for that transaction only. Sessions start with `default_transaction_read_only=on`, which no DSN can turn off, and `client_encoding=UTF8`. `standard_conforming_strings` is forced on, so Postgres reads the SQL exactly as the parser did.
+5. **Results are bounded.** Rows past `max_rows` or `max_bytes` are not read: the rest of the query is cancelled on the server. A result whose output would exceed 10 KB is written to a private CSV file (mode 0600) and summarized.
+6. **Calls are audited.** Each tool call writes one JSON line to stderr: tool, connection, SQL hash and length, duration, rows, outcome and SQLSTATE. SQL text, parameters and values are never logged.
+
+What these layers do not cover:
+
+- The parser knows function names, not function bodies. A function the role may execute that calls `dblink` or another escape internally, typically `SECURITY DEFINER`, acts outside the transaction. Grant `EXECUTE` with that in mind; the role check flags only the functions listed above.
+- Reading is the point: whatever the role can `SELECT`, the agent can read and repeat.
+- A superuser connection has no role boundary. The role check flags it as critical, so `strict` refuses it; under `warn`, the parser and the read-only transaction are all that stand between the agent and the server's files and programs. Use `strict`, or a role that is not a superuser.
+- A query may use the database's CPU and I/O, and hold `ACCESS SHARE` locks that delay DDL, until `statement_timeout` ends it.
+
 ## Documentation
 
 | Doc | Description |
 |-----|-------------|
-| [Usage Guide](docs/usage.md) | How to interact with the tools, parallel queries, tips |
-| [Configuration](docs/configuration.md) | Credential sources, connection options, validation rules, naming conventions |
+| [Usage Guide](docs/usage.md) | Tools, arguments, formats, large results, errors |
+| [Configuration](docs/configuration.md) | Credential sources, connection options, defaults, PgBouncer |
 | [Extending](docs/extending.md) | How to add custom credential sources (Vault, GCP, etc.) |
 | [Contributing](CONTRIBUTING.md) | Branch strategy, commit conventions, development workflow |
-
-## Security
-
-- Read-only transactions enforced by default
-- DDL/DML keywords blocked before reaching the database
-- Statement timeout prevents runaway queries
-- Credentials resolved at runtime, never logged
-- AWS secrets cached in-memory with 24h TTL
 
 ## License
 
