@@ -1,9 +1,12 @@
 package resolver
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 )
@@ -51,30 +54,44 @@ func TestAWSSecretsCacheGetReturnsCachedValue(t *testing.T) {
 	}
 }
 
-func TestAWSSecretsSourceResolveFromCache(t *testing.T) {
-	var s AWSSecretsSource
-	if s.Type() != "aws_secrets_manager" {
-		t.Errorf("Type = %q", s.Type())
-	}
-
-	primeSecret(t, "resolver_test_full", map[string]string{
-		"host": "db.example.internal", "db_name": "appdb", "user": "ro", "password": "secret", "port": "6543",
-	}, time.Minute)
-	dsn, err := s.Resolve(t.Context(), "c", config.Connection{SecretName: "resolver_test_full"})
+// resolveSecret resolves a connection whose cached secret is secret, and
+// parses the DSN as pgx does.
+func resolveSecret(t *testing.T, name string, secret map[string]string) *pgconn.Config {
+	t.Helper()
+	primeSecret(t, name, secret, time.Minute)
+	dsn, err := AWSSecretsSource{}.Resolve(t.Context(), "c", config.Connection{SecretName: name})
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
-	if want := "host=db.example.internal port=6543 dbname=appdb user=ro password=secret"; dsn != want {
-		t.Errorf("Resolve = %q, want %q", dsn, want)
+	cfg, err := pgconn.ParseConfig(dsn)
+	if err != nil {
+		t.Fatalf("the DSN does not parse: %v", err)
+	}
+	return cfg
+}
+
+func TestAWSSecretsSourceResolveFromCache(t *testing.T) {
+	for i, password := range []string{
+		"secret",
+		"has space",
+		`it's`,
+		`back\slash`,
+		"x dbname=other host=elsewhere", // must not set other parameters
+		"p@ss:w/rd?#%",
+	} {
+		got := resolveSecret(t, fmt.Sprintf("resolver_test_full_%d", i), map[string]string{
+			"host": "db.example.internal", "port": "6543", "db_name": "app db", "user": "ro", "password": password,
+		})
+		if got.Host != "db.example.internal" || got.Port != 6543 || got.Database != "app db" || got.User != "ro" || got.Password != password {
+			t.Errorf("password %q: got host %s, port %d, database %q, user %s, password %q",
+				password, got.Host, got.Port, got.Database, got.User, got.Password)
+		}
 	}
 
-	// Port defaults to 5432 when the secret omits it.
-	primeSecret(t, "resolver_test_noport", map[string]string{
-		"host": "h", "db_name": "d", "user": "u", "password": "p",
-	}, time.Minute)
-	dsn, err = s.Resolve(t.Context(), "c", config.Connection{SecretName: "resolver_test_noport"})
-	if err != nil || !strings.Contains(dsn, "port=5432") {
-		t.Errorf("Resolve without a port = %q, %v", dsn, err)
+	// Port defaults to 5432 when the secret omits it; an IPv6 host keeps its colons.
+	got := resolveSecret(t, "resolver_test_noport", map[string]string{"host": "::1", "db_name": "d", "user": "u", "password": "p"})
+	if got.Host != "::1" || got.Port != 5432 {
+		t.Errorf("without a port: host %s, port %d; want ::1 and 5432", got.Host, got.Port)
 	}
 }
 

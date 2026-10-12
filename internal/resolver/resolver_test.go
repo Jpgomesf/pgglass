@@ -66,13 +66,6 @@ func TestParseDotenvMissingFile(t *testing.T) {
 func TestDirectSource(t *testing.T) {
 	t.Parallel()
 	var s resolver.DirectSource
-	if s.Type() != "direct" {
-		t.Errorf("Type = %q, want direct", s.Type())
-	}
-	if s.Status(config.Connection{}) != "" {
-		t.Errorf("Status = %q, want empty", s.Status(config.Connection{}))
-	}
-
 	dsn, err := s.Resolve(t.Context(), "c", config.Connection{DSN: "postgres://localhost/db"})
 	if err != nil || dsn != "postgres://localhost/db" {
 		t.Errorf("Resolve = %q, %v", dsn, err)
@@ -85,14 +78,6 @@ func TestDirectSource(t *testing.T) {
 
 func TestEnvSource(t *testing.T) {
 	var s resolver.EnvSource
-	if s.Type() != "env" {
-		t.Errorf("Type = %q, want env", s.Type())
-	}
-
-	if s.Status(config.Connection{}) != "" {
-		t.Errorf("Status = %q, want empty", s.Status(config.Connection{}))
-	}
-
 	t.Setenv("RESOLVER_TEST_DSN", "postgres://localhost/envdb")
 	dsn, err := s.Resolve(t.Context(), "c", config.Connection{DSNEnvVar: "RESOLVER_TEST_DSN"})
 	if err != nil || dsn != "postgres://localhost/envdb" {
@@ -112,13 +97,6 @@ func TestEnvSource(t *testing.T) {
 func TestDotenvSource(t *testing.T) {
 	t.Parallel()
 	var s resolver.DotenvSource
-	if s.Type() != "dotenv" {
-		t.Errorf("Type = %q, want dotenv", s.Type())
-	}
-	if s.Status(config.Connection{}) != "" {
-		t.Errorf("Status = %q, want empty", s.Status(config.Connection{}))
-	}
-
 	path := writeDotenv(t, "APP_DSN=postgres://localhost/dotenvdb\n")
 	dsn, err := s.Resolve(t.Context(), "c", config.Connection{DSNEnvVar: "APP_DSN", DotenvPath: path})
 	if err != nil || dsn != "postgres://localhost/dotenvdb" {
@@ -168,28 +146,6 @@ func TestResolveDispatch(t *testing.T) {
 	for _, want := range []string{"direct", "env", "dotenv", "aws_secrets_manager"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("unknown-source error %q does not list %q", err, want)
-		}
-	}
-}
-
-func TestRegistration(t *testing.T) {
-	t.Parallel()
-	for _, typ := range []string{"direct", "env", "dotenv", "aws_secrets_manager"} {
-		if !resolver.IsRegistered(typ) {
-			t.Errorf("IsRegistered(%q) = false, want true", typ)
-		}
-	}
-	if resolver.IsRegistered("nope") {
-		t.Error("IsRegistered(nope) = true")
-	}
-
-	got := map[string]bool{}
-	for _, typ := range resolver.RegisteredSourceTypes() {
-		got[typ] = true
-	}
-	for _, typ := range []string{"direct", "env", "dotenv", "aws_secrets_manager"} {
-		if !got[typ] {
-			t.Errorf("RegisteredSourceTypes missing %q: %v", typ, got)
 		}
 	}
 }

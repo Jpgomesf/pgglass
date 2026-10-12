@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/url"
 	"sync"
 	"time"
 
@@ -47,11 +49,15 @@ func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn confi
 		port = "5432"
 	}
 
-	dsn := fmt.Sprintf(
-		"host=%s port=%s dbname=%s user=%s password=%s",
-		host, port, dbName, user, password,
-	)
-	return dsn, nil
+	// A URL escapes every value, so a password holding a space or a quote
+	// can neither break the DSN nor set another of its parameters.
+	dsn := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(user, password),
+		Host:   net.JoinHostPort(host, port),
+		Path:   "/" + dbName,
+	}
+	return dsn.String(), nil
 }
 
 // Status returns whether the AWS secret has been cached.

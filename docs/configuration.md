@@ -88,12 +88,12 @@ Example:
 
 The server accepts two PostgreSQL DSN formats, both passed directly to `pgx`:
 
-**URI format** (recommended for `direct`, `env`, `dotenv`):
+**URI format** (recommended for `direct`, `env`, `dotenv`; `aws_secrets_manager` builds one from the secret, escaping each value):
 ```
 postgres://user:password@host:5432/dbname?sslmode=require
 ```
 
-**Keyword/value format** (used internally by `aws_secrets_manager`):
+**Keyword/value format**:
 ```
 host=localhost port=5432 dbname=mydb user=admin password=secret
 ```
