@@ -546,6 +546,10 @@ var Rejected = []Case{
 	{`SELECT pg_try_advisory_lock_shared(42)`, "pg_try_advisory_lock_shared"},
 	// [policy] Called as a field.
 	{`SELECT (42::bigint).pg_advisory_lock`, "function pg_advisory_lock"},
+	// [redteam] Seeds random() for the session, past the rollback, as any role:
+	// EXECUTE is PUBLIC. Later calls on the pooled connection got the chosen
+	// sequence.
+	{`SELECT setseed(0.5)`, "setseed"},
 	// [policy] Statistics resets are not transactional.
 	{`SELECT pg_stat_reset()`, "pg_stat_reset"},
 	// [policy] Cluster-wide statistics.

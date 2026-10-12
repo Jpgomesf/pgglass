@@ -329,6 +329,10 @@ var deniedFunctions = map[string]bool{
 	// Settings and notifications.
 	"set_config": true,
 	"pg_notify":  true,
+	// The seed of random(), session state that the rollback does not undo:
+	// later calls on the pooled connection would get the sequence it chose.
+	// Every role may execute it.
+	"setseed": true,
 	// Sequences, which change outside the transaction.
 	"setval":  true,
 	"nextval": true,

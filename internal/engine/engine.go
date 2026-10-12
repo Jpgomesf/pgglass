@@ -3,11 +3,11 @@
 // back, under timeouts and result limits: Postgres refuses its table writes,
 // and the rollback undoes what else it changes transactionally. Neither
 // reaches what acts outside the transaction (dblink, server files and
-// programs, session advisory locks), writes in place (pg_log_standby_snapshot's
-// WAL record, pg_surgery, BRIN and GIN index maintenance) or takes a
-// transaction id, which no rollback gives back (txid_current):
-// internal/guard rejects those, and the connection's role should lack most
-// of them.
+// programs, session advisory locks, the seed setseed gives random()), writes
+// in place (pg_log_standby_snapshot's WAL record, pg_surgery, BRIN and GIN
+// index maintenance) or takes a transaction id, which no rollback gives back
+// (txid_current): internal/guard rejects those, and the connection's role
+// should lack most of them.
 package engine
 
 import (
