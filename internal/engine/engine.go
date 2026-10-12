@@ -94,9 +94,11 @@ type Manager struct {
 }
 
 // lazyPool is the pool of one connection. Its own lock serializes opening
-// it, so a slow connection never holds up the others.
+// it, so a slow connection never holds up the others. The lock is a 1-slot
+// channel so that a query waiting on a slow open can give up when its
+// context ends.
 type lazyPool struct {
-	mu   sync.Mutex
+	lock chan struct{}
 	pool *pgxpool.Pool
 }
 
@@ -128,7 +130,7 @@ func New(cfg *config.Config) *Manager {
 func (m *Manager) Query(ctx context.Context, conn string, q Query) (*result.Result, error) {
 	p, err := m.pool(ctx, conn)
 	if err != nil {
-		return nil, err
+		return nil, queryError(ctx, err)
 	}
 	ctx, cancel := context.WithTimeout(ctx, m.limits.StatementTimeout+deadlineGrace)
 	defer cancel()
@@ -167,11 +169,11 @@ func (m *Manager) Close() {
 	m.mu.Unlock()
 
 	for _, lp := range pools {
-		lp.mu.Lock()
+		lp.lock <- struct{}{}
 		if lp.pool != nil {
 			lp.pool.Close()
 		}
-		lp.mu.Unlock()
+		<-lp.lock
 	}
 }
 
@@ -191,8 +193,12 @@ func (m *Manager) pool(ctx context.Context, name string) (*pgxpool.Pool, error) 
 	if err != nil {
 		return nil, err
 	}
-	lp.mu.Lock()
-	defer lp.mu.Unlock()
+	select {
+	case lp.lock <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	defer func() { <-lp.lock }()
 	if lp.pool == nil {
 		// Close may have run since lazyPool returned; a pool opened now would leak.
 		if m.isClosed() {
@@ -218,7 +224,7 @@ func (m *Manager) lazyPool(name string) (*lazyPool, error) {
 	}
 	lp, ok := m.pools[name]
 	if !ok {
-		lp = &lazyPool{}
+		lp = &lazyPool{lock: make(chan struct{}, 1)}
 		m.pools[name] = lp
 	}
 	return lp, nil

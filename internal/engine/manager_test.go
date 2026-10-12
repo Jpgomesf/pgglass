@@ -170,6 +170,43 @@ func TestQueryWaitingOnOpenDoesNotOpenAfterClose(t *testing.T) {
 	}
 }
 
+// A query waiting for another to open the connection gives up when its own
+// context ends, instead of waiting out a slow resolve.
+func TestQueryWaitingOnOpenGivesUpWithItsContext(t *testing.T) {
+	name := stub.reset("open-wait-cancel")
+	release := stub.hold(name)
+	defer release()
+	m := managerFor(t, config.Defaults{}, map[string]config.Connection{name: {Source: "stub", DSN: "postgres://u:p@localhost:notaport/db"}})
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := m.Query(t.Context(), name, engine.Query{SQL: "SELECT 1"})
+		first <- err
+	}()
+	eventually(t, "the first query to start opening", func() bool { return stub.callCount(name) == 1 })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+	waiting := make(chan error, 1)
+	go func() {
+		_, err := m.Query(ctx, name, engine.Query{SQL: "SELECT 1"})
+		waiting <- err
+	}()
+	select {
+	case err := <-waiting:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("waiting query: err = %v, want its context's deadline", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Error("the waiting query ignored its context")
+	}
+
+	release()
+	if err := <-first; err == nil || !strings.Contains(err.Error(), "notaport") {
+		t.Errorf("first query: err = %v, want the DSN error", err)
+	}
+}
+
 func TestInvalidDSNErrorHidesPassword(t *testing.T) {
 	m := newManager(t, config.Defaults{}, "postgres://app:s3cret-pw@localhost:notaport/app")
 	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
