@@ -57,7 +57,7 @@ func TestRowsBeforeAnOversizedRowAreKept(t *testing.T) {
 	if len(res.Rows) != 2 || deref(res.Rows[1][0]) != "a" || res.TruncatedReason != "max_bytes=1048576" {
 		t.Errorf("%d rows, truncated %q; want the 2 rows before the oversized one, max_bytes=1048576", len(res.Rows), res.TruncatedReason)
 	}
-	watch := observer(t, testdb.DBApp)
+	watch := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
 	eventually(t, "the server to end the query", func() bool { return running(t, watch, "repeat('x', 64000000)") == 0 })
 	if got := value(t, m, "SELECT pg_backend_pid()"); got == pid {
 		t.Errorf("backend %s serves the next query: the connection was not reset", got)

@@ -53,9 +53,7 @@ func (r Relation) line() string {
 // view definition when there are any. Indexes that implement a constraint
 // are shown only as the constraint.
 func (t TableDetail) Render() string {
-	head := t.Relation
-	head.RLS = t.RLSEnabled
-	lines := []string{head.line()}
+	lines := []string{t.line()}
 	for _, c := range t.Columns {
 		lines = append(lines, "  "+c.line())
 	}

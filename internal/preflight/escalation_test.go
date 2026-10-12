@@ -40,7 +40,7 @@ func TestAuditEscalation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			report, err := preflight.Audit(t.Context(), engineQuerier(t, testdb.DSN(t, tt.login, database)))
+			report, err := preflight.Audit(t.Context(), testdb.Querier(t, tt.login, database))
 			if err != nil {
 				t.Fatal(err)
 			}

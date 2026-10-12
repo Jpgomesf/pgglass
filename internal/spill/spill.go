@@ -49,9 +49,10 @@ type Store struct {
 // Otherwise Output writes the full result as CSV to a new file under Dir,
 // named spill-<tool>-<conn>-<timestamp>-<random>.csv with tool and conn made
 // safe for file names, and returns a summary instead: row and column counts,
-// the truncation flag, per-column statistics, the first rows and the file
-// path. If the file cannot be written, Output returns as many leading rows as
-// fit in InlineMaxBytes, with a note saying why.
+// the truncation flag, the file path, the first 20 columns with their types
+// and as many of the first 5 rows as fit in InlineMaxBytes. If the file
+// cannot be written, Output returns as many leading rows as fit in
+// InlineMaxBytes, with a note saying why.
 //
 // Output runs Cleanup at most once an hour, ignoring its errors.
 func (s *Store) Output(tool, conn string, res *result.Result, f render.Format) (string, error) {
@@ -71,8 +72,9 @@ func (s *Store) Output(tool, conn string, res *result.Result, f render.Format) (
 	return summary(res, path, len(inline), s.InlineMaxBytes)
 }
 
-// Cleanup removes spill files in Dir older than TTL. It never touches files
-// it did not create: only regular files named like Output names them.
+// Cleanup removes the regular files in Dir that are named like spill files
+// and older than TTL, whichever Store wrote them. It leaves other files,
+// directories and symlinks alone.
 func (s *Store) Cleanup() error {
 	if s.TTL <= 0 || s.Dir == "" {
 		return nil

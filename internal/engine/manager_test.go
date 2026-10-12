@@ -58,7 +58,7 @@ func TestNewResolvesNothingUntilFirstUse(t *testing.T) {
 // connection after one use.
 func TestEachNewConnectionResolvesTheDSNAgain(t *testing.T) {
 	const role, envVar = "engine_rotating", "MCP_PG_ENGINE_ROTATING_DSN"
-	admin := observer(t, testdb.DBApp)
+	admin := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
 	exec := func(sql string) {
 		t.Helper()
 		if _, err := admin.Exec(t.Context(), sql); err != nil {

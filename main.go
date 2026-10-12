@@ -46,8 +46,14 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		logger.Warn("config: readonly is deprecated and ignored: the server is always read-only")
 	}
 
+	// A per-user directory: in a shared temp directory, another user could
+	// create it first and replace the files the agent is told to read.
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return fmt.Errorf("spill directory: %w", err)
+	}
 	store := &spill.Store{
-		Dir:            filepath.Join(os.TempDir(), "mcp-postgres"),
+		Dir:            filepath.Join(cacheDir, "mcp-postgres"),
 		TTL:            time.Duration(cfg.Defaults.SpillTTLHours) * time.Hour,
 		InlineMaxBytes: config.InlineMaxBytes,
 	}

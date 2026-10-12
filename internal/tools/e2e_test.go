@@ -1,18 +1,17 @@
 package tools_test
 
 import (
-	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
@@ -29,26 +28,6 @@ func appConns(t *testing.T) map[string]config.Connection {
 		"leaky": direct(testdb.DSN(t, testdb.RoleLeaky, testdb.DBApp)),
 		"super": direct(testdb.DSN(t, testdb.Superuser, testdb.DBApp)),
 	}
-}
-
-// observer connects to database as the superuser, outside the server.
-func observer(t *testing.T, database string) *pgx.Conn {
-	t.Helper()
-	conn, err := pgx.Connect(t.Context(), testdb.DSN(t, testdb.Superuser, database))
-	if err != nil {
-		t.Fatalf("connect observer: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return conn
-}
-
-func observe(t *testing.T, conn *pgx.Conn, sql string) string {
-	t.Helper()
-	var s string
-	if err := conn.QueryRow(t.Context(), sql).Scan(&s); err != nil {
-		t.Fatalf("observe %q: %v", sql, err)
-	}
-	return s
 }
 
 func args(connection, sql string, more ...any) map[string]any {
@@ -229,7 +208,7 @@ func TestSchemaIsCached(t *testing.T) {
 		t.Fatalf("first listing:\n%s", first)
 	}
 
-	if _, err := observer(t, name).Exec(t.Context(), "CREATE TABLE after_listing (id int)"); err != nil {
+	if _, err := testdb.Conn(t, testdb.Superuser, name).Exec(t.Context(), "CREATE TABLE after_listing (id int)"); err != nil {
 		t.Fatal(err)
 	}
 	if again := s.ok(t, "pg_schema", list); again != first {
@@ -238,6 +217,23 @@ func TestSchemaIsCached(t *testing.T) {
 	// pg_search is not cached: the new table is there.
 	if got := s.ok(t, "pg_search", map[string]any{"connection": "db", "pattern": "after_listing"}); got != "public.after_listing: table" {
 		t.Errorf("pg_search after_listing = %q", got)
+	}
+}
+
+// A description longer than the inline limit is cut at a line, with a note.
+func TestSchemaOutputIsCutToTheInlineLimit(t *testing.T) {
+	t.Parallel()
+	const name = "tools_many_tables"
+	testdb.CreateDatabase(t, name, `DO $$ BEGIN FOR i IN 1..500 LOOP
+		EXECUTE format('CREATE TABLE t%s (id int)', lpad(i::text, 3, '0'));
+	END LOOP; END $$`)
+	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{"db": direct(testdb.DSN(t, testdb.Superuser, name))}))
+
+	got := s.ok(t, "pg_schema", map[string]any{"connection": "db", "schema": "public"})
+	lines := strings.Split(got, "\n")
+	note := fmt.Sprintf("… %d of 500 lines shown (output limit %d bytes): use pg_search to find names", len(lines)-1, config.InlineMaxBytes)
+	if len(got) > config.InlineMaxBytes || len(lines) < 100 || !strings.HasPrefix(got, "public.t001: table") || lines[len(lines)-1] != note {
+		t.Errorf("pg_schema of 500 tables (%d bytes):\n%s", len(got), got)
 	}
 }
 
@@ -280,7 +276,9 @@ func TestListConnectionsShowsRoleChecks(t *testing.T) {
 	}
 }
 
-func TestRoleCheckStrictRefusesRolesThatCanWrite(t *testing.T) {
+// The superuser and ro_leaky, which may EXECUTE dblink, have critical
+// findings. Warnings alone, such as ro_leaky's INSERT, would not be refused.
+func TestRoleCheckStrictRefusesRolesWithCriticalFindings(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckStrict, appConns(t)))
 	for _, tc := range []struct {
@@ -361,32 +359,47 @@ func TestRoleCheckOffSkipsTheAudit(t *testing.T) {
 	}
 }
 
+// parallelRow matches the result of one query of the parallel test: its
+// parameter and the backend that ran it.
+var parallelRow = regexp.MustCompile(`^i\tn\tpid\tpg_sleep\n(\d+)\t1000\t(\d+)\t\n\(1 row\)$`)
+
+// Calls on one connection overlap: run one at a time, they would all reuse
+// one pooled session, so several backends show that they ran together.
 func TestParallelQueriesOnOneConnection(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
-	var wg sync.WaitGroup
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		pids = map[string]bool{}
+	)
 	for i := range 20 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			res, err := s.CallTool(t.Context(), &mcp.CallToolParams{Name: "pg_query", Arguments: args("clean",
-				"SELECT $1::int AS i, count(*) AS n, pg_sleep(0.05) FROM events WHERE id % 20 = $1", "params", []any{i})})
-			if err != nil {
-				t.Errorf("query %d: %v", i, err)
-				return
-			}
+				"SELECT $1::int AS i, count(*) AS n, pg_backend_pid() AS pid, pg_sleep(0.05) FROM events WHERE id % 20 = $1",
+				"params", []any{i})})
 			var text string // not resultText: t.Fatal must not run on this goroutine
-			if len(res.Content) == 1 {
+			if err == nil && len(res.Content) == 1 {
 				if c, ok := res.Content[0].(*mcp.TextContent); ok {
 					text = c.Text
 				}
 			}
-			if want := fmt.Sprintf("i\tn\tpg_sleep\n%d\t1000\t", i); res.IsError || !strings.HasPrefix(text, want) {
-				t.Errorf("query %d:\n%s\nwant it to start with\n%s", i, text, want)
+			m := parallelRow.FindStringSubmatch(text) // an error result does not match
+			if m == nil || m[1] != strconv.Itoa(i) {
+				t.Errorf("query %d: %v\n%s", i, err, text)
+				return
 			}
+			mu.Lock()
+			pids[m[2]] = true
+			mu.Unlock()
 		}()
 	}
 	wg.Wait()
+	if len(pids) < 2 {
+		t.Errorf("20 parallel calls ran on %d backend(s), want several", len(pids))
+	}
 	ok := 0
 	for _, line := range s.auditLines(t) {
 		if line.Tool == "pg_query" && line.Outcome == "ok" && line.Rows == 1 {
@@ -547,10 +560,10 @@ func TestBypassCorpusIsRejectedAndChangesNothing(t *testing.T) {
 		"app":      direct(testdb.DSN(t, testdb.Superuser, testdb.DBApp)),
 		"supabase": direct(testdb.DSN(t, testdb.Superuser, testdb.DBSupabase)),
 	}))
-	app, supabase := observer(t, testdb.DBApp), observer(t, testdb.DBSupabase)
+	app, supabase := testdb.Conn(t, testdb.Superuser, testdb.DBApp), testdb.Conn(t, testdb.Superuser, testdb.DBSupabase)
 	state := func() string {
-		return observe(t, app, stateSQL) + "\n" + observe(t, app, appRowsSQL) + "\n" +
-			observe(t, supabase, stateSQL) + "\n" + observe(t, supabase, supabaseRowsSQL)
+		return testdb.Value[string](t, app, stateSQL) + "\n" + testdb.Value[string](t, app, appRowsSQL) + "\n" +
+			testdb.Value[string](t, supabase, stateSQL) + "\n" + testdb.Value[string](t, supabase, supabaseRowsSQL)
 	}
 	before := state()
 	if !strings.Contains(before, "queued=0 ") || !strings.Contains(before, "events=20000 ") {
@@ -605,7 +618,7 @@ func TestBackslashCannotHideACallFromTheGuard(t *testing.T) {
 	if want := `v` + "\n" + `x\\', dblink_exec($$dbname=` + name + `$$, $$INSERT INTO t VALUES (1)$$) --` + "\n(1 row)"; !strings.HasSuffix(got, want) {
 		t.Errorf("result:\n%s\nwant it to end with\n%s", got, want)
 	}
-	if n := observe(t, observer(t, name), "SELECT count(*)::text FROM t"); n != "0" {
+	if n := testdb.Value[string](t, testdb.Conn(t, testdb.Superuser, name), "SELECT count(*)::text FROM t"); n != "0" {
 		t.Errorf("t has %s rows: the hidden dblink_exec ran", n)
 	}
 }

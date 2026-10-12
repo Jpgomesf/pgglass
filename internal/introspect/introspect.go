@@ -95,7 +95,6 @@ type TableDetail struct {
 	Columns     []Column
 	Indexes     []Index
 	Constraints []Constraint
-	RLSEnabled  bool
 	Policies    []Policy
 	Triggers    []string // user-defined triggers; internal constraint triggers are left out
 	Definition  string   // query of a view or materialized view; empty for tables

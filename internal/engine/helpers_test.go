@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/resolver"
@@ -28,9 +26,11 @@ func newManager(t *testing.T, d config.Defaults, dsn string) *engine.Manager {
 	return managerFor(t, d, map[string]config.Connection{db: {Source: "direct", DSN: dsn}})
 }
 
+// managerFor returns a Manager for conns with d, its unset settings at their
+// defaults. It is closed when t ends.
 func managerFor(t *testing.T, d config.Defaults, conns map[string]config.Connection) *engine.Manager {
 	t.Helper()
-	m := engine.New(&config.Config{Defaults: d, Connections: conns})
+	m := engine.New(&config.Config{Defaults: d.WithDefaults(), Connections: conns})
 	t.Cleanup(m.Close)
 	return m
 }
@@ -71,27 +71,6 @@ func deref(s *string) string {
 		return "NULL"
 	}
 	return *s
-}
-
-// observer connects to database as the superuser, outside the engine, to
-// observe the state queries leave behind.
-func observer(t *testing.T, database string) *pgx.Conn {
-	t.Helper()
-	conn, err := pgx.Connect(t.Context(), testdb.DSN(t, testdb.Superuser, database))
-	if err != nil {
-		t.Fatalf("connect observer: %v", err)
-	}
-	t.Cleanup(func() { _ = conn.Close(context.Background()) })
-	return conn
-}
-
-func observe(t *testing.T, conn *pgx.Conn, sql string, args ...any) string {
-	t.Helper()
-	var s string
-	if err := conn.QueryRow(t.Context(), sql, args...).Scan(&s); err != nil {
-		t.Fatalf("observe %q: %v", sql, err)
-	}
-	return s
 }
 
 // eventually fails t unless cond holds within a few seconds.

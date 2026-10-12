@@ -25,18 +25,18 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/result"
 )
 
-// Format is an output format. Its values match config.Format* for the
-// formats config accepts; CSV is for spill files.
+// Format is an output format: one of config.Formats, or CSV for spill files.
 type Format string
 
 // Formats.
 const (
-	TSV      Format = "tsv"
-	JSON     Format = "json"
-	Markdown Format = "markdown"
+	TSV      Format = config.FormatTSV
+	JSON     Format = config.FormatJSON
+	Markdown Format = config.FormatMarkdown
 	CSV      Format = "csv"
 )
 

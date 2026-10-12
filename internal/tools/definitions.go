@@ -1,6 +1,10 @@
 package tools
 
-import "github.com/modelcontextprotocol/go-sdk/mcp"
+import (
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/jpgomesf/mcp-postgres/internal/config"
+)
 
 // annotations hold for every tool: none changes anything.
 var annotations = &mcp.ToolAnnotations{
@@ -32,7 +36,7 @@ var queryTool = &mcp.Tool{
 		"schema":     prop("string", "search_path for this query; default: the connection's default_schema."),
 		"format": map[string]any{
 			"type":        "string",
-			"enum":        []string{"tsv", "json", "markdown"},
+			"enum":        config.Formats,
 			"description": "Result format; default from config.",
 		},
 		"max_rows": map[string]any{

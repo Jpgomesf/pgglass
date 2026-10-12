@@ -31,7 +31,7 @@ A connection's role is audited on its first use (see [role check](configuration.
 - `schema`: one line per table, view, materialized view or foreign table, `app.orders: table, ~50 rows, 48 kB`, with `RLS` when row-level security is on
 - `schema` and `table`: the relation in a compact DDL-like form, with column types, defaults, identity and generated columns, enum labels, comments, constraints, indexes, policies, triggers and, for views, the definition
 
-`table` without `schema` looks in the connection's `default_schema`. Names are matched exactly, unquoted, as the catalog stores them. Results are cached for 5 minutes.
+`table` without `schema` looks in the connection's `default_schema`. Names are matched exactly, unquoted, as the catalog stores them. Results are cached for 5 minutes. Output longer than 10 KB is cut after the last whole line that fits, followed by `… 312 of 4000 lines shown (output limit 10000 bytes): use pg_search to find names`.
 
 `pg_search` finds names that contain `pattern`, ignoring case; `%` and `_` are plain characters. Relations come first, then columns, then functions, `limit` (default 50) at most:
 
@@ -83,21 +83,23 @@ When the output would exceed 10 KB, the full result is written as CSV to a new f
 
 ```
 Result too large to return inline (33700 bytes, limit 10000): 1000 rows × 3 columns, truncated=true (max_rows=1000).
-Full result: /tmp/mcp-postgres/spill-pg_query-prod-app-20261012T180244Z-2684963475.csv
+Full result: /home/me/.cache/mcp-postgres/spill-pg_query-prod-app-20261012T180244Z-2684963475.csv
 It is CSV (RFC 4180) with a header row; NULL is an unquoted empty field and "" the empty string.
 Use Read or Grep on the file instead of re-running the query.
 
 Columns:
-column	type	nulls	distinct	min	max
-id	int8	0	1000	1	1000
-kind	text	0	4
-occurred_at	timestamptz	0	1000	2024-01-01 00:01:00+00	2024-01-01 16:40:00+00
+column	type
+id	int8
+kind	text
+occurred_at	timestamptz
 
 First 5 rows:
 ...
 ```
 
-Spill files live in `mcp-postgres` under the system temp directory (`$TMPDIR`), readable only by you (mode 0600). Files older than `spill_ttl_hours` are removed at startup, then at most once an hour as `pg_query` returns results.
+The summary lists at most 20 columns, previews only as many of the first 5 rows as fit in 10 KB, and cuts preview cells at 64 characters.
+
+Spill files live in `mcp-postgres` under your user cache directory (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux), readable only by you (mode 0600). Spill files older than `spill_ttl_hours` are removed at startup, then at most once an hour as `pg_query` returns results, whichever server instance wrote them.
 
 ## Errors
 

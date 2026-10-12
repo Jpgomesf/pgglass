@@ -201,7 +201,7 @@ func TestLockTimeout(t *testing.T) {
 	m := newManager(t, config.Defaults{StatementTimeoutSeconds: 10, LockTimeoutSeconds: 1},
 		testdb.DSN(t, testdb.Superuser, "engine_locks"))
 
-	locker := observer(t, "engine_locks")
+	locker := testdb.Conn(t, testdb.Superuser, "engine_locks")
 	tx, err := locker.Begin(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -276,7 +276,7 @@ func TestServerDefaultsCannotChangeHowSQLIsRead(t *testing.T) {
 	testdb.CreateDatabase(t, name, "ALTER DATABASE "+name+" SET standard_conforming_strings = off;"+
 		"ALTER DATABASE "+name+" SET client_encoding = 'LATIN1';")
 	var scs, encoding string
-	if err := observer(t, name).QueryRow(t.Context(), "SELECT current_setting('standard_conforming_strings'), current_setting('client_encoding')").
+	if err := testdb.Conn(t, testdb.Superuser, name).QueryRow(t.Context(), "SELECT current_setting('standard_conforming_strings'), current_setting('client_encoding')").
 		Scan(&scs, &encoding); err != nil {
 		t.Fatal(err)
 	}
@@ -320,7 +320,7 @@ func TestMaxBytesTruncates(t *testing.T) {
 // that contains fragment.
 func running(t *testing.T, observer *pgx.Conn, fragment string) int {
 	t.Helper()
-	n, err := strconv.Atoi(observe(t, observer, `SELECT count(*)::text FROM pg_stat_activity
+	n, err := strconv.Atoi(testdb.Value[string](t, observer, `SELECT count(*)::text FROM pg_stat_activity
 		WHERE state = 'active' AND pid <> pg_backend_pid() AND strpos(query, $1) > 0`, fragment))
 	if err != nil {
 		t.Fatal(err)
@@ -345,7 +345,7 @@ func TestTruncationStopsTheQuery(t *testing.T) {
 	if len(res.Rows) != 3 || res.TruncatedReason != "max_rows=3" {
 		t.Errorf("%d rows, truncated %q; want 3, max_rows=3", len(res.Rows), res.TruncatedReason)
 	}
-	if n := running(t, observer(t, testdb.DBApp), "generate_series(1, 100000)"); n != 0 {
+	if n := running(t, testdb.Conn(t, testdb.Superuser, testdb.DBApp), "generate_series(1, 100000)"); n != 0 {
 		t.Errorf("%d backends still run the truncated query", n)
 	}
 	if got := value(t, m, "SELECT pg_backend_pid()"); got != pid {
@@ -372,7 +372,7 @@ func TestEndedContextCancelsTheQuery(t *testing.T) {
 		t.Errorf("returned after %v, want soon after the deadline", elapsed)
 	}
 
-	watch := observer(t, testdb.DBApp)
+	watch := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
 	eventually(t, "the server to stop pg_sleep(30)", func() bool { return running(t, watch, "pg_sleep(30)") == 0 })
 	if got := value(t, m, "SELECT pg_backend_pid()"); got != pid {
 		t.Errorf("backend %s after the cancel, was %s: the connection was dropped", got, pid)

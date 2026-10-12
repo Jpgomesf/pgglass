@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/introspect"
@@ -20,7 +21,7 @@ type schemaArgs struct {
 }
 
 // schema runs pg_schema: the schemas, the relations of one schema, or one
-// relation in detail, each cached.
+// relation in detail, each cached and cut to the inline limit.
 func (h *Handlers) schema(ctx context.Context, raw json.RawMessage, c *call) (string, error) {
 	var args schemaArgs
 	if err := decode(raw, &args); err != nil {
@@ -46,7 +47,24 @@ func (h *Handlers) schema(ctx context.Context, raw json.RawMessage, c *call) (st
 	if err != nil {
 		return "", &dbError{err}
 	}
-	return text, nil
+	return firstLines(text, h.spill.InlineMaxBytes), nil
+}
+
+// firstLines returns text when it fits in limit bytes. Otherwise it returns
+// as many of its first lines as fit, then a line saying how many were shown.
+func firstLines(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	note := func(shown int) string {
+		return fmt.Sprintf("… %d of %d lines shown (output limit %d bytes): use pg_search to find names", shown, len(lines), limit)
+	}
+	budget, n := limit-len(note(len(lines))), 0
+	for size := 0; n < len(lines) && size+len(lines[n])+1 <= budget; n++ {
+		size += len(lines[n]) + 1
+	}
+	return strings.Join(append(lines[:n:n], note(n)), "\n")
 }
 
 // describe renders what the arguments ask for: the schemas, the relations of

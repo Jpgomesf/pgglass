@@ -1,27 +1,10 @@
 package preflight_test
 
 import (
-	"context"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/preflight"
 )
-
-// The API other packages build against. Changing it must fail here first.
-var (
-	_ func(context.Context, engine.Querier) (preflight.Report, error) = preflight.Audit
-	_ func(preflight.Report) bool                                     = preflight.Report.Blocking
-	_ func(preflight.Report) string                                   = preflight.Report.String
-
-	_ = preflight.Finding{Severity: preflight.SeverityCritical, Check: "c", Detail: "d"}
-)
-
-func TestSeverities(t *testing.T) {
-	if preflight.SeverityCritical != "critical" || preflight.SeverityWarning != "warning" {
-		t.Errorf("severities = %q, %q", preflight.SeverityCritical, preflight.SeverityWarning)
-	}
-}
 
 func TestBlocking(t *testing.T) {
 	warning := preflight.Finding{Severity: preflight.SeverityWarning, Check: "temp", Detail: "TEMP on app"}

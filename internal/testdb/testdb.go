@@ -32,6 +32,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+
+	"github.com/jpgomesf/mcp-postgres/internal/config"
+	"github.com/jpgomesf/mcp-postgres/internal/engine"
 )
 
 // Roles and databases created by the fixtures.
@@ -81,6 +84,42 @@ func Main(m *testing.M) {
 func DSN(t testing.TB, role, database string) string {
 	t.Helper()
 	return shared.get(t).dsn(role, database)
+}
+
+// Querier returns an engine.Querier that reads database as role through the
+// engine, with the default limits, as the server does. It is closed when t
+// finishes.
+func Querier(t testing.TB, role, database string) engine.Querier {
+	t.Helper()
+	m := engine.New(&config.Config{
+		Defaults:    config.Defaults{}.WithDefaults(),
+		Connections: map[string]config.Connection{"db": {Source: "direct", DSN: DSN(t, role, database)}},
+	})
+	t.Cleanup(m.Close)
+	return m.Querier("db")
+}
+
+// Conn opens a plain connection to database as role, outside the engine, for
+// setup and to observe what queries leave behind. It is closed when t
+// finishes.
+func Conn(t testing.TB, role, database string) *pgx.Conn {
+	t.Helper()
+	conn, err := pgx.Connect(t.Context(), DSN(t, role, database))
+	if err != nil {
+		t.Fatalf("testdb: connect as %s to %s: %v", role, database, err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
+}
+
+// Value runs sql on conn and returns the one value it selects.
+func Value[T any](t testing.TB, conn *pgx.Conn, sql string, args ...any) T {
+	t.Helper()
+	var v T
+	if err := conn.QueryRow(t.Context(), sql, args...).Scan(&v); err != nil {
+		t.Fatalf("testdb: %s: %v", sql, err)
+	}
+	return v
 }
 
 // CreateDatabase creates database name, runs fixtureSQL in it as the superuser
@@ -136,8 +175,8 @@ func (h *harness) terminate() error {
 	return testcontainers.TerminateContainer(h.srv.ctr)
 }
 
-// image returns the Postgres image to run.
-func image() string {
+// Image returns the Postgres image to run: MCP_PG_IMAGE, or DefaultImage.
+func Image() string {
 	if img := os.Getenv("MCP_PG_IMAGE"); img != "" {
 		return img
 	}
@@ -163,7 +202,7 @@ func startServer(ctx context.Context) (srv *server, err error) {
 	ctx, cancel := context.WithTimeout(ctx, startTimeout)
 	defer cancel()
 
-	ctr, err := postgres.Run(ctx, image(),
+	ctr, err := postgres.Run(ctx, Image(),
 		postgres.WithDatabase(maintenanceDB),
 		postgres.WithUsername(Superuser),
 		postgres.WithPassword(Superuser),
