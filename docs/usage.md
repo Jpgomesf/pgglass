@@ -83,7 +83,7 @@ When the output would exceed 10 KB, the full result is written as CSV to a new f
 
 ```
 Result too large to return inline (33700 bytes, limit 10000): 1000 rows × 3 columns, truncated=true (max_rows=1000).
-Full result: /tmp/mcp-postgres/spill-pg_query-prod-app-20261012T180244Z-2684963475.csv
+Full result: /home/me/.cache/mcp-postgres/spill-pg_query-prod-app-20261012T180244Z-2684963475.csv
 It is CSV (RFC 4180) with a header row; NULL is an unquoted empty field and "" the empty string.
 Use Read or Grep on the file instead of re-running the query.
 
@@ -99,7 +99,7 @@ First 5 rows:
 
 The summary lists at most 20 columns, previews only as many of the first 5 rows as fit in 10 KB, and cuts preview cells at 64 characters.
 
-Spill files live in `mcp-postgres` under the system temp directory (`$TMPDIR`), readable only by you (mode 0600). Files older than `spill_ttl_hours` are removed at startup, then at most once an hour as `pg_query` returns results.
+Spill files live in `mcp-postgres` under your user cache directory (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux), readable only by you (mode 0600). Spill files older than `spill_ttl_hours` are removed at startup, then at most once an hour as `pg_query` returns results, whichever server instance wrote them.
 
 ## Errors
 

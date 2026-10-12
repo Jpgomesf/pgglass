@@ -72,8 +72,9 @@ func (s *Store) Output(tool, conn string, res *result.Result, f render.Format) (
 	return summary(res, path, len(inline), s.InlineMaxBytes)
 }
 
-// Cleanup removes spill files in Dir older than TTL. It never touches files
-// it did not create: only regular files named like Output names them.
+// Cleanup removes the regular files in Dir that are named like spill files
+// and older than TTL, whichever Store wrote them. It leaves other files,
+// directories and symlinks alone.
 func (s *Store) Cleanup() error {
 	if s.TTL <= 0 || s.Dir == "" {
 		return nil

@@ -25,11 +25,19 @@ func TestStdioServer(t *testing.T) {
 		"defaults":    map[string]any{"readonly": true},
 		"connections": map[string]any{"app": map[string]any{"source": "direct", "dsn": dsn, "default_schema": "app"}},
 	})
-	tmp := t.TempDir() // the server spills under $TMPDIR/mcp-postgres
-	stale := plantStaleSpillFile(t, filepath.Join(tmp, "mcp-postgres"))
+	// The server spills under the user cache directory, which HOME (macOS)
+	// or XDG_CACHE_HOME (Linux) locates. Set after the build, which caches
+	// there too.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := plantStaleSpillFile(t, filepath.Join(cacheDir, "mcp-postgres"))
 
 	cmd := exec.Command(bin) //nolint:gosec // the binary this test just built
-	cmd.Env = append(os.Environ(), "TMPDIR="+tmp)
 	stderr, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
 	if err != nil {
 		t.Fatal(err)
