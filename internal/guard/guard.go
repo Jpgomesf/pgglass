@@ -2,7 +2,8 @@
 // the Postgres parser (libpg_query via github.com/wasilibs/go-pgquery, pure
 // Go) rather than keyword matching. The engine's READ ONLY transaction stops
 // writes; the guard also rejects what would act outside that transaction or
-// survive its rollback, which READ ONLY cannot stop.
+// survive its rollback, which READ ONLY cannot stop, and reads of the
+// catalogs that hold server configuration files or credentials.
 //
 // The parser lexes SQL like a server with standard_conforming_strings on, the
 // default since PostgreSQL 9.1. With it off, a backslash in a plain '...'
@@ -42,10 +43,11 @@ func violation(format string, args ...any) error {
 // The statement must be a SELECT (VALUES, TABLE and set operations included),
 // EXPLAIN [ANALYZE] of such a SELECT, or SHOW. Every node of the query is then
 // checked: WITH queries must be SELECTs, SELECT INTO and FOR UPDATE/SHARE are
-// rejected, and so are calls to the functions in deniedFunctions and
-// deniedPrefixes, wherever they appear and including field-selection calls
-// such as x.pg_read_file. SQL nested too deeply to parse safely is rejected
-// before parsing. Check is safe for concurrent use.
+// rejected, and so are references to the relations in deniedRelations and
+// calls to the functions in deniedFunctions, deniedPrefixes and, by qualified
+// name, deniedSchemas, wherever they appear and including field-selection
+// calls such as x.pg_read_file. SQL nested too deeply to parse safely is
+// rejected before parsing. Check is safe for concurrent use.
 func Check(sql string) error {
 	stmt, err := parseSingle(sql)
 	if err != nil {
@@ -208,16 +210,19 @@ func checkCTE(c *pg_query.CommonTableExpr) error {
 	return nil
 }
 
-// checkRelation rejects a reference to a system view that parses and returns
-// the content of a server configuration file. pg_read_file on those files is
-// already denied; these views are the same read under another name, so they
-// belong to the guard's "Server files" category. The match is on the
-// relation's own name, lower-cased and whatever the schema, like
-// checkFunction: a CTE or table that shadows one of these names is rejected
-// too, since the parse tree cannot tell them apart.
+// checkRelation rejects a reference to a system catalog or view in
+// deniedRelations, which disclose server configuration files or credentials.
+// The match is on the relation's own name, lower-cased and whatever the
+// schema, like checkFunction: a CTE or table that shadows one of these names
+// is rejected too, since the parse tree cannot tell them apart.
+//
+// Only a reference in the query is a RangeVar. A function that takes a
+// relation by name, as a regclass or text argument, and returns its rows
+// reads the relation without one, so such functions must be denied as well:
+// table_to_xml*, xpath_table and get_raw_page are.
 func checkRelation(r *pg_query.RangeVar) error {
 	if deniedRelations[strings.ToLower(r.GetRelname())] {
-		return violation("relation %s is not allowed: it discloses a server configuration file", r.GetRelname())
+		return violation("relation %s is not allowed: it discloses server configuration or credentials", r.GetRelname())
 	}
 	return nil
 }
@@ -275,8 +280,8 @@ func isDenied(parts []string) bool {
 	if len(parts) == 0 {
 		return true // the parser never produces this; fail closed
 	}
-	if len(parts) > 1 && parts[len(parts)-2] == "net" {
-		return true // pg_net: HTTP requests from the server
+	if len(parts) > 1 && deniedSchemas[parts[len(parts)-2]] {
+		return true
 	}
 	name := parts[len(parts)-1]
 	if deniedFunctions[name] {
@@ -290,10 +295,18 @@ func isDenied(parts []string) bool {
 	return false
 }
 
+// deniedSchemas belong to extensions whose functions all reach outside the
+// read-only transaction, so a call to any function in them is denied.
+var deniedSchemas = map[string]bool{
+	"net":        true, // pg_net (Supabase): HTTP requests from the server
+	"aws_s3":     true, // aws_s3 (RDS, Aurora): query results to S3, and S3 files into tables
+	"aws_lambda": true, // aws_lambda (RDS, Aurora): invokes Lambda functions
+}
+
 // deniedFunctions reach outside the read-only transaction (server files,
 // other sessions, settings, sequences, the network), leave state behind that
-// its rollback does not undo, or run SQL passed as a string, which the guard
-// cannot see.
+// its rollback does not undo, run SQL passed as a string, which the guard
+// cannot see, or read a relation passed by name, past deniedRelations.
 var deniedFunctions = map[string]bool{
 	// Server files.
 	"pg_read_file":        true,
@@ -306,7 +319,8 @@ var deniedFunctions = map[string]bool{
 	"pg_current_logfile":        true, // the active log file's path
 	"pg_hba_file_rules":         true, // pg_hba.conf, where the view wraps a like-named function
 	"pg_ident_file_mappings":    true, // pg_ident.conf, likewise
-	// Other sessions and the server process.
+	// Other sessions and the server process; pg_log_backend_memory_contexts
+	// is denied by its prefix.
 	"pg_terminate_backend": true,
 	"pg_cancel_backend":    true,
 	"pg_reload_conf":       true,
@@ -341,23 +355,36 @@ var deniedFunctions = map[string]bool{
 	"ts_stat":                    true,
 	"ts_rewrite":                 true, // ts_rewrite(query, select text) runs the select
 	"connectby":                  true, // tablefunc: builds SQL from its text arguments
+	"xpath_table":                true, // xml2: builds SQL from its text arguments
+	// A relation read by name, past deniedRelations (see checkRelation).
+	"get_raw_page": true, // pageinspect: the relation's raw pages, its rows included
 	// Writes in place, which neither READ ONLY nor the rollback stops.
 	"pg_truncate_visibility_map": true, // pg_visibility: truncates a visibility map
 }
 
-// deniedRelations are system views that parse and return the server's
-// configuration files: the same disclosure as the denied pg_read_file, by
-// another name. They are referenced as relations, not function calls, so the
-// guard rejects them where it meets a RangeVar.
+// deniedRelations are system catalogs and views that disclose the server's
+// configuration files or credentials. They are referenced as relations, not
+// function calls, so the guard rejects them where it meets a RangeVar.
+// pg_roles and pg_user, which mask passwords, stay allowed.
 var deniedRelations = map[string]bool{
+	// Configuration files: the same disclosure as the denied pg_read_file.
 	"pg_hba_file_rules":      true, // pg_hba.conf, the authentication policy
 	"pg_ident_file_mappings": true, // pg_ident.conf, the user name maps (PostgreSQL 15+)
 	"pg_file_settings":       true, // postgresql.conf and its include files, with their paths
+	// Credentials. Most are superuser-only, which role_check warn admits.
+	"pg_authid":            true, // password verifiers
+	"pg_shadow":            true, // the same, as a view
+	"pg_user_mapping":      true, // foreign-server passwords in umoptions
+	"pg_user_mappings":     true, // the same, shown to the mapped role itself
+	"user_mapping_options": true, // information_schema's view of them, likewise
+	"_pg_user_mappings":    true, // information_schema's base view of them
+	"pg_subscription":      true, // subscription connection strings, passwords included
 }
 
 // deniedPrefixes deny whole function families by name prefix.
 var deniedPrefixes = []string{
 	"dblink",          // dblink, dblink_exec, ...: a second connection, outside the transaction
+	"pg_background",   // pg_background_launch, ...: runs SQL passed as a string in a worker's own transaction
 	"lo_",             // large objects; lo_import and lo_export reach server files
 	"pg_logical_",     // logical decoding messages and slots
 	"pg_log_",         // pg_log_standby_snapshot writes WAL; pg_log_backend_memory_contexts makes another backend log
@@ -371,13 +398,17 @@ var deniedPrefixes = []string{
 	"pg_ls_",          // pg_ls_dir and the other server directory listings
 	"pg_file_",        // adminpack (before PostgreSQL 17): writes, renames and removes server files
 	"pg_stat_reset",   // statistics resets, which are not transactional
-	// Session advisory locks: the rollback does not release them, so they stay
-	// held on the pooled connection. Transaction-level ones (pg_advisory_xact_*)
-	// are released with it.
+	// Advisory locks. The rollback does not release session ones, so they stay
+	// held on the pooled connection; transaction ones can still hold the
+	// application's own lock keys, read from pg_locks, stalling its job queues
+	// and migrations until statement_timeout. Unlocking is harmless.
 	"pg_advisory_lock",
+	"pg_advisory_xact_lock",
 	"pg_try_advisory_lock",
+	"pg_try_advisory_xact_lock",
 	"database_to_xml", // database_to_xml*: runs a query per table of the database
 	"schema_to_xml",   // schema_to_xml*: runs a query per table of the schema
+	"table_to_xml",    // table_to_xml*: reads the relation it is given by name (see checkRelation)
 	"crosstab",        // tablefunc: crosstab and its wrappers run SQL passed as a string
 	"heap_force_",     // pg_surgery: kills or freezes rows in place, past READ ONLY and the rollback
 }

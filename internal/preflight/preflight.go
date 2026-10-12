@@ -15,10 +15,18 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 )
 
-// Finding severities.
+// Finding severities. role_check strict refuses a role with a critical
+// finding; warnings are only reported.
 const (
-	SeverityCritical = "critical" // the role can change data or escape the read-only transaction
-	SeverityWarning  = "warning"  // risky, but not a write path on its own
+	// The role can act outside the read-only transaction: as a superuser,
+	// directly or through SET ROLE, with the server program or file-write
+	// roles, or through functions that open sessions, send requests or rows
+	// out, or write server files.
+	SeverityCritical = "critical"
+	// Risky, but no way out of the read-only transaction on its own: role
+	// attributes, table write privileges (the transaction refuses the
+	// writes), reading server files and signalling other sessions.
+	SeverityWarning = "warning"
 )
 
 // Finding is one capability the role should not have.
@@ -75,48 +83,75 @@ var dangerousFunctions = []struct {
 	severity string
 	patterns []string
 }{
-	// Exfiltration paths: dblink* opens sessions of its own, http* (pgsql-http)
-	// and net.* (Supabase pg_net) send HTTP requests, and lo_export writes
-	// server files, even in a read-only transaction.
-	{SeverityCritical, []string{`%.dblink%`, `net.%`, `%.http%`, `%.lo\_export`}},
-	// They read server files.
-	{SeverityWarning, []string{`%.lo\_import`, `%.pg\_read\_file`}},
+	// Ways out of the read-only transaction: dblink* opens sessions of its
+	// own, pg_background* runs SQL in a worker's own transaction, http*
+	// (pgsql-http), net.* (Supabase pg_net), aws_s3.* and aws_lambda.* (RDS)
+	// send requests or rows out, and lo_export writes server files.
+	{SeverityCritical, []string{`%.dblink%`, `%.pg\_background%`, `%.http%`, `net.%`, `aws\_s3.%`, `aws\_lambda.%`, `%.lo\_export`}},
+	// They read server files, or make another backend dump its memory
+	// contexts to the server log.
+	{SeverityWarning, []string{`%.lo\_import`, `%.pg\_read\_file`, `%.pg\_read\_binary\_file`, `%.pg\_log\_backend\_memory\_contexts`}},
 }
 
-// Audit inspects, through q, the privileges of the role q connects as. A
-// superuser gets a single finding, since it passes every other check. Audit
-// returns an error, never a partial report, when a catalog query fails or
-// comes back truncated.
+// Audit inspects, through q, the privileges of the role q connects as: the
+// current user and, when the connection set another role, the session user
+// too, which RESET ROLE returns to. Each superuser gets a single finding,
+// since it passes every other check. Audit returns an error, never a partial
+// report, when a catalog query fails or comes back truncated.
 func Audit(ctx context.Context, q engine.Querier) (Report, error) {
-	attrs, err := queryAttributes(ctx, q)
+	users, err := queryRow(ctx, q, 2, usersSQL)
 	if err != nil {
-		return Report{}, fmt.Errorf("preflight: role attributes: %w", err)
+		return Report{}, fmt.Errorf("preflight: current and session user: %w", err)
 	}
-	if attrs.superuser {
-		return Report{Role: attrs.role, Findings: []Finding{
-			{Severity: SeverityCritical, Check: "superuser", Detail: "bypasses every privilege check"},
-		}}, nil
+	report := Report{Role: text(users[0])}
+	if report.Findings, err = auditRole(ctx, q, report.Role); err != nil {
+		return Report{}, err
 	}
-	report := Report{Role: attrs.role, Findings: attrs.findings()}
-	for _, check := range []struct {
-		name string
-		run  func(context.Context, engine.Querier) ([]Finding, error)
-	}{
-		{"role memberships", roleMemberships},
-		{"table writes", tableWrites},
-		{"function grants", functionGrants},
-	} {
-		found, err := check.run(ctx, q)
+	if session := text(users[1]); session != report.Role {
+		found, err := auditRole(ctx, q, session)
 		if err != nil {
-			return Report{}, fmt.Errorf("preflight: %s: %w", check.name, err)
+			return Report{}, err
 		}
-		report.Findings = append(report.Findings, found...)
+		for _, f := range found {
+			f.Detail = "session user " + session + ": " + f.Detail
+			report.Findings = append(report.Findings, f)
+		}
 	}
 	// Critical findings first; each severity keeps the order of the checks.
 	slices.SortStableFunc(report.Findings, func(a, b Finding) int {
 		return severityRank(a.Severity) - severityRank(b.Severity)
 	})
 	return report, nil
+}
+
+const usersSQL = `SELECT current_user, session_user`
+
+// auditRole returns the findings for role.
+func auditRole(ctx context.Context, q engine.Querier, role string) ([]Finding, error) {
+	attrs, err := queryAttributes(ctx, q, role)
+	if err != nil {
+		return nil, fmt.Errorf("preflight: role attributes: %w", err)
+	}
+	if attrs.superuser {
+		return []Finding{{Severity: SeverityCritical, Check: "superuser", Detail: "bypasses every privilege check"}}, nil
+	}
+	found := attrs.findings()
+	for _, check := range []struct {
+		name string
+		run  func(context.Context, engine.Querier, string) ([]Finding, error)
+	}{
+		{"role memberships", roleMemberships},
+		{"superuser memberships", superuserMemberships},
+		{"table writes", tableWrites},
+		{"function grants", functionGrants},
+	} {
+		more, err := check.run(ctx, q, role)
+		if err != nil {
+			return nil, fmt.Errorf("preflight: %s: %w", check.name, err)
+		}
+		found = append(found, more...)
+	}
+	return found, nil
 }
 
 func severityRank(severity string) int {
@@ -127,23 +162,22 @@ func severityRank(severity string) int {
 }
 
 const attributesSQL = `
-SELECT current_user, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
+SELECT rolsuper, rolbypassrls, rolcreaterole, rolcreatedb
 FROM pg_roles
-WHERE rolname = current_user`
+WHERE rolname = $1`
 
 type attributes struct {
-	role                                       string
 	superuser, bypassRLS, createRole, createDB bool
 }
 
-func queryAttributes(ctx context.Context, q engine.Querier) (attributes, error) {
-	row, err := queryRow(ctx, q, 5, attributesSQL)
+func queryAttributes(ctx context.Context, q engine.Querier, role string) (attributes, error) {
+	row, err := queryRow(ctx, q, 4, attributesSQL, role)
 	if err != nil {
 		return attributes{}, err
 	}
-	a := attributes{role: text(row[0])}
+	var a attributes
 	for i, flag := range []*bool{&a.superuser, &a.bypassRLS, &a.createRole, &a.createDB} {
-		if *flag, err = strconv.ParseBool(text(row[i+1])); err != nil {
+		if *flag, err = strconv.ParseBool(text(row[i])); err != nil {
 			return attributes{}, err
 		}
 	}
@@ -169,74 +203,90 @@ func (a attributes) findings() []Finding {
 	return found
 }
 
-// membershipsSQL lists the roles in $1 the role is a member of. MEMBER, not
-// USAGE: a member that does not inherit a role's privileges can still SET
+// membershipsSQL lists the roles in $2 that role $1 is a member of. MEMBER,
+// not USAGE: a member that does not inherit a role's privileges can still SET
 // ROLE to it. Roles are matched by oid, so one missing on an older server is
 // skipped rather than an error.
 const membershipsSQL = `
 SELECT string_agg(rolname, ' ' ORDER BY rolname)
 FROM pg_roles
-WHERE rolname = ANY ($1::text[]) AND pg_has_role(current_user, oid, 'MEMBER')`
+WHERE rolname = ANY ($2::text[]) AND pg_has_role($1::name, oid, 'MEMBER')`
 
-func roleMemberships(ctx context.Context, q engine.Querier) ([]Finding, error) {
-	row, err := queryRow(ctx, q, 1, membershipsSQL, slices.Sorted(maps.Keys(serverRoles)))
+func roleMemberships(ctx context.Context, q engine.Querier, role string) ([]Finding, error) {
+	row, err := queryRow(ctx, q, 1, membershipsSQL, role, slices.Sorted(maps.Keys(serverRoles)))
 	if err != nil {
 		return nil, err
 	}
 	var found []Finding
-	for _, role := range strings.Fields(text(row[0])) {
-		found = append(found, Finding{Severity: serverRoles[role], Check: "role_membership", Detail: "member of " + role})
+	for _, granted := range strings.Fields(text(row[0])) {
+		found = append(found, Finding{Severity: serverRoles[granted], Check: "role_membership", Detail: "member of " + granted})
 	}
 	return found, nil
 }
 
+// superusersSQL counts the superusers that role $1 is a member of, and lists
+// the first $2. Superuser is never inherited, but SET ROLE reaches it, as for
+// the predefined roles.
+const superusersSQL = `
+SELECT count(*), array_to_string((array_agg(format('%I', rolname) ORDER BY rolname))[1:$2::int], ', ')
+FROM pg_roles
+WHERE rolsuper AND pg_has_role($1::name, oid, 'MEMBER')`
+
+func superuserMemberships(ctx context.Context, q engine.Querier, role string) ([]Finding, error) {
+	total, sample, err := countAndSample(ctx, q, superusersSQL, role, maxNames)
+	if err != nil || total == 0 {
+		return nil, err
+	}
+	return []Finding{{Severity: SeverityCritical, Check: "superuser_membership", Detail: "member of " + summarize(total, "superusers", sample)}}, nil
+}
+
 // tableWritesSQL counts the tables, partitioned tables, views, materialized
-// views and foreign tables the role can write, and lists the first $1.
+// views and foreign tables that role $1 can write, and lists the first $2.
 // Column-level INSERT or UPDATE grants count. A relation in a schema the role
 // cannot use is unreachable, so it does not count.
 const tableWritesSQL = `
-SELECT count(*), array_to_string((array_agg(privileges || ' on ' || name ORDER BY name))[1:$1::int], '; ')
+SELECT count(*), array_to_string((array_agg(privileges || ' on ' || name ORDER BY name))[1:$2::int], '; ')
 FROM (
 	SELECT format('%I.%I', n.nspname, c.relname) AS name,
 	       concat_ws(', ',
-	           CASE WHEN has_any_column_privilege(c.oid, 'INSERT') THEN 'INSERT' END,
-	           CASE WHEN has_any_column_privilege(c.oid, 'UPDATE') THEN 'UPDATE' END,
-	           CASE WHEN has_table_privilege(c.oid, 'DELETE') THEN 'DELETE' END,
-	           CASE WHEN has_table_privilege(c.oid, 'TRUNCATE') THEN 'TRUNCATE' END) AS privileges
+	           CASE WHEN has_any_column_privilege($1::name, c.oid, 'INSERT') THEN 'INSERT' END,
+	           CASE WHEN has_any_column_privilege($1::name, c.oid, 'UPDATE') THEN 'UPDATE' END,
+	           CASE WHEN has_table_privilege($1::name, c.oid, 'DELETE') THEN 'DELETE' END,
+	           CASE WHEN has_table_privilege($1::name, c.oid, 'TRUNCATE') THEN 'TRUNCATE' END) AS privileges
 	FROM pg_class AS c
 	JOIN pg_namespace AS n ON n.oid = c.relnamespace
 	WHERE c.relkind IN ('r', 'p', 'v', 'm', 'f')
 	  AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-	  AND has_schema_privilege(n.oid, 'USAGE')
+	  AND has_schema_privilege($1::name, n.oid, 'USAGE')
 ) AS relations
 WHERE privileges <> ''`
 
-func tableWrites(ctx context.Context, q engine.Querier) ([]Finding, error) {
-	total, sample, err := countAndSample(ctx, q, tableWritesSQL, maxNames)
+func tableWrites(ctx context.Context, q engine.Querier, role string) ([]Finding, error) {
+	total, sample, err := countAndSample(ctx, q, tableWritesSQL, role, maxNames)
 	if err != nil || total == 0 {
 		return nil, err
 	}
 	return []Finding{{Severity: SeverityWarning, Check: "table_write", Detail: summarize(total, "relations", sample)}}, nil
 }
 
-// functionGrantsSQL counts the functions matching the patterns in $1 that the
-// role can execute, overloads counted once, and lists the first $2. As with
-// tables, a function in a schema the role cannot use does not count.
+// functionGrantsSQL counts the functions matching the patterns in $2 that
+// role $1 can execute, overloads counted once, and lists the first $3. As
+// with tables, a function in a schema the role cannot use does not count.
 const functionGrantsSQL = `
-SELECT count(*), array_to_string((array_agg(name ORDER BY name))[1:$2::int], ', ')
+SELECT count(*), array_to_string((array_agg(name ORDER BY name))[1:$3::int], ', ')
 FROM (
 	SELECT DISTINCT format('%I.%I', n.nspname, p.proname) AS name
 	FROM pg_proc AS p
 	JOIN pg_namespace AS n ON n.oid = p.pronamespace
-	WHERE n.nspname || '.' || p.proname LIKE ANY ($1::text[])
-	  AND has_function_privilege(p.oid, 'EXECUTE')
-	  AND has_schema_privilege(n.oid, 'USAGE')
+	WHERE n.nspname || '.' || p.proname LIKE ANY ($2::text[])
+	  AND has_function_privilege($1::name, p.oid, 'EXECUTE')
+	  AND has_schema_privilege($1::name, n.oid, 'USAGE')
 ) AS functions`
 
-func functionGrants(ctx context.Context, q engine.Querier) ([]Finding, error) {
+func functionGrants(ctx context.Context, q engine.Querier, role string) ([]Finding, error) {
 	var found []Finding
 	for _, group := range dangerousFunctions {
-		total, sample, err := countAndSample(ctx, q, functionGrantsSQL, group.patterns, maxNames)
+		total, sample, err := countAndSample(ctx, q, functionGrantsSQL, role, group.patterns, maxNames)
 		if err != nil {
 			return nil, err
 		}
@@ -273,8 +323,11 @@ func countAndSample(ctx context.Context, q engine.Querier, sql string, params ..
 // queryRow runs sql and returns its only row, which must hold width values.
 // Every query of the audit aggregates into one row, so max_rows cannot cut it
 // short, and any other result is an error rather than a silently clean audit.
+// The search_path is pg_catalog alone: a schema the role or database puts
+// before it could otherwise shadow the catalogs and functions the audit reads
+// and fake a clean report.
 func queryRow(ctx context.Context, q engine.Querier, width int, sql string, params ...any) ([]*string, error) {
-	res, err := q.Query(ctx, engine.Query{SQL: sql, Params: params})
+	res, err := q.Query(ctx, engine.Query{SQL: sql, Params: params, SearchPath: "pg_catalog"})
 	if err != nil {
 		return nil, err
 	}
