@@ -243,9 +243,11 @@ func unknownConnection(name string, conns map[string]config.Connection) error {
 	return fmt.Errorf("unknown connection %q (available: %s)", name, strings.Join(slices.Sorted(maps.Keys(conns)), ", "))
 }
 
-// rowByteHeadroom is added to max_bytes to get the per-message cap, so a row
-// whose values sum to the whole byte budget is never rejected for its wire
-// framing alone (two bytes plus four per column, well under this).
+// rowByteHeadroom is added to max_bytes to get the per-message cap. A row the
+// budget allows is smaller than the budget on the wire, where a value takes 4
+// bytes beyond its own, under valueCost; the headroom keeps the messages that
+// are not rows, such as row descriptions and errors, readable when max_bytes
+// is small.
 const rowByteHeadroom = 1 << 20
 
 // open resolves the DSN of the connection named name and creates its pool,

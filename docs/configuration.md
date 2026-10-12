@@ -142,7 +142,7 @@ Every field is optional: a missing or zero value takes the default. Numbers must
 | `statement_timeout_seconds` | `30` | Max query execution time |
 | `lock_timeout_seconds` | `5` | Max time a query waits for a lock |
 | `max_rows` | `1000` | Rows a query returns before its result is truncated. A `pg_query` call can lower it with `max_rows`, never raise it. Also caps `pg_search` |
-| `max_bytes` | `1048576` (1 MiB) | Bytes a query's result holds before it is truncated: each value counts its length plus 24, so empty and NULL values count too |
+| `max_bytes` | `1048576` (1 MiB) | Bytes a query's result holds before it is truncated: each value counts its length plus 24, so empty and NULL values count too. A server message larger than `max_bytes` plus 1 MiB is not read: the connection is reset, and the result is truncated there if it was a row, or the query fails if it was an error |
 | `spill_ttl_hours` | `24` | How long spill files of large results are kept |
 | `format` | `tsv` | Default result format of `pg_query`: `tsv`, `json` or `markdown` |
 | `role_check` | `warn` | What to do when a connection's role can do more than read (see below) |

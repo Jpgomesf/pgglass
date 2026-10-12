@@ -83,23 +83,23 @@ func collect(ctx context.Context, tx pgx.Tx, q Query, l Limits) (*result.Result,
 		}
 	}
 	if err := rows.Err(); err != nil {
-		// A row wider than the per-message cap is a byte-budget overrun that
-		// pgx caught before buffering it, so truncate rather than error, like
-		// the collector's own MaxBytes cut.
-		if oversizedRow(err) {
-			c.truncate("max_bytes", c.limits.MaxBytes)
-			return c.res, nil
+		var tooBig *pgproto3.ExceededMaxBodyLenErr
+		if !errors.As(err, &tooBig) {
+			return nil, err
 		}
-		return nil, err
+		// pgx refused a message over the per-message cap harden set, after
+		// reading only its header, and closed the connection. Once the columns
+		// are described, that message is almost always a row: a byte-budget
+		// overrun, cut like the collector's own. Before, it can only be an
+		// error or a notice, such as one quoting a huge invalid value.
+		if len(c.res.Columns) == 0 {
+			return nil, fmt.Errorf("the server sent a %d-byte message, over the %d-byte limit (max_bytes plus 1 MiB); the connection was reset",
+				tooBig.ActualBodyLen, tooBig.MaxExpectedBodyLen)
+		}
+		c.truncate("max_bytes", c.limits.MaxBytes)
+		return c.res, nil
 	}
 	return c.res, nil
-}
-
-// oversizedRow reports whether err is pgx rejecting a protocol message larger
-// than the per-message cap harden set from max_bytes.
-func oversizedRow(err error) bool {
-	var e *pgproto3.ExceededMaxBodyLenErr
-	return errors.As(err, &e)
 }
 
 // collector keeps rows until one would exceed a limit.
