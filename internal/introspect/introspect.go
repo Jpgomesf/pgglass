@@ -1,16 +1,27 @@
 // Package introspect describes database objects from the system catalogs,
 // rendered as compact text for agents.
+//
+// Every query reads pg_catalog through an engine.Querier, so it runs in a
+// read-only transaction, and pins search_path to pg_catalog: names outside
+// pg_catalog come back schema-qualified, and objects in user schemas cannot
+// shadow the catalog functions the queries call. Each query returns one JSON
+// value that decodes straight into the types below.
+//
+// Only what the current role can read is described: schemas it has USAGE on,
+// relations it can SELECT at least one column of, columns it can SELECT and
+// functions it can EXECUTE. Partitions are reached through their parent, so
+// listings and searches leave them out.
 package introspect
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"time"
+	"fmt"
+	"strings"
 
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 )
-
-var errNotImplemented = errors.New("not implemented")
 
 // Schema is a non-system schema the current role can see.
 type Schema struct {
@@ -22,23 +33,21 @@ type Schema struct {
 // SchemaList is the result of Schemas.
 type SchemaList []Schema
 
-// Render returns one line per schema.
-func (l SchemaList) Render() string { return "" }
-
 // Relation is a table-like object.
 type Relation struct {
-	Schema  string
-	Name    string
-	Kind    string // "table", "partitioned table", "view", "materialized view" or "foreign table"
-	Rows    int64  // planner estimate (pg_class.reltuples); -1 when never analyzed
+	Schema string
+	Name   string
+	Kind   string // "table", "partitioned table", "view", "materialized view" or "foreign table"
+	Rows   int64  // planner estimate (pg_class.reltuples); -1 when never analyzed
+	// Size is the pretty total size, TOAST, indexes and partitions included,
+	// e.g. "48 kB"; empty for views and foreign tables.
+	Size    string
+	RLS     bool // row-level security is enabled
 	Comment string
 }
 
 // RelationList is the result of Tables.
 type RelationList []Relation
-
-// Render returns one line per relation.
-func (l RelationList) Render() string { return "" }
 
 // Column is a column of a relation.
 type Column struct {
@@ -46,13 +55,19 @@ type Column struct {
 	Type    string // format_type, e.g. "numeric(12,2)", "integer[]", "app.order_status"
 	NotNull bool
 	Default string // default expression; empty when none
-	Comment string
+	// Generated is the identity or generation clause, e.g. "GENERATED ALWAYS
+	// AS IDENTITY" or "GENERATED ALWAYS AS (price * qty) STORED"; empty when none.
+	Generated string
+	// EnumValues are the labels, in order, of an enum type or of the element
+	// type of an enum array.
+	EnumValues []string
+	Comment    string
 }
 
 // Index is an index of a table.
 type Index struct {
 	Name       string
-	Definition string // pg_get_indexdef, e.g. "CREATE INDEX ... WHERE (status = 'pending')"
+	Definition string // pg_get_indexdef, e.g. "CREATE INDEX ... WHERE status = 'pending'::app.order_status"
 	Primary    bool
 	Unique     bool
 }
@@ -82,62 +97,109 @@ type TableDetail struct {
 	Constraints []Constraint
 	RLSEnabled  bool
 	Policies    []Policy
-	Definition  string // query of a view or materialized view; empty for tables
+	Triggers    []string // user-defined triggers; internal constraint triggers are left out
+	Definition  string   // query of a view or materialized view; empty for tables
 }
-
-// Render returns the description in a compact, DDL-like form.
-func (t TableDetail) Render() string { return "" }
 
 // Match is one hit of Search.
 type Match struct {
 	Schema string
+	// Table is the relation name or, for a function match, the function name
+	// and identity arguments, e.g. "order_total(customer uuid)".
 	Table  string
-	Column string // empty when the relation name itself matched
-	Type   string // the column type, or the relation kind for a relation match
+	Column string // empty when the relation or function name itself matched
+	// Type is the column type, the relation kind for a relation match, or
+	// "function", "aggregate", "window function" or "procedure".
+	Type string
 }
 
 // MatchList is the result of Search.
 type MatchList []Match
 
-// Render returns one line per match.
-func (l MatchList) Render() string { return "" }
+// errNoRows reports a catalog query that found nothing, such as a missing
+// relation or one the role cannot read.
+var errNoRows = errors.New("no rows")
 
 // Schemas lists the non-system schemas the current role can see.
 func Schemas(ctx context.Context, q engine.Querier) (SchemaList, error) {
-	return nil, errNotImplemented
+	var list SchemaList
+	if err := queryJSON(ctx, q, &list, schemasSQL); err != nil {
+		return nil, fmt.Errorf("list schemas: %w", err)
+	}
+	return list, nil
 }
 
-// Tables lists the relations in schema.
+// Tables lists the relations in schema that the current role can read, by
+// name, leaving out partitions. It returns an error if the schema does not
+// exist or the role lacks USAGE on it.
 func Tables(ctx context.Context, q engine.Querier, schema string) (RelationList, error) {
-	return nil, errNotImplemented
+	var list RelationList
+	err := queryJSON(ctx, q, &list, tablesSQL, schema)
+	if errors.Is(err, errNoRows) {
+		return nil, fmt.Errorf("schema %q does not exist or the current role lacks USAGE on it", schema)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("list relations in schema %q: %w", schema, err)
+	}
+	return list, nil
 }
 
 // Table describes the relation schema.name, or returns an error if the
-// current role cannot see it.
+// current role cannot see it. Names match exactly, as the catalog stores
+// them (unquoted). Partitions can be described too.
 func Table(ctx context.Context, q engine.Querier, schema, name string) (*TableDetail, error) {
-	return nil, errNotImplemented
+	var t TableDetail
+	err := queryJSON(ctx, q, &t, tableSQL, schema, name)
+	if errors.Is(err, errNoRows) {
+		return nil, fmt.Errorf("relation %q.%q does not exist or the current role cannot read it", schema, name)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("describe relation %q.%q: %w", schema, name, err)
+	}
+	return &t, nil
 }
 
 // Search finds relations and columns whose name contains pattern, ignoring
 // case and treating pattern literally (no wildcards), and returns at most
-// limit matches.
+// limit matches. Functions whose name contains pattern match too. Relations
+// come first, then columns, then functions.
 func Search(ctx context.Context, q engine.Querier, pattern string, limit int) (MatchList, error) {
-	return nil, errNotImplemented
+	if pattern == "" {
+		return nil, errors.New("search pattern is empty")
+	}
+	if limit < 1 {
+		return nil, fmt.Errorf("search limit must be at least 1, got %d", limit)
+	}
+	var list MatchList
+	if err := queryJSON(ctx, q, &list, searchSQL, likePattern(pattern), limit); err != nil {
+		return nil, fmt.Errorf("search %q: %w", pattern, err)
+	}
+	return list, nil
 }
 
-// Cache keeps rendered introspection output for a TTL, so repeated schema
-// calls do not hit the catalogs. It is safe for concurrent use.
-type Cache struct {
-	ttl time.Duration
+// queryJSON runs sql, which returns at most one row holding one JSON value,
+// and decodes that value into dst. It returns errNoRows when no row or NULL
+// comes back.
+func queryJSON(ctx context.Context, q engine.Querier, dst any, sql string, params ...any) error {
+	res, err := q.Query(ctx, engine.Query{SQL: sql, Params: params, SearchPath: "pg_catalog"})
+	if err != nil {
+		return err
+	}
+	if res.Truncated {
+		return fmt.Errorf("catalog result exceeds the configured limits (%s)", res.TruncatedReason)
+	}
+	if len(res.Rows) == 0 || len(res.Rows[0]) == 0 || res.Rows[0][0] == nil {
+		return errNoRows
+	}
+	dec := json.NewDecoder(strings.NewReader(*res.Rows[0][0]))
+	dec.DisallowUnknownFields() // a key the SQL misspells fails loudly
+	return dec.Decode(dst)
 }
 
-// NewCache returns an empty Cache whose entries expire after ttl.
-func NewCache(ttl time.Duration) *Cache {
-	return &Cache{ttl: ttl}
-}
+// likeEscaper escapes the ILIKE wildcards and its escape character.
+var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
-// Get returns the value cached under key, calling load and caching its
-// result when the entry is missing or expired. Errors are not cached.
-func (c *Cache) Get(key string, load func() (string, error)) (string, error) {
-	return "", errNotImplemented
+// likePattern returns an ILIKE pattern that matches s literally anywhere.
+func likePattern(s string) string {
+	return "%" + likeEscaper.Replace(s) + "%"
 }
