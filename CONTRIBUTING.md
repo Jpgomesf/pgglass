@@ -115,10 +115,15 @@ No changes to `resolver.go`, `main.go`, or any other source files should be need
 ## Running Tests
 
 ```bash
-make test          # all tests with race detector
-go test ./...      # quick run without race detector
+make test          # unit + integration tests with the race detector (needs Docker)
+make test-short    # unit tests only: integration tests skip under -short
 go test ./internal/resolver/...  # single package
 ```
+
+Integration tests run a throwaway Postgres container through `internal/testdb`
+(one per test package; set `MCP_PG_IMAGE` to pick the image, default
+`postgres:17-alpine`). Without Docker they fail rather than skip. A package that
+uses `testdb` needs `func TestMain(m *testing.M) { testdb.Main(m) }`.
 
 ## Releases
 

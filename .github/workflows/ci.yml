@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  lint-test-build:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +18,31 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.10.1
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pg-image: [postgres:15-alpine, postgres:16-alpine, postgres:17-alpine]
+    env:
+      MCP_PG_IMAGE: ${{ matrix.pg-image }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
       - name: Test
         run: go test -race ./...
-      - name: Build
-        run: CGO_ENABLED=0 go build -o /dev/null .
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build release targets without cgo
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./...
