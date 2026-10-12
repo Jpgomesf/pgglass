@@ -1,7 +1,8 @@
 // Package guard rejects SQL that is not a single read-only statement, using
 // the Postgres parser (libpg_query via github.com/wasilibs/go-pgquery, pure
-// Go) rather than keyword matching. It is defense in depth: the engine's READ
-// ONLY transaction is the guarantee.
+// Go) rather than keyword matching. The engine's READ ONLY transaction stops
+// writes; the guard also rejects what would act outside that transaction or
+// survive its rollback, which READ ONLY cannot stop.
 //
 // The parser lexes SQL like a server with standard_conforming_strings on, the
 // default since PostgreSQL 9.1. With it off, a backslash in a plain '...'
@@ -274,13 +275,13 @@ func isDenied(parts []string) bool {
 }
 
 // deniedFunctions reach outside the read-only transaction (server files,
-// other sessions, settings, sequences, the network) or run SQL passed as a
-// string, which the guard cannot see.
+// other sessions, settings, sequences, the network), leave state behind that
+// its rollback does not undo, or run SQL passed as a string, which the guard
+// cannot see.
 var deniedFunctions = map[string]bool{
 	// Server files.
 	"pg_read_file":        true,
 	"pg_read_binary_file": true,
-	"pg_ls_dir":           true,
 	"pg_stat_file":        true,
 	// Other sessions and the server process.
 	"pg_terminate_backend": true,
@@ -294,6 +295,12 @@ var deniedFunctions = map[string]bool{
 	// Sequences, which change outside the transaction.
 	"setval":  true,
 	"nextval": true,
+	// Statistics resets, which are not transactional (pg_stat_statements).
+	"pg_stat_statements_reset": true,
+	// Backup control before PostgreSQL 15, and slot sync on a standby (17).
+	"pg_start_backup":           true,
+	"pg_stop_backup":            true,
+	"pg_sync_replication_slots": true,
 	// HTTP from the server (pgsql-http).
 	"http":        true,
 	"http_get":    true,
@@ -323,6 +330,16 @@ var deniedPrefixes = []string{
 	"pg_drop_",        // replication slots
 	"pg_backup_",      // backup control
 	"pg_switch_",      // WAL segment switch
+	"pg_copy_",        // copies of replication slots
+	"pg_wal_replay_",  // pauses or resumes replay on a standby
+	"pg_ls_",          // pg_ls_dir and the other server directory listings
+	"pg_file_",        // adminpack (before PostgreSQL 17): writes, renames and removes server files
+	"pg_stat_reset",   // statistics resets, which are not transactional
+	// Session advisory locks: the rollback does not release them, so they stay
+	// held on the pooled connection. Transaction-level ones (pg_advisory_xact_*)
+	// are released with it.
+	"pg_advisory_lock",
+	"pg_try_advisory_lock",
 	"database_to_xml", // database_to_xml*: runs a query per table of the database
 	"schema_to_xml",   // schema_to_xml*: runs a query per table of the schema
 	"crosstab",        // tablefunc: crosstab and its wrappers run SQL passed as a string

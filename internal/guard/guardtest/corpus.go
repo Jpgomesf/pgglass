@@ -1,4 +1,7 @@
-package guard_test
+// Package guardtest holds the guard's corpus: the bypasses it must reject and
+// the reads it must allow. The guard's unit tests and the server's end-to-end
+// tests both run it.
+package guardtest
 
 // Sources cited by the cases below:
 //
@@ -11,12 +14,15 @@ package guard_test
 //	[lexer]      statement smuggling past a lexer that is not Postgres's own
 //	[policy]     the guard's own rules
 
-// rejected is the bypass corpus: SQL the guard must reject. want is part of
-// the reason, naming the statement type or function where there is one.
-var rejected = []struct {
-	sql  string
-	want string
-}{
+// Case is SQL the guard must reject. Want is part of the reason, naming the
+// statement type or function where there is one.
+type Case struct {
+	SQL  string
+	Want string
+}
+
+// Rejected is the bypass corpus: SQL the guard must reject.
+var Rejected = []Case{
 	// --- More than one statement ---
 
 	// [datadog] COMMIT ends the read-only transaction; DROP then runs read-write.
@@ -401,11 +407,44 @@ var rejected = []struct {
 	{`SELECT * FROM crosstab('SELECT 1, 2, 3') AS ct(a int, b int)`, "crosstab"},
 	// [policy] tablefunc's connectby builds SQL from its text arguments.
 	{`SELECT * FROM connectby('app.tree', 'id', 'parent_id', '1', 0) AS t(id int, parent_id int, level int)`, "connectby"},
+
+	// --- Denied functions: state the rollback does not undo ---
+
+	// [policy] A session advisory lock stays held on the pooled connection.
+	{`SELECT pg_advisory_lock(42)`, "pg_advisory_lock"},
+	// [policy] Shared session advisory lock.
+	{`SELECT pg_advisory_lock_shared(42)`, "pg_advisory_lock_shared"},
+	// [policy] The non-blocking variant.
+	{`SELECT pg_try_advisory_lock(1, 2)`, "pg_try_advisory_lock"},
+	// [policy] Its shared variant.
+	{`SELECT pg_try_advisory_lock_shared(42)`, "pg_try_advisory_lock_shared"},
+	// [policy] Called as a field.
+	{`SELECT (42::bigint).pg_advisory_lock`, "function pg_advisory_lock"},
+	// [policy] Statistics resets are not transactional.
+	{`SELECT pg_stat_reset()`, "pg_stat_reset"},
+	// [policy] Cluster-wide statistics.
+	{`SELECT pg_stat_reset_shared('bgwriter')`, "pg_stat_reset_shared"},
+	// [policy] pg_stat_statements.
+	{`SELECT pg_stat_statements_reset()`, "pg_stat_statements_reset"},
+	// [policy] Copies a replication slot, which outlives the transaction.
+	{`SELECT pg_copy_physical_replication_slot('a', 'b')`, "pg_copy_physical_replication_slot"},
+	// [policy] Creates slots on a standby (PostgreSQL 17).
+	{`SELECT pg_sync_replication_slots()`, "pg_sync_replication_slots"},
+	// [policy] Pauses replay on a standby.
+	{`SELECT pg_wal_replay_pause()`, "pg_wal_replay_pause"},
+	// [policy] Backup control before PostgreSQL 15.
+	{`SELECT pg_start_backup('b')`, "pg_start_backup"},
+	// [policy] Backup control before PostgreSQL 15.
+	{`SELECT pg_stop_backup()`, "pg_stop_backup"},
+	// [policy] adminpack writes server files (before PostgreSQL 17).
+	{`SELECT pg_file_write('x', 'y', false)`, "pg_file_write"},
+	// [policy] Server directory listings.
+	{`SELECT * FROM pg_ls_waldir()`, "pg_ls_waldir"},
 }
 
-// allowed is SQL the guard must accept: what an agent reading a database
+// Allowed is SQL the guard must accept: what an agent reading a database
 // writes, and look-alikes of the rejected cases.
-var allowed = []string{
+var Allowed = []string{
 	// Plain and complex SELECTs.
 	`SELECT 1`,
 	`select 1;`,
@@ -476,6 +515,9 @@ var allowed = []string{
 	`SELECT to_tsvector('english', message) FROM app.audit_log`,
 	`SELECT pg_size_pretty(pg_total_relation_size('app.orders')), pg_backend_pid()`,
 	`SELECT n.nspname FROM pg_catalog.pg_namespace n`,
+	`SELECT pg_advisory_xact_lock(42), pg_try_advisory_xact_lock(43), pg_advisory_unlock(44)`,
+	`SELECT relname, seq_scan FROM pg_stat_user_tables`,
+	`SELECT pg_is_wal_replay_paused(), pg_lsn('0/16B3748'), name FROM pg_file_settings`,
 	`SELECT net.id FROM app.events AS net`,
 	`SELECT "dblink" FROM (SELECT 1 AS "dblink") s`,
 	`SELECT 'São Paulo' AS cidade`,

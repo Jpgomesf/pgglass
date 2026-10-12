@@ -11,6 +11,7 @@ import (
 	pgquery "github.com/wasilibs/go-pgquery"
 
 	"github.com/jpgomesf/mcp-postgres/internal/guard"
+	"github.com/jpgomesf/mcp-postgres/internal/guard/guardtest"
 )
 
 func assertRejected(t *testing.T, sql, want string) {
@@ -27,13 +28,13 @@ func assertRejected(t *testing.T, sql, want string) {
 }
 
 func TestCheckRejectsBypassCorpus(t *testing.T) {
-	for _, c := range rejected {
-		assertRejected(t, c.sql, c.want)
+	for _, c := range guardtest.Rejected {
+		assertRejected(t, c.SQL, c.Want)
 	}
 }
 
 func TestCheckAllowsReadOnlyCorpus(t *testing.T) {
-	for _, sql := range allowed {
+	for _, sql := range guardtest.Allowed {
 		if err := guard.Check(sql); err != nil {
 			t.Errorf("Check(%q) = %v, want nil", sql, err)
 		}
@@ -102,12 +103,12 @@ func TestCheckIsSafeForConcurrentUse(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for _, c := range rejected[:20] {
-				if guard.Check(c.sql) == nil {
-					t.Errorf("Check(%q) = nil, want a *Violation", c.sql)
+			for _, c := range guardtest.Rejected[:20] {
+				if guard.Check(c.SQL) == nil {
+					t.Errorf("Check(%q) = nil, want a *Violation", c.SQL)
 				}
 			}
-			for _, sql := range allowed[:20] {
+			for _, sql := range guardtest.Allowed[:20] {
 				if err := guard.Check(sql); err != nil {
 					t.Errorf("Check(%q) = %v, want nil", sql, err)
 				}
@@ -120,10 +121,10 @@ func TestCheckIsSafeForConcurrentUse(t *testing.T) {
 // FuzzCheck: Check never panics, every error it returns is a *Violation, and
 // whatever it accepts parses to exactly one allowed statement.
 func FuzzCheck(f *testing.F) {
-	for _, c := range rejected {
-		f.Add(c.sql)
+	for _, c := range guardtest.Rejected {
+		f.Add(c.SQL)
 	}
-	for _, sql := range allowed {
+	for _, sql := range guardtest.Allowed {
 		f.Add(sql)
 	}
 	f.Fuzz(func(t *testing.T, sql string) {
