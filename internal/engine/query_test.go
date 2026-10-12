@@ -269,7 +269,7 @@ func TestMaxBytesTruncates(t *testing.T) {
 // that contains fragment.
 func running(t *testing.T, observer *pgx.Conn, fragment string) int {
 	t.Helper()
-	n, err := strconv.Atoi(observe(t, observer, `SELECT count(*)::text FROM pg_stat_activity
+	n, err := strconv.Atoi(testdb.Value[string](t, observer, `SELECT count(*)::text FROM pg_stat_activity
 		WHERE state = 'active' AND pid <> pg_backend_pid() AND strpos(query, $1) > 0`, fragment))
 	if err != nil {
 		t.Fatal(err)

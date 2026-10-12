@@ -112,6 +112,16 @@ func Conn(t testing.TB, role, database string) *pgx.Conn {
 	return conn
 }
 
+// Value runs sql on conn and returns the one value it selects.
+func Value[T any](t testing.TB, conn *pgx.Conn, sql string, args ...any) T {
+	t.Helper()
+	var v T
+	if err := conn.QueryRow(t.Context(), sql, args...).Scan(&v); err != nil {
+		t.Fatalf("testdb: %s: %v", sql, err)
+	}
+	return v
+}
+
 // CreateDatabase creates database name, runs fixtureSQL in it as the superuser
 // and drops the database, closing any open connections, when t finishes.
 // fixtureSQL may hold several statements. Roles are cluster-wide and survive

