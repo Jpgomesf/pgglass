@@ -12,6 +12,8 @@ package guardtest
 //	[crystaldba] https://github.com/crystaldba/postgres-mcp/issues/178
 //	[v1]         bypasses of this server's v1 first-word blocklist
 //	[lexer]      statement smuggling past a lexer that is not Postgres's own
+//	[redteam]    bypasses of v2 confirmed by red-team runs
+//	[review]     gaps in v2 found by code review
 //	[policy]     the guard's own rules
 
 // Case is SQL the guard must reject. Want is part of the reason, naming the
@@ -265,6 +267,29 @@ var Rejected = []Case{
 	{`SELECT xpath('//auth_method/text()', table_to_xml('pg_hba_file_rules', true, false, ''))`, "table_to_xml"},
 	// [redteam] xml2's xpath_table builds and runs SQL from its text arguments.
 	{`SELECT * FROM xpath_table('k','d','pg_hba_file_rules','/x','true') AS t(k int, v text)`, "xpath_table"},
+	// [policy] pageinspect returns a relation's raw pages, its rows included.
+	{`SELECT encode(get_raw_page('pg_authid', 0), 'escape')`, "get_raw_page"},
+
+	// --- Credentials in system catalogs and views ---
+	// A superuser connection, which role_check warn admits, reads most of
+	// them; the user-mapping views show a mapped role its own passwords.
+
+	// [review] SCRAM or MD5 password verifiers.
+	{`SELECT rolname, rolpassword FROM pg_authid`, "pg_authid"},
+	// [review] The same, joined in.
+	{`SELECT r.rolname FROM pg_roles r JOIN pg_catalog.pg_authid a ON a.oid = r.oid WHERE a.rolpassword IS NOT NULL`, "pg_authid"},
+	// [review] The same, as a view.
+	{`SELECT usename, passwd FROM pg_shadow`, "pg_shadow"},
+	// [review] Foreign-server passwords.
+	{`SELECT umuser, umoptions FROM pg_user_mapping`, "pg_user_mapping"},
+	// [review] The same, shown to the mapped role itself.
+	{`SELECT srvname, usename, umoptions FROM pg_user_mappings`, "pg_user_mappings"},
+	// [policy] information_schema's view of them, likewise.
+	{`SELECT option_name, option_value FROM information_schema.user_mapping_options`, "user_mapping_options"},
+	// [policy] information_schema's base view of them.
+	{`SELECT umoptions FROM information_schema._pg_user_mappings`, "_pg_user_mappings"},
+	// [review] Subscription connection strings, passwords included.
+	{`SELECT subname, subconninfo FROM pg_subscription`, "pg_subscription"},
 
 	// --- Denied functions: v1 bypasses and spellings ---
 
@@ -562,6 +587,13 @@ var Allowed = []string{
 	// pg_settings (current GUC values, like SHOW) stays allowed; only the
 	// views that return raw config-file contents are denied.
 	`SELECT name, setting, unit FROM pg_settings WHERE name = 'statement_timeout'`,
+	// Function prefixes do not apply to relations: pg_replication_ is denied
+	// as a function prefix only.
+	`SELECT slot_name, active FROM pg_replication_slots`,
+	// Views that mask passwords, and subscription status without conninfo.
+	`SELECT rolname, rolsuper, rolpassword FROM pg_roles`,
+	`SELECT usename, passwd FROM pg_catalog.pg_user`,
+	`SELECT subname, pid FROM pg_stat_subscription`,
 	`SELECT net.id FROM app.events AS net`,
 	`SELECT "dblink" FROM (SELECT 1 AS "dblink") s`,
 	`SELECT 'São Paulo' AS cidade`,

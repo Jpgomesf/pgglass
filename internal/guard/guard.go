@@ -42,10 +42,11 @@ func violation(format string, args ...any) error {
 // The statement must be a SELECT (VALUES, TABLE and set operations included),
 // EXPLAIN [ANALYZE] of such a SELECT, or SHOW. Every node of the query is then
 // checked: WITH queries must be SELECTs, SELECT INTO and FOR UPDATE/SHARE are
-// rejected, and so are calls to the functions in deniedFunctions and
-// deniedPrefixes, wherever they appear and including field-selection calls
-// such as x.pg_read_file. SQL nested too deeply to parse safely is rejected
-// before parsing. Check is safe for concurrent use.
+// rejected, and so are references to the relations in deniedRelations and
+// calls to the functions in deniedFunctions and deniedPrefixes, wherever they
+// appear and including field-selection calls such as x.pg_read_file. SQL
+// nested too deeply to parse safely is rejected before parsing. Check is safe
+// for concurrent use.
 func Check(sql string) error {
 	stmt, err := parseSingle(sql)
 	if err != nil {
@@ -208,21 +209,19 @@ func checkCTE(c *pg_query.CommonTableExpr) error {
 	return nil
 }
 
-// checkRelation rejects a reference to a system view that parses and returns
-// the content of a server configuration file. pg_read_file on those files is
-// already denied; these views are the same read under another name, so they
-// belong to the guard's "Server files" category. The match is on the
-// relation's own name, lower-cased and whatever the schema, like
-// checkFunction: a CTE or table that shadows one of these names is rejected
-// too, since the parse tree cannot tell them apart.
+// checkRelation rejects a reference to a system catalog or view in
+// deniedRelations, which disclose server configuration files or credentials.
+// The match is on the relation's own name, lower-cased and whatever the
+// schema, like checkFunction: a CTE or table that shadows one of these names
+// is rejected too, since the parse tree cannot tell them apart.
 //
 // Only a reference in the query is a RangeVar. A function that takes a
 // relation by name, as a regclass or text argument, and returns its rows
 // reads the relation without one, so such functions must be denied as well:
-// table_to_xml* and xpath_table are.
+// table_to_xml*, xpath_table and get_raw_page are.
 func checkRelation(r *pg_query.RangeVar) error {
 	if deniedRelations[strings.ToLower(r.GetRelname())] {
-		return violation("relation %s is not allowed: it discloses a server configuration file", r.GetRelname())
+		return violation("relation %s is not allowed: it discloses server configuration or credentials", r.GetRelname())
 	}
 	return nil
 }
@@ -347,16 +346,27 @@ var deniedFunctions = map[string]bool{
 	"ts_rewrite":                 true, // ts_rewrite(query, select text) runs the select
 	"connectby":                  true, // tablefunc: builds SQL from its text arguments
 	"xpath_table":                true, // xml2: builds SQL from its text arguments
+	// A relation read by name, past deniedRelations (see checkRelation).
+	"get_raw_page": true, // pageinspect: the relation's raw pages, its rows included
 }
 
-// deniedRelations are system views that parse and return the server's
-// configuration files: the same disclosure as the denied pg_read_file, by
-// another name. They are referenced as relations, not function calls, so the
-// guard rejects them where it meets a RangeVar.
+// deniedRelations are system catalogs and views that disclose the server's
+// configuration files or credentials. They are referenced as relations, not
+// function calls, so the guard rejects them where it meets a RangeVar.
+// pg_roles and pg_user, which mask passwords, stay allowed.
 var deniedRelations = map[string]bool{
+	// Configuration files: the same disclosure as the denied pg_read_file.
 	"pg_hba_file_rules":      true, // pg_hba.conf, the authentication policy
 	"pg_ident_file_mappings": true, // pg_ident.conf, the user name maps (PostgreSQL 15+)
 	"pg_file_settings":       true, // postgresql.conf and its include files, with their paths
+	// Credentials. Most are superuser-only, which role_check warn admits.
+	"pg_authid":            true, // password verifiers
+	"pg_shadow":            true, // the same, as a view
+	"pg_user_mapping":      true, // foreign-server passwords in umoptions
+	"pg_user_mappings":     true, // the same, shown to the mapped role itself
+	"user_mapping_options": true, // information_schema's view of them, likewise
+	"_pg_user_mappings":    true, // information_schema's base view of them
+	"pg_subscription":      true, // subscription connection strings, passwords included
 }
 
 // deniedPrefixes deny whole function families by name prefix.
