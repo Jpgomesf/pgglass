@@ -215,6 +215,11 @@ func checkCTE(c *pg_query.CommonTableExpr) error {
 // relation's own name, lower-cased and whatever the schema, like
 // checkFunction: a CTE or table that shadows one of these names is rejected
 // too, since the parse tree cannot tell them apart.
+//
+// Only a reference in the query is a RangeVar. A function that takes a
+// relation by name, as a regclass or text argument, and returns its rows
+// reads the relation without one, so such functions must be denied as well:
+// table_to_xml* and xpath_table are.
 func checkRelation(r *pg_query.RangeVar) error {
 	if deniedRelations[strings.ToLower(r.GetRelname())] {
 		return violation("relation %s is not allowed: it discloses a server configuration file", r.GetRelname())
@@ -341,6 +346,7 @@ var deniedFunctions = map[string]bool{
 	"ts_stat":                    true,
 	"ts_rewrite":                 true, // ts_rewrite(query, select text) runs the select
 	"connectby":                  true, // tablefunc: builds SQL from its text arguments
+	"xpath_table":                true, // xml2: builds SQL from its text arguments
 }
 
 // deniedRelations are system views that parse and return the server's
@@ -375,5 +381,6 @@ var deniedPrefixes = []string{
 	"pg_try_advisory_lock",
 	"database_to_xml", // database_to_xml*: runs a query per table of the database
 	"schema_to_xml",   // schema_to_xml*: runs a query per table of the schema
+	"table_to_xml",    // table_to_xml*: reads the relation it is given by name (see checkRelation)
 	"crosstab",        // tablefunc: crosstab and its wrappers run SQL passed as a string
 }

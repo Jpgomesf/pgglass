@@ -255,6 +255,17 @@ var Rejected = []Case{
 	// [policy] Called as a field: Postgres reads x.pg_current_logfile as the call.
 	{`SELECT ('stderr'::text).pg_current_logfile`, "function pg_current_logfile"},
 
+	// --- Denied relations read by name, with no reference to check ---
+
+	// [redteam] table_to_xml takes a regclass: it returned pg_hba.conf as the superuser.
+	{`SELECT table_to_xml('pg_catalog.pg_hba_file_rules', true, false, '')`, "table_to_xml"},
+	// [redteam] Its sibling, for postgresql.conf with its paths.
+	{`SELECT table_to_xml_and_xmlschema('pg_file_settings', true, false, '')`, "table_to_xml_and_xmlschema"},
+	// [policy] xpath() extracts the whole document, past the inline output limit.
+	{`SELECT xpath('//auth_method/text()', table_to_xml('pg_hba_file_rules', true, false, ''))`, "table_to_xml"},
+	// [redteam] xml2's xpath_table builds and runs SQL from its text arguments.
+	{`SELECT * FROM xpath_table('k','d','pg_hba_file_rules','/x','true') AS t(k int, v text)`, "xpath_table"},
+
 	// --- Denied functions: v1 bypasses and spellings ---
 
 	// [v1] query_to_xml runs the SQL string it is given.
@@ -542,6 +553,7 @@ var Allowed = []string{
 	`SELECT netmask(last_ip) FROM app.customers`,
 	`SELECT set_byte('\x00'::bytea, 0, 1), current_setting('statement_timeout')`,
 	`SELECT to_tsvector('english', message) FROM app.audit_log`,
+	`SELECT xmlelement(name total, sum(total)), xpath('/a/text()', '<a>1</a>'::xml) FROM app.orders`,
 	`SELECT pg_size_pretty(pg_total_relation_size('app.orders')), pg_backend_pid()`,
 	`SELECT n.nspname FROM pg_catalog.pg_namespace n`,
 	`SELECT pg_advisory_xact_lock(42), pg_try_advisory_xact_lock(43), pg_advisory_unlock(44)`,
