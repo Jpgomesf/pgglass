@@ -10,7 +10,6 @@ config.json
         └── "my-db"                          ← connection name (used in tool calls)
               ├── source: "direct"           ← which CredentialSource resolves the DSN
               ├── dsn: "postgres://..."      ← source-specific fields
-              ├── readonly: true             ← per-connection overrides
               └── default_schema: "public"   ← optional search_path
 ```
 
@@ -106,7 +105,7 @@ The server automatically appends `statement_timeout` and `default_transaction_re
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `source` | string | *required* | `direct`, `env`, `dotenv`, or `aws_secrets_manager` |
-| `readonly` | bool | from defaults | Override the global readonly setting |
+| `readonly` | bool | — | Deprecated and ignored: the server is always read-only |
 | `requires_vpn` | bool | `false` | TCP reachability check before connecting |
 | `default_schema` | string | `""` | Auto-set `search_path` when querying |
 
@@ -115,21 +114,35 @@ The server automatically appends `statement_timeout` and `default_transaction_re
 ```json
 {
   "defaults": {
-    "readonly": true,
-    "statement_timeout_seconds": 30
+    "statement_timeout_seconds": 30,
+    "lock_timeout_seconds": 5,
+    "max_rows": 1000,
+    "max_bytes": 1048576,
+    "spill_ttl_hours": 24,
+    "format": "tsv",
+    "role_check": "warn"
   }
 }
 ```
 
+Every field is optional: a missing or zero value takes the default. Numbers must be positive.
+
 | Field | Default | Description |
 |-------|---------|-------------|
-| `readonly` | `false` | Enforce `default_transaction_read_only=on` for all connections |
 | `statement_timeout_seconds` | `30` | Max query execution time |
+| `lock_timeout_seconds` | `5` | Max time a query waits for a lock |
+| `max_rows` | `1000` | Rows returned before the result is truncated |
+| `max_bytes` | `1048576` (1 MiB) | Result bytes returned before the result is truncated |
+| `spill_ttl_hours` | `24` | How long large results spilled to files are kept |
+| `format` | `tsv` | Result format: `tsv`, `json` or `markdown` |
+| `role_check` | `warn` | When the connected role can do more than read: `strict` refuses, `warn` warns, `off` skips the check |
+| `readonly` | — | Deprecated and ignored: the server is always read-only |
 
 ## Validation Rules
 
 | When | What | Error |
 |------|------|-------|
+| Startup | `defaults` values must be valid | `defaults.max_rows must be positive, got -1` |
 | Startup | `source` must be a registered type | `unknown source "foo" (registered: ...)` |
 | Connect | `direct`: `dsn` must be non-empty | `missing required fields: dsn` |
 | Connect | `env`: `dsn_env_var` must be set, variable must exist | `environment variable "X" is not set` |
@@ -157,14 +170,12 @@ We recommend `{environment}-{database}`:
 ```json
 {
   "defaults": {
-    "readonly": true,
     "statement_timeout_seconds": 30
   },
   "connections": {
     "local-dev": {
       "source": "direct",
       "dsn": "postgres://dev:dev@localhost:5432/app_dev",
-      "readonly": false,
       "default_schema": "public"
     },
     "staging-app": {

@@ -1,6 +1,5 @@
 {
   "defaults": {
-    "readonly": true,
     "statement_timeout_seconds": 30
   },
   "connections": {
