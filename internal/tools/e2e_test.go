@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -368,32 +369,47 @@ func TestRoleCheckOffSkipsTheAudit(t *testing.T) {
 	}
 }
 
+// parallelRow matches the result of one query of the parallel test: its
+// parameter and the backend that ran it.
+var parallelRow = regexp.MustCompile(`^i\tn\tpid\tpg_sleep\n(\d+)\t1000\t(\d+)\t\n\(1 row\)$`)
+
+// Calls on one connection overlap: run one at a time, they would all reuse
+// one pooled session, so several backends show that they ran together.
 func TestParallelQueriesOnOneConnection(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
-	var wg sync.WaitGroup
+	var (
+		wg   sync.WaitGroup
+		mu   sync.Mutex
+		pids = map[string]bool{}
+	)
 	for i := range 20 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			res, err := s.CallTool(t.Context(), &mcp.CallToolParams{Name: "pg_query", Arguments: args("clean",
-				"SELECT $1::int AS i, count(*) AS n, pg_sleep(0.05) FROM events WHERE id % 20 = $1", "params", []any{i})})
-			if err != nil {
-				t.Errorf("query %d: %v", i, err)
-				return
-			}
+				"SELECT $1::int AS i, count(*) AS n, pg_backend_pid() AS pid, pg_sleep(0.05) FROM events WHERE id % 20 = $1",
+				"params", []any{i})})
 			var text string // not resultText: t.Fatal must not run on this goroutine
-			if len(res.Content) == 1 {
+			if err == nil && len(res.Content) == 1 {
 				if c, ok := res.Content[0].(*mcp.TextContent); ok {
 					text = c.Text
 				}
 			}
-			if want := fmt.Sprintf("i\tn\tpg_sleep\n%d\t1000\t", i); res.IsError || !strings.HasPrefix(text, want) {
-				t.Errorf("query %d:\n%s\nwant it to start with\n%s", i, text, want)
+			m := parallelRow.FindStringSubmatch(text) // an error result does not match
+			if m == nil || m[1] != strconv.Itoa(i) {
+				t.Errorf("query %d: %v\n%s", i, err, text)
+				return
 			}
+			mu.Lock()
+			pids[m[2]] = true
+			mu.Unlock()
 		}()
 	}
 	wg.Wait()
+	if len(pids) < 2 {
+		t.Errorf("20 parallel calls ran on %d backend(s), want several", len(pids))
+	}
 	ok := 0
 	for _, line := range s.auditLines(t) {
 		if line.Tool == "pg_query" && line.Outcome == "ok" && line.Rows == 1 {
