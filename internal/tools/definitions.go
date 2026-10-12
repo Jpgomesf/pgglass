@@ -87,3 +87,15 @@ func prop(typ, description string) map[string]any {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+var diffSchemaTool = &mcp.Tool{
+	Name: "pg_diff_schema",
+	Description: "Compare one schema on two connections, e.g. prod and staging: relations, columns, " +
+		"constraints, indexes and RLS policies.",
+	Annotations: annotations,
+	InputSchema: object([]string{"left", "right"}, map[string]any{
+		"left":   connectionArg,
+		"right":  connectionArg,
+		"schema": prop("string", "Schema to compare; default public."),
+	}),
+}

@@ -140,3 +140,22 @@ Two `pg_query` calls run at the same time, one per connection.
 - **Start with `pg_schema` or `pg_search`.** Agents write better SQL when they know the exact names and types.
 - **Set `default_schema`** so unqualified names resolve without a `schema` argument.
 - **Aggregate in SQL.** A `count(*)` or `GROUP BY` answers in one row where reading rows spills a file.
+
+## Compare a schema across connections
+
+`pg_diff_schema` compares one schema on two connections, typically production and staging. It takes `left` and `right`, two connection names, and `schema` (default `public`), and reads each side with one catalog query:
+
+```
+schema app, prod → staging: 4 differences (- only in prod, + only in staging)
++ table coupons
+~ column orders.total: numeric(12,2) NOT NULL → numeric(14,2) NOT NULL
++ index orders.orders_placed_at_idx
+- table tenant_notes
+```
+
+`~` marks what both define differently, left then right. It compares relations (their kind and whether row-level security is on), columns (type, `NOT NULL`, default, identity or generation), constraints, indexes and RLS policies; an index that implements a constraint shows as the constraint. Relations come in name order, each followed by its columns, constraints, indexes and policies, and a relation only one side has takes one line. When nothing differs, the result says `identical` and how many relations it compared.
+
+- Only what each connection's role can read is compared, as in `pg_schema`, and partitions are left out. A schema that one side lacks, or whose role lacks `USAGE` on it, is an error naming that side.
+- Definitions are compared as each server prints them, so servers of different major versions can differ in spelling alone.
+- Output past 10 KB is written to a CSV file, one difference per row, and summarized under the first line.
+- Both connections go through the role check, and the audit line names both: `"connection":"prod,staging"`.
