@@ -273,8 +273,11 @@ func countAndSample(ctx context.Context, q engine.Querier, sql string, params ..
 // queryRow runs sql and returns its only row, which must hold width values.
 // Every query of the audit aggregates into one row, so max_rows cannot cut it
 // short, and any other result is an error rather than a silently clean audit.
+// The search_path is pg_catalog alone: a schema the role or database puts
+// before it could otherwise shadow the catalogs and functions the audit reads
+// and fake a clean report.
 func queryRow(ctx context.Context, q engine.Querier, width int, sql string, params ...any) ([]*string, error) {
-	res, err := q.Query(ctx, engine.Query{SQL: sql, Params: params})
+	res, err := q.Query(ctx, engine.Query{SQL: sql, Params: params, SearchPath: "pg_catalog"})
 	if err != nil {
 		return nil, err
 	}
