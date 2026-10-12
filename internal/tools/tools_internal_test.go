@@ -127,6 +127,30 @@ func TestFormat(t *testing.T) {
 	}
 }
 
+// The schema argument replaces default_schema, and either is refused when it
+// names a schema whose functions the guard denies.
+func TestSearchPath(t *testing.T) {
+	h := &Handlers{cfg: config.Config{Connections: map[string]config.Connection{
+		"app": {DefaultSchema: "app"},
+		"net": {DefaultSchema: "net"},
+	}}}
+	for _, tc := range []struct{ conn, schema, want string }{
+		{"app", "", "app"},
+		{"app", "public", "public"},
+		{"net", "app", "app"},
+	} {
+		if got, err := h.searchPath(tc.conn, tc.schema); err != nil || got != tc.want {
+			t.Errorf("searchPath(%q, %q) = %q, %v; want %q", tc.conn, tc.schema, got, err, tc.want)
+		}
+	}
+	for _, tc := range []struct{ conn, schema string }{{"app", "net"}, {"app", "AWS_S3"}, {"net", ""}} {
+		var v *guard.Violation
+		if _, err := h.searchPath(tc.conn, tc.schema); !errors.As(err, &v) {
+			t.Errorf("searchPath(%q, %q): err = %v, want a *guard.Violation", tc.conn, tc.schema, err)
+		}
+	}
+}
+
 func TestDecode(t *testing.T) {
 	var args queryArgs
 	if err := decode([]byte(`{"connection": "c", "sql": "SELECT $1", "params": [12345678901234567890.5, "x", null], "max_rows": 5}`), &args); err != nil {

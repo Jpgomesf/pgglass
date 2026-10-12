@@ -46,13 +46,17 @@ func (h *Handlers) query(ctx context.Context, raw json.RawMessage, c *call) (str
 	if err := guard.Check(args.SQL); err != nil {
 		return "", err
 	}
+	searchPath, err := h.searchPath(args.Connection, args.Schema)
+	if err != nil {
+		return "", err
+	}
 	if c.notice, err = h.checks.gate(ctx, args.Connection); err != nil {
 		return "", err
 	}
 	res, err := h.engine.Query(ctx, args.Connection, engine.Query{
 		SQL:        args.SQL,
 		Params:     args.Params,
-		SearchPath: h.searchPath(args.Connection, args.Schema),
+		SearchPath: searchPath,
 		MaxRows:    args.MaxRows,
 	})
 	if err != nil {
@@ -90,10 +94,11 @@ func (h *Handlers) format(name string) (render.Format, error) {
 }
 
 // searchPath returns schema, or the connection's default_schema when schema
-// is empty.
-func (h *Handlers) searchPath(conn, schema string) string {
-	if schema != "" {
-		return schema
+// is empty. It refuses, with a *guard.Violation, a schema whose functions the
+// guard denies: on the search_path, they could be called unqualified.
+func (h *Handlers) searchPath(conn, schema string) (string, error) {
+	if schema == "" {
+		schema = h.cfg.Connections[conn].DefaultSchema
 	}
-	return h.cfg.Connections[conn].DefaultSchema
+	return schema, guard.CheckSearchPath(schema)
 }

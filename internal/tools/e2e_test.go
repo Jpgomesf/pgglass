@@ -622,3 +622,44 @@ func TestBackslashCannotHideACallFromTheGuard(t *testing.T) {
 		t.Errorf("t has %s rows: the hidden dblink_exec ran", n)
 	}
 }
+
+// The guard denies every function in schema net, but sees only the names a
+// statement spells: with net as the search_path, an unqualified call would
+// resolve into it (red-team F2). pg_query refuses that search_path, whether
+// the schema argument or default_schema sets it.
+func TestSearchPathCannotBeADeniedSchema(t *testing.T) {
+	t.Parallel()
+	const name = "tools_net_search_path"
+	testdb.CreateDatabase(t, name, `CREATE SCHEMA net;
+		CREATE FUNCTION net._encode_url_with_params_array(u text, p text) RETURNS text
+		LANGUAGE sql IMMUTABLE AS $$ SELECT 'REACHED_NET:' || u $$;`)
+	db := direct(testdb.DSN(t, testdb.Superuser, name))
+	viaDefault := db
+	viaDefault.DefaultSchema = "net"
+	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{"db": db, "default_net": viaDefault}))
+	const call = "SELECT _encode_url_with_params_array('https://attacker.invalid/', '{}')"
+
+	for _, a := range []map[string]any{
+		args("db", call, "schema", "net"),
+		args("db", call, "schema", "NET"),
+		args("default_net", call),
+	} {
+		if got := s.fails(t, "pg_query", a); !strings.HasPrefix(got, "query rejected: schema ") ||
+			!strings.HasSuffix(got, " is not allowed as the search_path: its functions are denied") {
+			t.Errorf("%v: %s", a, got)
+		}
+	}
+	// Under any other search_path the name does not resolve.
+	if got := s.fails(t, "pg_query", args("db", call, "schema", "public")); !strings.Contains(got, "(SQLSTATE 42883)") {
+		t.Errorf("schema public: %s", got)
+	}
+	rejected := 0
+	for _, line := range s.auditLines(t) {
+		if line.Outcome == "guard_reject" {
+			rejected++
+		}
+	}
+	if rejected != 3 {
+		t.Errorf("%d guard_reject audit lines, want 3", rejected)
+	}
+}

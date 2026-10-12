@@ -25,7 +25,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
 	"github.com/jpgomesf/mcp-postgres/internal/resolver"
 	"github.com/jpgomesf/mcp-postgres/internal/result"
 )
@@ -58,8 +57,7 @@ type Query struct {
 	SQL    string
 	Params []any // values for $1..$n
 	// SearchPath, when set, names the one schema used as search_path for this
-	// query only. The engine quotes it as an identifier, and refuses a schema
-	// the guard denies, such as net.
+	// query only. The engine quotes it as an identifier.
 	SearchPath string
 	// MaxRows, when positive, lowers the max_rows limit for this query only.
 	// It never raises it.
@@ -128,14 +126,10 @@ func New(cfg *config.Config) *Manager {
 // that is always rolled back, with the limits applied. Rows beyond MaxRows or
 // MaxBytes are dropped and reported through Result.Truncated. Errors raised
 // by Postgres are returned as *QueryError; connection, resolution and context
-// failures as plain errors. Query does not run guard.Check: callers passing
-// untrusted SQL must check it first. It does refuse, with the
-// *guard.Violation of guard.CheckSearchPath, a SearchPath that would let
-// unqualified names reach a schema the guard denies.
+// failures as plain errors. Query does not run the guard: callers passing
+// untrusted SQL or SearchPath must check them first, with guard.Check and
+// guard.CheckSearchPath.
 func (m *Manager) Query(ctx context.Context, conn string, q Query) (*result.Result, error) {
-	if err := guard.CheckSearchPath(q.SearchPath); err != nil {
-		return nil, err
-	}
 	p, err := m.pool(ctx, conn)
 	if err != nil {
 		return nil, queryError(ctx, err)

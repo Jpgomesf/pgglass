@@ -13,7 +13,6 @@ import (
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
 
@@ -117,30 +116,6 @@ func TestSearchPathAppliesToOneQuery(t *testing.T) {
 	if got, want := deref(res.Rows[0][0]), `"app""; SET LOCAL search_path TO public; --"`; got != want {
 		t.Errorf("search_path = %s, want the one quoted identifier %s", got, want)
 	}
-}
-
-// The guard denies every function in schema net, but sees only the names a
-// statement spells: with net as the search_path, an unqualified call would
-// resolve into it (red-team F2). The engine refuses that search_path.
-func TestSearchPathCannotBeADeniedSchema(t *testing.T) {
-	t.Parallel()
-	const name = "engine_net_search_path"
-	testdb.CreateDatabase(t, name, `CREATE SCHEMA net;
-		CREATE FUNCTION net._encode_url_with_params_array(u text, p text) RETURNS text
-		LANGUAGE sql IMMUTABLE AS $$ SELECT 'REACHED_NET:' || u $$;`)
-	m := newManager(t, config.Defaults{}, testdb.DSN(t, testdb.Superuser, name))
-	const call = "SELECT _encode_url_with_params_array('https://attacker.invalid/', '{}')"
-
-	for _, schema := range []string{"net", "NET"} {
-		res, err := m.Query(t.Context(), db, engine.Query{SQL: call, SearchPath: schema})
-		var v *guard.Violation
-		if !errors.As(err, &v) {
-			t.Errorf("search_path %s: result %+v, err %v; want a *guard.Violation", schema, res, err)
-		}
-	}
-	// Under any other search_path the name does not resolve.
-	_, err := m.Query(t.Context(), db, engine.Query{SQL: call, SearchPath: "public"})
-	wantSQLState(t, err, "42883") // undefined_function
 }
 
 func TestLimitsAreSetPerTransaction(t *testing.T) {
