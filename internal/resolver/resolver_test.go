@@ -194,8 +194,9 @@ func TestRegistration(t *testing.T) {
 	}
 }
 
+// TestRegisterSource writes the global registry that the parallel tests
+// read, so it is not parallel.
 func TestRegisterSource(t *testing.T) {
-	t.Parallel()
 	resolver.RegisterSource(fakeSource{})
 	if !resolver.IsRegistered("resolver_test_fake") {
 		t.Fatal("RegisterSource did not register the source")
