@@ -285,7 +285,9 @@ func TestListConnectionsShowsRoleChecks(t *testing.T) {
 	}
 }
 
-func TestRoleCheckStrictRefusesRolesThatCanWrite(t *testing.T) {
+// The superuser and ro_leaky, which may EXECUTE dblink, have critical
+// findings. Warnings alone, such as ro_leaky's INSERT, would not be refused.
+func TestRoleCheckStrictRefusesRolesWithCriticalFindings(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckStrict, appConns(t)))
 	for _, tc := range []struct {
