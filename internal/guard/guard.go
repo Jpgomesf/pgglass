@@ -43,16 +43,34 @@ func violation(format string, args ...any) error {
 // EXPLAIN [ANALYZE] of such a SELECT, or SHOW. Every node of the query is then
 // checked: WITH queries must be SELECTs, SELECT INTO and FOR UPDATE/SHARE are
 // rejected, and so are references to the relations in deniedRelations and
-// calls to the functions in deniedFunctions and deniedPrefixes, wherever they
-// appear and including field-selection calls such as x.pg_read_file. SQL
-// nested too deeply to parse safely is rejected before parsing. Check is safe
-// for concurrent use.
+// calls to the functions in deniedFunctions, deniedPrefixes and, by qualified
+// name, deniedSchemas, wherever they appear and including field-selection
+// calls such as x.pg_read_file. SQL nested too deeply to parse safely is
+// rejected before parsing. Check is safe for concurrent use.
 func Check(sql string) error {
 	stmt, err := parseSingle(sql)
 	if err != nil {
 		return err
 	}
 	return checkStatement(stmt)
+}
+
+// CheckSearchPath returns a *Violation if schema, the one schema a query's
+// search_path is set to, is in deniedSchemas. Check denies calls into those
+// schemas by their qualified names only; with one on the search path, its
+// functions could be called by unqualified names, which Check cannot tell
+// apart from others. Callers must check every search_path they set for SQL
+// that Check accepted.
+func CheckSearchPath(schema string) error {
+	// The engine quotes the schema with pgx, which drops NUL bytes:
+	// "n\x00et" would name net.
+	if strings.ContainsRune(schema, 0) {
+		return violation("schema contains a NUL byte")
+	}
+	if deniedSchemas[strings.ToLower(schema)] {
+		return violation("schema %s is not allowed as the search_path: its functions are denied", schema)
+	}
+	return nil
 }
 
 // parseSingle parses sql and returns its only statement.
@@ -279,8 +297,8 @@ func isDenied(parts []string) bool {
 	if len(parts) == 0 {
 		return true // the parser never produces this; fail closed
 	}
-	if len(parts) > 1 && parts[len(parts)-2] == "net" {
-		return true // pg_net: HTTP requests from the server
+	if len(parts) > 1 && deniedSchemas[parts[len(parts)-2]] {
+		return true
 	}
 	name := parts[len(parts)-1]
 	if deniedFunctions[name] {
@@ -292,6 +310,14 @@ func isDenied(parts []string) bool {
 		}
 	}
 	return false
+}
+
+// deniedSchemas belong to extensions whose functions all reach outside the
+// read-only transaction, so a call to any function in them is denied.
+var deniedSchemas = map[string]bool{
+	"net":        true, // pg_net (Supabase): HTTP requests from the server
+	"aws_s3":     true, // aws_s3 (RDS, Aurora): query results to S3, and S3 files into tables
+	"aws_lambda": true, // aws_lambda (RDS, Aurora): invokes Lambda functions
 }
 
 // deniedFunctions reach outside the read-only transaction (server files,
@@ -373,6 +399,7 @@ var deniedRelations = map[string]bool{
 // deniedPrefixes deny whole function families by name prefix.
 var deniedPrefixes = []string{
 	"dblink",          // dblink, dblink_exec, ...: a second connection, outside the transaction
+	"pg_background",   // pg_background_launch, ...: runs SQL passed as a string in a worker's own transaction
 	"lo_",             // large objects; lo_import and lo_export reach server files
 	"pg_logical_",     // logical decoding messages and slots
 	"pg_replication_", // replication origins and slots

