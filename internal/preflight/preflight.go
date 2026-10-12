@@ -15,10 +15,18 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 )
 
-// Finding severities.
+// Finding severities. role_check strict refuses a role with a critical
+// finding; warnings are only reported.
 const (
-	SeverityCritical = "critical" // the role can change data or escape the read-only transaction
-	SeverityWarning  = "warning"  // risky, but not a write path on its own
+	// The role can act outside the read-only transaction: as a superuser,
+	// directly or through SET ROLE, with the server program or file-write
+	// roles, or through functions that open sessions, send requests or rows
+	// out, or write server files.
+	SeverityCritical = "critical"
+	// Risky, but no way out of the read-only transaction on its own: role
+	// attributes, table write privileges, which the transaction refuses to
+	// use, reading server files and signalling other sessions.
+	SeverityWarning = "warning"
 )
 
 // Finding is one capability the role should not have.
