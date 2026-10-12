@@ -135,7 +135,7 @@ track_extra_parameters = default_transaction_read_only
 }
 ```
 
-Every field is optional: a missing or zero value takes the default. Numbers must be positive.
+Every field is optional: a missing or zero value takes the default. Numbers must be positive. The timeouts can be at most 2147483 seconds, since Postgres takes them as an int of milliseconds, and `spill_ttl_hours` at most 2562047.
 
 | Field | Default | Description |
 |-------|---------|-------------|

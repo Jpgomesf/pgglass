@@ -130,6 +130,25 @@ func TestLimitsAreSetPerTransaction(t *testing.T) {
 	}
 }
 
+// config.MaxTimeoutSeconds is the largest timeout Postgres accepts; one
+// second more fails every query in its setup.
+func TestLargestTimeoutsAreAccepted(t *testing.T) {
+	t.Parallel()
+	const largest = config.MaxTimeoutSeconds
+	m := cleanApp(t, config.Defaults{StatementTimeoutSeconds: largest, LockTimeoutSeconds: largest})
+	res := mustQuery(t, m, engine.Query{SQL: `SELECT current_setting('statement_timeout'), current_setting('lock_timeout'),
+		current_setting('idle_in_transaction_session_timeout')`})
+	for i := range 3 {
+		if got := deref(res.Rows[0][i]); got != "2147483s" {
+			t.Errorf("setting %d = %s, want 2147483s", i, got)
+		}
+	}
+
+	over := cleanApp(t, config.Defaults{StatementTimeoutSeconds: largest + 1})
+	_, err := over.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
+	wantSQLState(t, err, "22023") // invalid_parameter_value
+}
+
 func TestDSNCannotTurnOffReadOnlyDefault(t *testing.T) {
 	t.Parallel()
 	dsn := testdb.DSN(t, testdb.RoleClean, testdb.DBApp) +

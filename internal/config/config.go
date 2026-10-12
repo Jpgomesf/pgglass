@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 const (
@@ -24,6 +26,12 @@ const (
 	DefaultSpillTTLHours      = 24
 	DefaultFormat             = FormatTSV
 	DefaultRoleCheck          = RoleCheckWarn
+
+	// MaxTimeoutSeconds bounds the timeouts: Postgres takes them as an int
+	// of milliseconds.
+	MaxTimeoutSeconds = math.MaxInt32 / 1000
+	// MaxSpillTTLHours bounds spill_ttl_hours, which becomes a time.Duration.
+	MaxSpillTTLHours = int(math.MaxInt64 / int64(time.Hour))
 )
 
 // Values of Defaults.RoleCheck: what to do when the connected role can do
@@ -119,17 +127,20 @@ func setInt(v *int, def int) {
 func (d Defaults) Validate() error {
 	var errs []error
 	for _, s := range []struct {
-		key   string
-		value int
+		key        string
+		value, max int
 	}{
-		{"statement_timeout_seconds", d.StatementTimeoutSeconds},
-		{"lock_timeout_seconds", d.LockTimeoutSeconds},
-		{"max_rows", d.MaxRows},
-		{"max_bytes", d.MaxBytes},
-		{"spill_ttl_hours", d.SpillTTLHours},
+		{"statement_timeout_seconds", d.StatementTimeoutSeconds, MaxTimeoutSeconds},
+		{"lock_timeout_seconds", d.LockTimeoutSeconds, MaxTimeoutSeconds},
+		{"max_rows", d.MaxRows, math.MaxInt},
+		{"max_bytes", d.MaxBytes, math.MaxInt},
+		{"spill_ttl_hours", d.SpillTTLHours, MaxSpillTTLHours},
 	} {
-		if s.value <= 0 {
+		switch {
+		case s.value <= 0:
 			errs = append(errs, fmt.Errorf("defaults.%s must be positive, got %d", s.key, s.value))
+		case s.value > s.max:
+			errs = append(errs, fmt.Errorf("defaults.%s must be at most %d, got %d", s.key, s.max, s.value))
 		}
 	}
 	errs = append(errs, oneOf("format", d.Format, formats), oneOf("role_check", d.RoleCheck, roleCheckModes))
