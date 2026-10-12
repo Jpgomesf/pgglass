@@ -408,6 +408,30 @@ var Rejected = []Case{
 	{`SELECT heap_force_freeze('app.orders'::regclass, ARRAY['(0,1)']::tid[])`, "heap_force_freeze"},
 	// [policy] pg_visibility truncates a visibility map in place.
 	{`SELECT pg_truncate_visibility_map('app.orders')`, "pg_truncate_visibility_map"},
+	// [redteam] Summarizes BRIN ranges in place, past READ ONLY and the
+	// rollback, as the superuser or the index's owner.
+	{`SELECT brin_summarize_new_values('idx')`, "brin_summarize_new_values"},
+	// [policy] The same for one range.
+	{`SELECT brin_summarize_range('app.events_brin_idx', 0)`, "brin_summarize_range"},
+	// [redteam] Deletes a BRIN range summary in place.
+	{`SELECT brin_desummarize_range('idx', 0)`, "brin_desummarize_range"},
+	// [redteam] Flushes a GIN index's pending list in place.
+	{`SELECT gin_clean_pending_list('idx')`, "gin_clean_pending_list"},
+	// [policy] Called as a field.
+	{`SELECT ('idx'::regclass).gin_clean_pending_list`, "function gin_clean_pending_list"},
+	// [policy] Advances the OID counter, which the rollback does not undo.
+	{`SELECT pg_nextoid('pg_class', 'oid', 'pg_class_oid_index')`, "pg_nextoid"},
+	// [redteam] Takes a transaction id that the rollback does not give back,
+	// as any role: EXECUTE is PUBLIC.
+	{`SELECT pg_current_xact_id()`, "pg_current_xact_id"},
+	// [redteam] Its older name.
+	{`SELECT txid_current()`, "txid_current"},
+	// [policy] Writes pg_collation, taking a transaction id.
+	{`SELECT pg_import_system_collations('public')`, "pg_import_system_collations"},
+	// [policy] Writes planner statistics to pg_class, likewise (PostgreSQL 18).
+	{`SELECT pg_restore_relation_stats('schemaname', 'app', 'relname', 'orders', 'reltuples', 1e9::real)`, "pg_restore_relation_stats"},
+	// [policy] Deletes a column's statistics, likewise (PostgreSQL 18).
+	{`SELECT pg_clear_attribute_stats('app', 'orders', 'status', false)`, "pg_clear_attribute_stats"},
 	// [policy] pg_replication_*.
 	{`SELECT pg_replication_origin_create('o')`, "pg_replication_origin_create"},
 	// [policy] pg_create_*.
@@ -619,6 +643,8 @@ var Allowed = []string{
 	`SELECT pg_size_pretty(pg_total_relation_size('app.orders')), pg_backend_pid()`,
 	`SELECT n.nspname FROM pg_catalog.pg_namespace n`,
 	`SELECT pg_advisory_unlock(44), pg_advisory_unlock_shared(45), pg_advisory_unlock_all()`,
+	// These read the transaction id only if one was taken, or the snapshot.
+	`SELECT pg_current_xact_id_if_assigned(), txid_current_if_assigned(), pg_current_snapshot(), txid_current_snapshot()`,
 	`SELECT relname, seq_scan FROM pg_stat_user_tables`,
 	`SELECT pg_is_wal_replay_paused(), pg_lsn('0/16B3748'), name FROM pg_settings`,
 	// pg_settings (current GUC values, like SHOW) stays allowed; only the

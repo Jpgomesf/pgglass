@@ -1,10 +1,13 @@
 // Package engine runs read-only queries against the configured connections.
 // Each query runs alone in a READ ONLY transaction that is always rolled
-// back, under timeouts and result limits: Postgres refuses its writes, and
-// the rollback undoes the rest. What acts outside the transaction (dblink,
-// server files and programs, session advisory locks), or writes in place
-// past those checks (pg_log_standby_snapshot's WAL record, pg_surgery), is
-// for internal/guard to reject and for the connection's role to lack.
+// back, under timeouts and result limits: Postgres refuses its table writes,
+// and the rollback undoes what else it changes transactionally. Neither
+// reaches what acts outside the transaction (dblink, server files and
+// programs, session advisory locks), writes in place (pg_log_standby_snapshot's
+// WAL record, pg_surgery, BRIN and GIN index maintenance) or takes a
+// transaction id, which no rollback gives back (txid_current):
+// internal/guard rejects those, and the connection's role should lack most
+// of them.
 package engine
 
 import (

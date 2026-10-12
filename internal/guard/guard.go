@@ -360,6 +360,19 @@ var deniedFunctions = map[string]bool{
 	"get_raw_page": true, // pageinspect: the relation's raw pages, its rows included
 	// Writes in place, which neither READ ONLY nor the rollback stops.
 	"pg_truncate_visibility_map": true, // pg_visibility: truncates a visibility map
+	"brin_summarize_new_values":  true, // BRIN index maintenance: summarizes ranges
+	"brin_summarize_range":       true,
+	"brin_desummarize_range":     true, // deletes a range's summary
+	"gin_clean_pending_list":     true, // GIN index maintenance: flushes the pending list
+	"pg_nextoid":                 true, // advances the OID counter
+	// A transaction id, which READ ONLY allows and the rollback does not give
+	// back: each call uses one up for good, toward wraparound. Every role may
+	// execute these.
+	"txid_current":       true,
+	"pg_current_xact_id": true,
+	// Catalog writes, which READ ONLY allows too: the rollback undoes them,
+	// but each takes a transaction id. See also pg_restore_ and pg_clear_.
+	"pg_import_system_collations": true, // inserts into pg_collation
 }
 
 // deniedRelations are system catalogs and views that disclose the server's
@@ -411,4 +424,6 @@ var deniedPrefixes = []string{
 	"table_to_xml",    // table_to_xml*: reads the relation it is given by name (see checkRelation)
 	"crosstab",        // tablefunc: crosstab and its wrappers run SQL passed as a string
 	"heap_force_",     // pg_surgery: kills or freezes rows in place, past READ ONLY and the rollback
+	"pg_restore_",     // pg_restore_relation_stats, pg_restore_attribute_stats (PostgreSQL 18): write planner statistics to the catalogs
+	"pg_clear_",       // pg_clear_relation_stats, pg_clear_attribute_stats (PostgreSQL 18): clear them
 }
