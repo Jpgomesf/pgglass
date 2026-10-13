@@ -197,7 +197,7 @@ func TestToolsListIsAnnotatedAndSmall(t *testing.T) {
 			t.Errorf("%s has no description or input schema", tool.Name)
 		}
 	}
-	if got := strings.Join(names, " "); got != "pg_diff_schema pg_list_connections pg_profile pg_query pg_schema pg_search" {
+	if got := strings.Join(names, " "); got != "pg_diff_schema pg_explain pg_list_connections pg_profile pg_query pg_schema pg_search" {
 		t.Errorf("tools = %s", got)
 	}
 	defs, err := json.Marshal(res.Tools)

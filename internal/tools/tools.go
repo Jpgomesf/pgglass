@@ -59,6 +59,7 @@ func NewServer(h *Handlers, version string) *mcp.Server {
 	s.AddTool(searchTool, h.handle("pg_search", h.search))
 	s.AddTool(diffSchemaTool, h.handle("pg_diff_schema", h.diffSchema))
 	s.AddTool(profileTool, h.handle("pg_profile", h.profile))
+	s.AddTool(explainTool, h.handle("pg_explain", h.explain))
 	return s
 }
 

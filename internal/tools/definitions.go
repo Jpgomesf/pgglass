@@ -121,3 +121,15 @@ var profileTool = &mcp.Tool{
 		"column":     prop("string", "Only this column."),
 	}),
 }
+
+var explainTool = &mcp.Tool{
+	Name:        "pg_explain",
+	Description: "Summarize one SELECT's plan: cost, costliest nodes and flags (big seq scans, misestimates, disk spills, big nested loops).",
+	Annotations: annotations,
+	InputSchema: object([]string{"connection", "sql"}, map[string]any{
+		"connection": connectionArg,
+		"sql":        prop("string", "One SELECT."),
+		"analyze":    prop("boolean", "Run it, rolled back, for actual times and rows; default false."),
+		"schema":     prop("string", "search_path; default: the connection's default_schema."),
+	}),
+}
