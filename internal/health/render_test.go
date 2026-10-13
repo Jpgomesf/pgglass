@@ -45,10 +45,19 @@ func TestSessionLines(t *testing.T) {
 	})
 	equal(t, blockedLines(list[session]{}, clean), []string{"none"})
 
-	long := list[session]{Total: 1, Items: []session{{PID: 75, Database: "app", State: "idle in transaction", Seconds: 3700, Wait: "Client:ClientRead"}}}
-	equal(t, longRunningLines(long, super), []string{"pid 75, database app, idle in transaction for 1h1m40s, waiting on Client:ClientRead"})
+	// A session idle in transaction is as old as its transaction; one whose
+	// transaction failed, as its last query.
+	long := list[session]{Total: 2, Items: []session{
+		{PID: 75, Database: "app", State: "idle in transaction", Seconds: 3700, Wait: "Client:ClientRead"},
+		{PID: 76, Database: "app", State: "idle in transaction (aborted)", Seconds: 65, Wait: "Client:ClientRead"},
+	}}
+	equal(t, longRunningLines(long, super), []string{
+		"pid 75, database app, idle in transaction, transaction open for 1h1m40s, waiting on Client:ClientRead",
+		"pid 76, database app, idle in transaction (aborted) for 1m5s, waiting on Client:ClientRead",
+	})
 	equal(t, longRunningLines(long, clean), []string{
-		"pid 75, database app, idle in transaction for 1h1m40s, waiting on Client:ClientRead",
+		"pid 75, database app, idle in transaction, transaction open for 1h1m40s, waiting on Client:ClientRead",
+		"pid 76, database app, idle in transaction (aborted) for 1m5s, waiting on Client:ClientRead",
 		"other roles' sessions are not visible to role ro_clean",
 	})
 	equal(t, longRunningLines(list[session]{}, super), []string{"none"})

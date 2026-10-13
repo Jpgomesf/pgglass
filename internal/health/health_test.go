@@ -147,7 +147,7 @@ func TestCheckListsLongRunningAndBlockedSessions(t *testing.T) {
 
 	got := checkAs(t, testdb.Superuser, name, time.Second)
 	waiting := fmt.Sprintf(`pid %d, database health_locks, active for \d+s, waiting on Lock:transactionid, application "health_waiter"`, waiter)
-	idle := fmt.Sprintf(`pid %d, database health_locks, idle in transaction for \d+s, waiting on Client:ClientRead`, holder)
+	idle := fmt.Sprintf(`pid %d, database health_locks, idle in transaction, transaction open for \d+s, waiting on Client:ClientRead`, holder)
 	// Longest first, then by pid: the two may have run for as many seconds.
 	if long := got["long_running"]; len(long) == 2 && regexp.MustCompile("^"+waiting+"$").MatchString(long[0]) {
 		match(t, "long_running", long, waiting, idle)
@@ -165,6 +165,40 @@ func TestCheckListsLongRunningAndBlockedSessions(t *testing.T) {
 
 	// Neither query has run for a minute.
 	equal(t, checkAs(t, testdb.Superuser, name, longRunning)["long_running"], []string{"none"})
+}
+
+// A session idle in transaction is as old as its transaction, which keeps
+// its locks however recent its last query. One whose transaction failed
+// keeps none, and is as old as the query that failed.
+func TestCheckListsSessionsIdleInOldTransactions(t *testing.T) {
+	const name = "health_idle"
+	testdb.CreateDatabase(t, name, "")
+	idle, aborted := testdb.Conn(t, testdb.Superuser, name), testdb.Conn(t, testdb.Superuser, name)
+	idlePID, abortedPID := testdb.Value[int](t, idle, "SELECT pg_backend_pid()"), testdb.Value[int](t, aborted, "SELECT pg_backend_pid()")
+	if _, err := idle.Exec(t.Context(), "BEGIN"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := aborted.Exec(t.Context(), "BEGIN; SELECT 1/0"); err == nil {
+		t.Fatal("SELECT 1/0 succeeded")
+	}
+	time.Sleep(1100 * time.Millisecond) // both transactions are over a second old
+	if _, err := idle.Exec(t.Context(), "SELECT 1"); err != nil { // but idle's last query is not
+		t.Fatal(err)
+	}
+
+	long := checkAs(t, testdb.Superuser, name, time.Second)["long_running"]
+	// Longest first, then by pid: the two may be as many seconds old.
+	for _, want := range []string{
+		fmt.Sprintf(`pid %d, database health_idle, idle in transaction, transaction open for [1-9]\d*s, waiting on Client:ClientRead`, idlePID),
+		fmt.Sprintf(`pid %d, database health_idle, idle in transaction \(aborted\) for [1-9]\d*s, waiting on Client:ClientRead`, abortedPID),
+	} {
+		if !slices.ContainsFunc(long, regexp.MustCompile("^"+want+"$").MatchString) {
+			t.Errorf("long_running = %q, want a line matching %q", long, want)
+		}
+	}
+	if len(long) != 2 {
+		t.Errorf("long_running = %q, want 2 lines", long)
+	}
 }
 
 // A section whose query the role may not run says so, and the others still

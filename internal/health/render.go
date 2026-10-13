@@ -76,25 +76,31 @@ func (l list[T]) lines(line func(T) string) []string {
 // session is a row of pg_stat_activity. A role that may not see a session
 // sees its pid, database and application name only.
 type session struct {
-	PID       int
-	Database  string
-	State     string // empty when not visible to the role
-	Seconds   int64  // since the current or last query started
+	PID      int
+	Database string
+	State    string // empty when not visible to the role
+	// Seconds is the time since the current or last query started or, for a
+	// long-running session idle in transaction, since its transaction did.
+	Seconds   int64
 	Wait      string // wait_event_type:wait_event; empty when not waiting
 	App       string
 	BlockedBy []int // the pids that block it, for blocked sessions
 }
 
 // line renders s, e.g. "pid 76, database app, active for 1m5s, waiting on
-// Lock:transactionid, blocked by 75".
+// Lock:transactionid, blocked by 75", or for a session idle in transaction
+// "pid 75, database app, idle in transaction, transaction open for 2h0m0s".
 func (s session) line(v viewer) string {
 	parts := []string{"pid " + strconv.Itoa(s.PID)}
 	if s.Database != "" {
 		parts = append(parts, "database "+s.Database)
 	}
-	if s.State == "" {
+	switch s.State {
+	case "":
 		parts = append(parts, "state not visible to role "+v.Role)
-	} else {
+	case "idle in transaction":
+		parts = append(parts, s.State+", transaction open for "+duration(s.Seconds))
+	default:
 		parts = append(parts, s.State+" for "+duration(s.Seconds))
 	}
 	if s.Wait != "" {
