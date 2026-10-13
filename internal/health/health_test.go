@@ -167,37 +167,69 @@ func TestCheckListsLongRunningAndBlockedSessions(t *testing.T) {
 	equal(t, checkAs(t, testdb.Superuser, name, longRunning)["long_running"], []string{"none"})
 }
 
-// A session idle in transaction is as old as its transaction, which keeps
-// its locks however recent its last query. One whose transaction failed
-// keeps none, and is as old as the query that failed.
-func TestCheckListsSessionsIdleInOldTransactions(t *testing.T) {
+// start runs sql on conn in the background until it returns or t ends,
+// which cancels it.
+func start(t *testing.T, conn *pgx.Conn, sql string) {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = conn.Exec(t.Context(), sql)
+	}()
+	t.Cleanup(func() { <-done }) // t.Context is canceled first, which ends sql
+}
+
+// A session in a transaction is as old as its transaction, which keeps its
+// locks however recent its query, running or not. One whose transaction
+// failed keeps none, and is as old as the query that failed. A procedure
+// that commits starts a new transaction, and is as old as its CALL.
+func TestCheckListsSessionsInOldTransactions(t *testing.T) {
 	const name = "health_idle"
-	testdb.CreateDatabase(t, name, "")
-	idle, aborted := testdb.Conn(t, testdb.Superuser, name), testdb.Conn(t, testdb.Superuser, name)
-	idlePID, abortedPID := testdb.Value[int](t, idle, "SELECT pg_backend_pid()"), testdb.Value[int](t, aborted, "SELECT pg_backend_pid()")
-	if _, err := idle.Exec(t.Context(), "BEGIN"); err != nil {
-		t.Fatal(err)
+	testdb.CreateDatabase(t, name, `CREATE PROCEDURE nap_then_commit() LANGUAGE plpgsql
+		AS 'BEGIN PERFORM pg_sleep(1.1); COMMIT; PERFORM pg_sleep(60); END'`)
+	conn := func() (*pgx.Conn, int) {
+		c := testdb.Conn(t, testdb.Superuser, name)
+		return c, testdb.Value[int](t, c, "SELECT pg_backend_pid()")
+	}
+	idle, idlePID := conn()
+	aborted, abortedPID := conn()
+	active, activePID := conn()
+	call, callPID := conn()
+	observer := testdb.Conn(t, testdb.Superuser, name)
+	for _, c := range []*pgx.Conn{idle, active} {
+		if _, err := c.Exec(t.Context(), "BEGIN"); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if _, err := aborted.Exec(t.Context(), "BEGIN; SELECT 1/0"); err == nil {
 		t.Fatal("SELECT 1/0 succeeded")
 	}
-	time.Sleep(1100 * time.Millisecond)                           // both transactions are over a second old
-	if _, err := idle.Exec(t.Context(), "SELECT 1"); err != nil { // but idle's last query is not
+	start(t, call, "CALL nap_then_commit()")
+	time.Sleep(1100 * time.Millisecond) // the three transactions and the CALL are over a second old
+
+	// The last queries of idle and active are not, nor is the transaction
+	// the CALL commits into.
+	if _, err := idle.Exec(t.Context(), "SELECT 1"); err != nil {
 		t.Fatal(err)
 	}
+	start(t, active, "SELECT pg_sleep(60)")
+	waitFor(t, observer, `SELECT count(*) = 2 FROM pg_stat_activity
+		WHERE (pid = $1 AND wait_event = 'PgSleep') OR (pid = $2 AND xact_start > query_start)`, activePID, callPID)
 
 	long := checkAs(t, testdb.Superuser, name, time.Second)["long_running"]
-	// In any order: the two may be as many seconds old, and then come by pid.
+	// In any order: they may be as many seconds old, and then come by pid.
 	for _, want := range []string{
 		fmt.Sprintf(`pid %d, database health_idle, idle in transaction, transaction open for [1-9]\d*s, waiting on Client:ClientRead`, idlePID),
 		fmt.Sprintf(`pid %d, database health_idle, idle in transaction \(aborted\) for [1-9]\d*s, waiting on Client:ClientRead`, abortedPID),
+		fmt.Sprintf(`pid %d, database health_idle, active for [1-9]\d*s, waiting on Timeout:PgSleep`, activePID),
+		fmt.Sprintf(`pid %d, database health_idle, active for [1-9]\d*s, waiting on Timeout:PgSleep`, callPID),
 	} {
 		if !slices.ContainsFunc(long, regexp.MustCompile("^"+want+"$").MatchString) {
 			t.Errorf("long_running = %q, want a line matching %q", long, want)
 		}
 	}
-	if len(long) != 2 {
-		t.Errorf("long_running = %q, want 2 lines", long)
+	if len(long) != 4 {
+		t.Errorf("long_running = %q, want 4 lines", long)
 	}
 }
 

@@ -85,7 +85,7 @@ type session struct {
 	Database string
 	State    string // empty when not visible to the role
 	// Seconds is the time since the current or last query started or, for a
-	// long-running session idle in transaction, since its transaction did.
+	// long-running session, since its transaction did, when that was earlier.
 	Seconds   int64
 	Wait      string // wait_event_type:wait_event; empty when not waiting
 	App       string

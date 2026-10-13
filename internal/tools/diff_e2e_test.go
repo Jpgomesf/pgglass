@@ -210,6 +210,27 @@ func TestDiffSchemaChecksBothRoles(t *testing.T) {
 	}
 }
 
+// Under strict, a side whose role check fails refuses the call too, and the
+// error starts with that side's name.
+func TestDiffSchemaNamesTheSideWhoseRoleCheckFails(t *testing.T) {
+	t.Parallel()
+	conns := appConns(t)
+	conns["down"] = direct("postgres://u@127.0.0.1:1/none?sslmode=disable") // nothing listens on port 1
+	s := connect(t, newConfig(config.RoleCheckStrict, conns))
+
+	const want = "down: role check failed, and role_check strict refuses connections it cannot check: "
+	for _, a := range []map[string]any{diffArgs("clean", "down"), diffArgs("down", "clean")} {
+		if got := s.fails(t, "pg_diff_schema", a); !strings.HasPrefix(got, want) {
+			t.Errorf("%v:\n%s\nwant it to start with\n%s", a, got, want)
+		}
+	}
+	for _, line := range s.auditLines(t) {
+		if line.Outcome != "db_error" {
+			t.Errorf("audit line %+v, want a db_error", line)
+		}
+	}
+}
+
 // These fail before any query, so they need no database.
 func TestDiffSchemaInvalidCalls(t *testing.T) {
 	s := connect(t, newConfig(config.RoleCheckWarn, map[string]config.Connection{"db": direct(unusedDSN), "app": direct(unusedDSN)}))
@@ -295,8 +316,13 @@ func TestDiffSchemaSpillsALargeDiff(t *testing.T) {
 	}
 }
 
-func TestDiffSchemaDefinitionIsSmall(t *testing.T) {
-	if _, size := listedTool(t, "pg_diff_schema"); size > 700 {
+// The definition is small, and names what is compared, view queries too.
+func TestDiffSchemaDefinition(t *testing.T) {
+	tool, size := listedTool(t, "pg_diff_schema")
+	if size > 700 {
 		t.Errorf("pg_diff_schema takes %d bytes of JSON, want at most 700", size)
+	}
+	if !strings.Contains(tool.Description, "relations, view queries, columns") {
+		t.Errorf("description %q, want it to name view queries", tool.Description)
 	}
 }

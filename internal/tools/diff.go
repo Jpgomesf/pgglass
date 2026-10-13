@@ -69,15 +69,20 @@ func (h *Handlers) useConnectionPair(left, right string, c *call) error {
 }
 
 // gatePair runs the role check of left, then of right. What each reports
-// starts the result, under its connection's name.
+// starts the result, under its connection's name, and an error names the
+// side that failed: a refusal names its connection already.
 func (h *Handlers) gatePair(ctx context.Context, left, right string, c *call) error {
 	for _, conn := range []string{left, right} {
 		notice, err := h.checks.gate(ctx, conn)
 		if notice != "" {
 			c.notice += conn + ": " + notice
 		}
-		if err != nil {
+		var blocked *blockedError
+		if errors.As(err, &blocked) {
 			return err
+		}
+		if err != nil {
+			return &connError{conn: conn, err: err}
 		}
 	}
 	return nil

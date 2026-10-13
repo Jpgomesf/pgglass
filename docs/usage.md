@@ -202,7 +202,7 @@ schema app, prod → staging: 5 differences (- only in prod, + only in staging)
 - Each side's structure is read as one catalog value, which [`max_bytes`](configuration.md#defaults) bounds like any result: a table of 7 columns, 2 constraints and an index takes about 660 bytes, so the default 1 MiB holds about 1,600 of them. A larger schema fails with `staging: read the structure of schema "public": catalog result exceeds the configured limits (max_bytes=1048576); raise defaults.max_bytes in config.json to read larger schemas`.
 - Definitions and queries are compared as each server prints them, so servers of different major versions can differ in spelling alone: in the query of a view that reads one table, Postgres 15 qualifies the column names and later versions do not, for one.
 - Output past 10 KB is written to a CSV file, one difference per row, and summarized under the first line.
-- Both connections go through the role check, and the audit line names both: `"connection":"prod,staging"`.
+- Both connections go through the role check, and the audit line names both: `"connection":"prod,staging"`. Under `role_check: strict`, the error names the side that is refused or whose role check fails, as in `staging: role check failed, and role_check strict refuses connections it cannot check: …`.
 
 ## Check server health
 
@@ -225,7 +225,7 @@ replication	not a replica
 | Section | Shows |
 |---------|-------|
 | `connections` | Client backends, which `max_connections` limits, by state; autovacuum and parallel workers have slots of their own |
-| `long_running` | Client sessions, other than idle ones, whose query started over a minute ago or, for one idle in transaction, whose transaction did: pid, database, state, duration, wait event, application name |
+| `long_running` | Client sessions, other than idle ones, whose transaction or query started over a minute ago, counted from whichever started first: pid, database, state, duration, wait event, application name. An open transaction keeps its locks, so a session in one is listed while it idles or runs a short query; one `idle in transaction (aborted)` holds none, and counts from its last query |
 | `blocked` | Sessions that `pg_blocking_pids` reports waiting for a lock, and the pids blocking them |
 | `cache_hit` | The share of this database's block reads found in shared buffers |
 | `dead_tuples` | The 5 tables of this database with the most dead rows, with their share of the table's rows and their last autovacuum |

@@ -96,12 +96,15 @@ No changes to `resolver.go`, `main.go`, or any other source files should be need
 │   ├── config/                          # types, constants, config loader
 │   ├── resolver/                        # CredentialSource interface + implementations
 │   ├── guard/                           # parses SQL, rejects anything but one read-only statement
+│   │   └── guardtest/                   # the bypasses the guard must reject and the reads it must allow
 │   ├── preflight/                       # audits what a connection's role can do beyond reading
 │   ├── engine/                          # connection pools, READ ONLY rolled-back queries, limits
 │   ├── result/                          # a query result as Postgres text
 │   ├── render/                          # tsv, csv, json and markdown output
 │   ├── spill/                           # writes large results to files and summarizes them
 │   ├── introspect/                      # schema descriptions from the system catalogs
+│   ├── explain/                         # summarizes a SELECT's plan: cost, costliest nodes, flags
+│   ├── health/                          # checks a server from its statistics views and catalogs
 │   ├── tools/                           # MCP tool handlers and audit log
 │   └── testdb/                          # disposable Postgres for integration tests
 ```

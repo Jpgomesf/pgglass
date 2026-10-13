@@ -8,10 +8,10 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
 
-// pg_diff_schema puts its first line, which names the schema as given,
-// before a summary already fitted to InlineMaxBytes. Postgres cuts a name
-// parameter to 63 bytes, so a 12,063-byte schema argument still matched the
-// 63-byte schema, and the result took about 12.6 kB.
+// pg_diff_schema's first line names the schema as given. Postgres cuts a
+// name parameter to 63 bytes, so a 12,063-byte schema argument matched the
+// 63-byte schema, and the line that repeated it took the result to about
+// 12.6 kB. Such an argument is refused, and the error does not repeat it.
 func TestDiffSchemaHeadStaysWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	schema := strings.Repeat("s", 63)
@@ -22,8 +22,8 @@ func TestDiffSchemaHeadStaysWithinTheInlineLimit(t *testing.T) {
 		"right": direct(testdb.DSN(t, testdb.Superuser, "tools_diff_head_right")),
 	}))
 
-	got, _ := s.call(t, "pg_diff_schema", diffArgs("left", "right", "schema", schema+strings.Repeat("x", 12000)))
-	if len(got) > config.InlineMaxBytes {
-		t.Errorf("pg_diff_schema returned %d bytes, limit %d:\n%.200s", len(got), config.InlineMaxBytes, got)
+	got := s.fails(t, "pg_diff_schema", diffArgs("left", "right", "schema", schema+strings.Repeat("x", 12000)))
+	if want := "schema is 12063 bytes: Postgres names take at most 63, and it cuts a longer one"; got != want {
+		t.Errorf("a 12,063-byte schema = %.200q, want %q", got, want)
 	}
 }
