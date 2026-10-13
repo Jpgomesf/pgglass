@@ -1,0 +1,66 @@
+{
+  "note": "Bytes each scenario puts in an agent's context, and tokens estimated as bytes/4. See docs/benchmark.md; make bench-baseline rewrites this file.",
+  "postgres_image": "postgres:17-alpine",
+  "scenarios": [
+    {
+      "name": "tools/list",
+      "bytes": 5484,
+      "tokens_est": 1371
+    },
+    {
+      "name": "instructions",
+      "bytes": 1064,
+      "tokens_est": 266
+    },
+    {
+      "name": "list connections",
+      "bytes": 177,
+      "tokens_est": 45
+    },
+    {
+      "name": "find a table",
+      "bytes": 95,
+      "tokens_est": 24
+    },
+    {
+      "name": "describe a table",
+      "bytes": 785,
+      "tokens_est": 197
+    },
+    {
+      "name": "filtered query",
+      "bytes": 415,
+      "tokens_est": 104
+    },
+    {
+      "name": "large query, spilled",
+      "bytes": 963,
+      "tokens_est": 241
+    },
+    {
+      "name": "profile a column",
+      "bytes": 182,
+      "tokens_est": 46
+    },
+    {
+      "name": "explain a query",
+      "bytes": 187,
+      "tokens_est": 47
+    },
+    {
+      "name": "server health",
+      "bytes": 549,
+      "tokens_est": 138
+    },
+    {
+      "name": "diff two databases",
+      "bytes": 220,
+      "tokens_est": 55
+    },
+    {
+      "name": "fan-out",
+      "bytes": 79,
+      "tokens_est": 20
+    }
+  ]
+}

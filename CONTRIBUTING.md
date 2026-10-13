@@ -111,7 +111,8 @@ No changes to `resolver.go`, `main.go`, or any other source files should be need
 │   ├── explain/                         # summarizes a SELECT's plan: cost, costliest nodes, flags
 │   ├── health/                          # checks a server from its statistics views and catalogs
 │   ├── tools/                           # MCP tool and resource handlers, audit log
-│   └── testdb/                          # disposable Postgres for integration tests
+│   ├── testdb/                          # disposable Postgres for integration tests
+│   └── bench/                           # token benchmark: response sizes against a baseline
 ```
 
 - `internal/` prevents external import — all packages are internal by design
@@ -132,6 +133,8 @@ No changes to `resolver.go`, `main.go`, or any other source files should be need
 make test          # unit + integration tests with the race detector (needs Docker)
 make test-short    # unit tests only: integration tests skip under -short
 go test ./internal/resolver/...  # single package
+make bench         # token benchmark: fails when a response grows past its baseline (needs Docker)
+make bench-baseline  # rewrites the baseline and the table in docs/benchmark.md
 ```
 
 Integration tests run a throwaway Postgres container through `internal/testdb`
