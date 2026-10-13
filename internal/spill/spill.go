@@ -86,7 +86,7 @@ func (s *Store) output(tool, conn string, res *result.Result, f render.Format, l
 	}
 	path, err := s.write(tool, conn, res)
 	if err != nil {
-		return capped(res, f, err, limit)
+		return capped(res, f, err, limit, maxCell)
 	}
 	return summary(res, path, len(inline), limit)
 }
@@ -208,16 +208,17 @@ func safeName(s string) string {
 	return name
 }
 
-// capped renders as many leading rows of res as fit in limit bytes, for when
+// capped renders as many leading rows of res as fit in limit bytes, their
+// cells cut to maxCell characters as inline (0 keeps them whole), for when
 // the spill file could not be written.
-func capped(res *result.Result, f render.Format, cause error, limit int) (string, error) {
+func capped(res *result.Result, f render.Format, cause error, limit, maxCell int) (string, error) {
 	total := len(res.Rows)
 	budget := limit - len(cappedNote(total, res, cause))
 	body, shown := "", 0
 	// Binary search for the most rows whose rendering fits in budget.
 	for lo, hi := 0, total; lo <= hi; {
 		mid := (lo + hi) / 2
-		out, err := render.Render(head(res, mid), f, inlineMaxCell)
+		out, err := render.Render(head(res, mid), f, maxCell)
 		if err != nil {
 			return "", err
 		}

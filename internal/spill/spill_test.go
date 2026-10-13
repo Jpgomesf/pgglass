@@ -654,6 +654,42 @@ func TestOutputFallbackStaysBoundedWhenNothingFits(t *testing.T) {
 	}
 }
 
+// When the spill file cannot be written, the rows that fit come back cut as
+// the call cuts them inline: OutputWithin at 200 characters, OutputWhole not
+// at all. OutputWhole cut them at 200 too, and lost the ends it keeps.
+func TestOutputFallbackCutsCellsAsTheCallDoes(t *testing.T) {
+	const limit = 3000
+	res := lines(20, 600) // 12 kB whole, 4.3 kB cut
+	store := newStore(t)
+	store.Dir = "" // no file
+	for _, tc := range []struct {
+		name    string
+		output  func(tool, conn string, res *result.Result, f render.Format, limit int) (string, error)
+		maxCell int
+	}{
+		{"OutputWithin", store.OutputWithin, 200},
+		{"OutputWhole", store.OutputWhole, 0},
+	} {
+		out, err := tc.output("pg_profile", "prod", res, render.TSV, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := strings.LastIndex(out, "\n(")
+		body, note := out[:i+1], out[i+1:]
+		var shown int
+		if _, err := fmt.Sscanf(note, "(%d of 20 rows shown;", &shown); err != nil || shown < 1 || shown >= 20 {
+			t.Fatalf("%s: want some but not all rows shown, got %q (%v)", tc.name, note, err)
+		}
+		want, err := render.Render(&result.Result{Columns: res.Columns, Rows: res.Rows[:shown]}, render.TSV, tc.maxCell)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body != want || len(out) > limit {
+			t.Errorf("%s: %d bytes, want the first %d rows cut at %d characters (0: whole):\n%.400s", tc.name, len(out), shown, tc.maxCell, out)
+		}
+	}
+}
+
 func TestOutputRejectsAnUnknownFormat(t *testing.T) {
 	store := newStore(t)
 	if _, err := store.OutputWithin("pg_query", "prod", people(), render.Format("xml"), 10); err == nil {
