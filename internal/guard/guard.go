@@ -221,10 +221,7 @@ func checkCTE(c *pg_query.CommonTableExpr) error {
 // reads the relation without one, so such functions must be denied as well:
 // table_to_xml*, xpath_table and get_raw_page are.
 func checkRelation(r *pg_query.RangeVar) error {
-	if deniedRelations[strings.ToLower(r.GetRelname())] {
-		return violation("relation %s is not allowed: it discloses server configuration or credentials", r.GetRelname())
-	}
-	return nil
+	return CheckRelation(r.GetRelname())
 }
 
 // checkFunction rejects a call to a denied function. Names match

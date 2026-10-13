@@ -198,9 +198,14 @@ func oneLine(s string) string {
 func quoteAll(values []string) string {
 	quoted := make([]string, len(values))
 	for i, v := range values {
-		quoted[i] = "'" + strings.ReplaceAll(v, "'", "''") + "'"
+		quoted[i] = quote(v)
 	}
 	return strings.Join(quoted, ", ")
+}
+
+// quote returns s as an SQL string literal.
+func quote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 // clip shortens s to limit characters and says how much was cut.

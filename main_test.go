@@ -119,7 +119,7 @@ func checkTools(t *testing.T, session *mcp.ClientSession) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name)
 	}
-	if got := strings.Join(names, " "); got != "pg_diff_schema pg_list_connections pg_query pg_schema pg_search" {
+	if got := strings.Join(names, " "); got != "pg_diff_schema pg_list_connections pg_profile pg_query pg_schema pg_search" {
 		t.Errorf("tools = %s", got)
 	}
 }
