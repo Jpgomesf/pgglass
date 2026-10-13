@@ -1,6 +1,7 @@
 package introspect_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -56,6 +57,21 @@ func TestRenderMatchList(t *testing.T) {
 	}, "app.orders: table\n"+
 		"app.orders.total: numeric(12,2)\n"+
 		"app.order_total(customer uuid): function")
+}
+
+// Lines gives each match one line, even when a quoted name holds a newline,
+// so a spilled pg_search writes one row per match.
+func TestMatchListLines(t *testing.T) {
+	got := introspect.MatchList{
+		{Schema: "app", Table: "orders", Column: "two\nlines", Type: "text"},
+		{Schema: "app", Table: "orders", Type: "table"},
+	}.Lines()
+	if want := []string{"app.orders.two\nlines: text", "app.orders: table"}; !slices.Equal(got, want) {
+		t.Errorf("Lines() = %q, want %q", got, want)
+	}
+	if got := introspect.MatchList(nil).Lines(); len(got) != 0 {
+		t.Errorf("Lines() of no matches = %q, want none", got)
+	}
 }
 
 func TestRenderTableDetail(t *testing.T) {

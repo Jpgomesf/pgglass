@@ -107,7 +107,8 @@ type searchArgs struct {
 	Limit      int    `json:"limit"`
 }
 
-// search runs pg_search.
+// search runs pg_search: the matches, one per line, inline or spilled to a
+// file.
 func (h *Handlers) search(ctx context.Context, raw json.RawMessage, c *call) (string, error) {
 	var args searchArgs
 	if err := decode(raw, &args); err != nil {
@@ -131,7 +132,10 @@ func (h *Handlers) search(ctx context.Context, raw json.RawMessage, c *call) (st
 		return "", &dbError{err}
 	}
 	c.rows = len(matches)
-	return matches.Render(), nil
+	if text := matches.Render(); len(text) <= h.spill.InlineMaxBytes {
+		return text, nil
+	}
+	return h.linesOutput("pg_search", args.Connection, "match", matches.Lines())
 }
 
 // searchLimit returns how many matches to return when asked for limit: the

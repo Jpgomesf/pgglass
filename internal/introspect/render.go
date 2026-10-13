@@ -141,12 +141,17 @@ func (p Policy) line() string {
 	return s
 }
 
-// Render returns one line per match: the qualified name, then the column
-// type, relation kind or function kind.
+// Render returns Lines joined by newlines, or "no matches".
 func (l MatchList) Render() string {
 	if len(l) == 0 {
 		return "no matches"
 	}
+	return strings.Join(l.Lines(), "\n")
+}
+
+// Lines returns one line per match: the qualified name, then the column
+// type, relation kind or function kind.
+func (l MatchList) Lines() []string {
 	lines := make([]string, len(l))
 	for i, m := range l {
 		name := m.Schema + "." + m.Table
@@ -155,7 +160,7 @@ func (l MatchList) Render() string {
 		}
 		lines[i] = name + ": " + m.Type
 	}
-	return strings.Join(lines, "\n")
+	return lines
 }
 
 // appendSection appends title and the indented lines, unless there are none.
