@@ -25,10 +25,13 @@ func TestDiffSchemaLongConnectionNamesStayWithinTheInlineLimit(t *testing.T) {
 		t.Errorf("config.json with names of 5,100 bytes: %v", err)
 	}
 	// 150 tables of 63-byte names only on the right: 10.6 kB of differences.
+	// Each name starts with its number: a table's array type takes the first
+	// 62 bytes of its name after an underscore, and PostgreSQL 15 finds no
+	// free name for it when too many tables share those bytes.
 	testdb.CreateDatabase(t, "tools_diff_long_names_left", "CREATE TABLE a (id int);")
 	testdb.CreateDatabase(t, "tools_diff_long_names_right", `CREATE TABLE a (id int);
 		DO $$ BEGIN FOR i IN 1..150 LOOP
-			EXECUTE format('CREATE TABLE %I (id int)', repeat('b', 60) || lpad(i::text, 3, '0'));
+			EXECUTE format('CREATE TABLE %I (id int)', 'b' || lpad(i::text, 3, '0') || repeat('b', 59));
 		END LOOP; END $$;`)
 	left := direct(testdb.DSN(t, testdb.Superuser, "tools_diff_long_names_left"))
 	right := direct(testdb.DSN(t, testdb.Superuser, "tools_diff_long_names_right"))
