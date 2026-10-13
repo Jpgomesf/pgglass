@@ -140,3 +140,31 @@ Two `pg_query` calls run at the same time, one per connection.
 - **Start with `pg_schema` or `pg_search`.** Agents write better SQL when they know the exact names and types.
 - **Set `default_schema`** so unqualified names resolve without a `schema` argument.
 - **Aggregate in SQL.** A `count(*)` or `GROUP BY` answers in one row where reading rows spills a file.
+
+## Profile a table
+
+`pg_profile` (`connection`, `table`, `schema`?, `column`?) shows what the columns of a table, partitioned table or materialized view hold, one line per column: the first 50, with a note counting the rest, or only `column`. `table` is `schema.table`, or a name in `schema` or else the connection's `default_schema`, matched exactly.
+
+The figures come from `pg_stats`, which reads nothing from the table: the share of nulls, distinct values (a count, or a share of the rows when `pg_stats` expects them to grow with the table), average width in bytes, the 5 most common values with their share of the rows, and the first and last histogram bounds, an estimate of the range without the most common values:
+
+```
+app.orders: ~50 rows, from pg_stats
+column	type	nulls	distinct	width	common	min	max
+id	bigint	0%	100%	8		1	50
+status	app.order_status	0%	4	4	'paid' 26%, 'shipped' 26%, 'pending' 24%, 'cancelled' 24%		
+total	numeric(12,2)	0%	100%	6		12.34	617.00
+...
+(9 rows)
+```
+
+When `pg_stats` has nothing on the columns, because the table was never analyzed or row-level security hides its statistics from the role, `pg_profile` samples the table instead, at most 10,000 rows taken with `TABLESAMPLE SYSTEM`, and counts each column's nulls and distinct values in the sample:
+
+```
+public.fresh: sampled 300 rows with TABLESAMPLE SYSTEM (100) LIMIT 10000, since pg_stats has nothing on these columns (never analyzed, or hidden by row-level security)
+column	type	nulls	distinct
+id	integer	0	300
+note	text	100	7
+(2 rows)
+```
+
+Both read as the connection's role: `pg_stats` shows only the columns the role can `SELECT`, and `pg_profile` says so when that leaves none; the sample is subject to privileges and row-level security. Relations the guard denies, such as `pg_authid`, are refused, since their statistics hold their values. Output over 10 KB is written to a file, as `pg_query`'s is.

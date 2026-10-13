@@ -87,3 +87,16 @@ func prop(typ, description string) map[string]any {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+var profileTool = &mcp.Tool{
+	Name: "pg_profile",
+	Description: "Profile a table's columns from pg_stats: nulls, distinct values, top 5 values, min/max; " +
+		"if never analyzed, counts in a sample of up to 10000 rows.",
+	Annotations: annotations,
+	InputSchema: object([]string{"connection", "table"}, map[string]any{
+		"connection": connectionArg,
+		"table":      prop("string", "schema.table, or a table in schema."),
+		"schema":     prop("string", "Schema of table; default: default_schema."),
+		"column":     prop("string", "Only this column."),
+	}),
+}
