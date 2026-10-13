@@ -140,10 +140,10 @@ flags:
   Seq Scan on app.events: full scan of ~20000 rows
 ```
 
-The 5 top nodes are ranked by what each takes on its own: its total less its children's. That is cost without `analyze`, and time with it, summed over loops and parallel workers. Rows are per loop, as in EXPLAIN. The flags are:
+The 5 top nodes are ranked by what each takes on its own: its total less its children's. That is cost without `analyze`, and time with it, summed over loops and parallel workers. Rows are per loop, as in EXPLAIN. A `LIMIT` stops early the nodes that pass it rows as it reads them, down to the first that reads all of its input before returning a row, such as a sort, hash or aggregate. Without `analyze`, each of them counts the part of its estimated cost and rows that the `LIMIT` is planned to read, as EXPLAIN costs the `Limit` itself: under `LIMIT 10`, a seq scan of 20,000 rows shows `cost 0.26, ~10 rows`, not `cost 528, ~20000 rows`. The flags are:
 
-- a seq scan of a relation with over 10,000 rows (`pg_class.reltuples`)
-- with `analyze`: a node that returned more than 10 times its estimated rows, or less than a tenth of them
+- a seq scan that reads over 10,000 rows of a relation with over 10,000 (`pg_class.reltuples`): with `analyze`, the rows it returned and those its filter removed; without, all of the relation, or the part a `LIMIT` is planned to read
+- with `analyze`: a node that returned more than 10 times its estimated rows or, unless a `LIMIT` stopped it early, less than a tenth of them
 - with `analyze`: a sort, hash or hash aggregate that spilled to disk
 - a nested loop whose outer side returns over 10,000 rows, so that its inner side runs that many times
 
