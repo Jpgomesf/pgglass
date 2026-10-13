@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
@@ -56,7 +57,7 @@ func TestHealthOnTheAppFixture(t *testing.T) {
 		t.Errorf("ro_clean has no findings, yet: %q", notice)
 	}
 
-	connections := regexp.MustCompile(`^\d+ of max_connections 100: `)
+	connections := regexp.MustCompile(`^(up to )?\d+ of max_connections 100: `)
 	for role, got := range map[string]map[string][]string{"postgres": super, "ro_clean": clean} {
 		if len(got["connections"]) != 1 || !connections.MatchString(got["connections"][0]) {
 			t.Errorf("%s: connections = %q", role, got["connections"])
@@ -68,11 +69,14 @@ func TestHealthOnTheAppFixture(t *testing.T) {
 			t.Errorf("%s: replication = %q", role, got["replication"])
 		}
 	}
-	// Only the superuser sees every session in full.
+	// Only the superuser sees every session in full. To ro_clean, the backends
+	// whose type it may not see make the count of client backends an upper
+	// bound.
 	if slices.ContainsFunc(super["connections"], isHidden) || slices.ContainsFunc(super["long_running"], isHidden) {
 		t.Errorf("the superuser sees every session, yet:\n%q\n%q", super["connections"], super["long_running"])
 	}
-	if !strings.HasSuffix(strings.Join(clean["connections"], "\n"), " is not visible to role ro_clean") ||
+	upperBound := regexp.MustCompile(`^up to \d+ of max_connections 100: .+; the type and state of \d+ are not visible to role ro_clean$`)
+	if !upperBound.MatchString(strings.Join(clean["connections"], "\n")) ||
 		!slices.Contains(clean["long_running"], "other roles' sessions are not visible to role ro_clean") {
 		t.Errorf("ro_clean:\n%q\n%q", clean["connections"], clean["long_running"])
 	}
@@ -115,6 +119,40 @@ func TestHealthShowsBlockedSessions(t *testing.T) {
 	_, _, clean := healthReport(t, s, "clean")
 	if want := fmt.Sprintf("pid %d, database %s, state not visible to role ro_clean, blocked by %d", waiter, name, holder); !slices.Contains(clean["blocked"], want) {
 		t.Errorf("blocked = %q, want it to contain %q", clean["blocked"], want)
+	}
+}
+
+// dead_tuples ranks tables by their dead rows, so a tiny table with a high
+// share of them comes after a large one with more.
+func TestHealthRanksTablesByDeadRows(t *testing.T) {
+	t.Parallel()
+	const name = "tools_health_dead"
+	testdb.CreateDatabase(t, name, `
+		CREATE TABLE large (id int) WITH (autovacuum_enabled = off);
+		CREATE TABLE tiny (id int) WITH (autovacuum_enabled = off);
+		INSERT INTO large SELECT generate_series(1, 1000);
+		DELETE FROM large WHERE id <= 10;
+		INSERT INTO tiny VALUES (1), (2), (3), (4);
+		DELETE FROM tiny WHERE id <= 3;`)
+	// The statistics reach other sessions some time after the statements
+	// that change them.
+	conn := testdb.Conn(t, testdb.Superuser, name)
+	for deadline := time.Now().Add(10 * time.Second); !testdb.Value[bool](t, conn, `SELECT
+		(SELECT n_dead_tup = 10 AND n_live_tup = 990 FROM pg_stat_user_tables WHERE relname = 'large') AND
+		(SELECT n_dead_tup = 3 AND n_live_tup = 1 FROM pg_stat_user_tables WHERE relname = 'tiny')`); time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the statistics")
+		}
+	}
+	s := connect(t, newConfig(config.RoleCheckWarn, map[string]config.Connection{"clean": direct(testdb.DSN(t, testdb.RoleClean, name))}))
+
+	_, _, got := healthReport(t, s, "clean")
+	want := []string{
+		"public.large: 1.0% dead (10 dead, 990 live), never autovacuumed",
+		"public.tiny: 75.0% dead (3 dead, 1 live), never autovacuumed",
+	}
+	if !slices.Equal(got["dead_tuples"], want) {
+		t.Errorf("dead_tuples = %q, want %q", got["dead_tuples"], want)
 	}
 }
 

@@ -205,7 +205,7 @@ schema app, prod → staging: 5 differences (- only in prod, + only in staging)
 
 ```
 section	detail
-connections	7 of max_connections 100: active 1, idle in transaction 1; the state of 5 is not visible to role app_reader
+connections	up to 7 of max_connections 100: active 1, idle in transaction 1; the type and state of 5 are not visible to role app_reader
 long_running	none
 long_running	other roles' sessions are not visible to role app_reader
 blocked	pid 79, database app, state not visible to role app_reader, blocked by 78
@@ -219,16 +219,16 @@ replication	not a replica
 
 | Section | Shows |
 |---------|-------|
-| `connections` | Backends connected to a database, against `max_connections`, by state |
-| `long_running` | Client sessions, other than idle ones, whose query started over a minute ago: pid, database, state, duration, wait event, application name |
+| `connections` | Client backends, which `max_connections` limits, by state; autovacuum and parallel workers have slots of their own |
+| `long_running` | Client sessions, other than idle ones, whose query started over a minute ago or, for one idle in transaction, whose transaction did: pid, database, state, duration, wait event, application name |
 | `blocked` | Sessions that `pg_blocking_pids` reports waiting for a lock, and the pids blocking them |
 | `cache_hit` | The share of this database's block reads found in shared buffers |
-| `dead_tuples` | The 5 tables of this database with the highest share of dead rows, and their last autovacuum |
+| `dead_tuples` | The 5 tables of this database with the most dead rows, with their share of the table's rows and their last autovacuum |
 | `unused_indexes` | This database's indexes not scanned since the statistics were reset, largest first; unique indexes, primary keys and exclusion constraints' indexes are left out |
 | `xid_wraparound` | The oldest `age(datfrozenxid)` of any database, against `autovacuum_freeze_max_age` |
 | `replication` | On a replica, how long ago it replayed its last transaction, and how many received WAL bytes it has yet to replay |
 
-`long_running`, `blocked` and `unused_indexes` stop at 10 rows and say how many more there are. Sessions are those of the whole server, and their query text is never shown: it can hold secrets. A role without the privileges of `pg_read_all_stats` sees the state, timing and wait event of its own sessions only, as above. A section whose view or function the role may not use says `not visible to role <name>`, and the other sections still run.
+`long_running`, `blocked` and `unused_indexes` stop at 10 rows and say how many more there are. Sessions are those of the whole server, and their query text is never shown: it can hold secrets. A role without the privileges of `pg_read_all_stats` sees the type, state, timing and wait event of its own sessions only, as above: `connections` then also counts the other backends connected to a database, which may be workers rather than client backends, and says `up to`. A section whose view or function the role may not use says `not visible to role <name>`, and the other sections still run.
 
 ## Errors
 

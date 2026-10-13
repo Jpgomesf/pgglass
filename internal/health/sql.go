@@ -7,12 +7,16 @@ package health
 // hold secrets. The lists stop at 10 items and say how many there are in all.
 
 // viewerSQL returns the current role and whether it has the privileges of
-// pg_read_all_stats. Without them, pg_stat_activity shows the state, timing
-// and wait event of the role's own sessions only, and NULL for the others.
+// pg_read_all_stats. Without them, pg_stat_activity shows the type, state,
+// timing and wait event of the role's own sessions only, and NULL for the
+// others.
 const viewerSQL = `SELECT json_build_object('Role', current_user, 'AllStats', pg_has_role('pg_read_all_stats', 'USAGE'))`
 
-// connectionsSQL counts the backends connected to a database, as
-// pg_stat_database.numbackends does, by state.
+// connectionsSQL counts the client backends, which max_connections limits, by
+// state: autovacuum, parallel and other background workers have slots of
+// their own. To a role without the privileges of pg_read_all_stats, the
+// backends that are not its own have no type, so those connected to a
+// database count too, with no state.
 const connectionsSQL = `
 SELECT json_build_object(
 	'Max', current_setting('max_connections')::int,
@@ -21,21 +25,30 @@ SELECT json_build_object(
 FROM (
 	SELECT state, count(*) AS n
 	FROM pg_stat_activity
-	WHERE datid IS NOT NULL
+	WHERE backend_type = 'client backend' OR (backend_type IS NULL AND datid IS NOT NULL)
 	GROUP BY state
 ) s`
 
 // longRunningSQL lists the client sessions, other than idle ones, whose
-// current or last query started more than $1 seconds ago, longest first.
+// current or last query started more than $1 seconds ago or, for a session
+// idle in transaction, whose transaction did, longest first. An open
+// transaction keeps its locks however recent its last query. One that failed
+// leaves its session idle in transaction (aborted), with no locks and no
+// xact_start.
 const longRunningSQL = `
 SELECT json_build_object('Total', coalesce(max(total), 0), 'Items', coalesce(json_agg(json_build_object(
 		'PID', pid, 'Database', datname, 'State', state, 'Seconds', seconds, 'Wait', wait, 'App', application_name)
 	ORDER BY seconds DESC, pid), '[]'))
 FROM (
-	SELECT pid, datname, state, extract(epoch FROM now() - query_start)::bigint AS seconds,
+	SELECT pid, datname, state, extract(epoch FROM now() - since)::bigint AS seconds,
 		concat_ws(':', wait_event_type, wait_event) AS wait, application_name, count(*) OVER () AS total
-	FROM pg_stat_activity
-	WHERE backend_type = 'client backend' AND state <> 'idle' AND query_start < now() - $1::int * interval '1 second'
+	FROM (
+		SELECT pid, datname, state, wait_event_type, wait_event, application_name,
+			CASE state WHEN 'idle in transaction' THEN xact_start ELSE query_start END AS since
+		FROM pg_stat_activity
+		WHERE backend_type = 'client backend' AND state <> 'idle'
+	) a
+	WHERE since < now() - $1::int * interval '1 second'
 	ORDER BY seconds DESC, pid
 	LIMIT 10
 ) s`
@@ -71,19 +84,19 @@ SELECT (SELECT json_build_object('Database', datname, 'Hit', blks_hit, 'Read', b
 	FROM pg_stat_database
 	WHERE datname = current_database())`
 
-// deadTuplesSQL lists the 5 tables with the highest share of dead rows, and
-// how long ago autovacuum last processed each.
+// deadTuplesSQL lists the 5 tables with the most dead rows, their live rows,
+// and how long ago autovacuum last processed each. Ranked by their share of
+// dead rows instead, a tiny table with a few would crowd out large ones.
 const deadTuplesSQL = `
 SELECT coalesce(json_agg(json_build_object(
 		'Name', format('%I.%I', schemaname, relname), 'Dead', n_dead_tup, 'Live', n_live_tup,
 		'AutovacuumSecondsAgo', extract(epoch FROM now() - last_autovacuum)::bigint)
-	ORDER BY ratio DESC, n_dead_tup DESC, schemaname, relname), '[]')
+	ORDER BY n_dead_tup DESC, schemaname, relname), '[]')
 FROM (
-	SELECT schemaname, relname, n_dead_tup, n_live_tup, last_autovacuum,
-		n_dead_tup::float8 / (n_live_tup + n_dead_tup) AS ratio
+	SELECT schemaname, relname, n_dead_tup, n_live_tup, last_autovacuum
 	FROM pg_stat_user_tables
 	WHERE n_dead_tup > 0
-	ORDER BY ratio DESC, n_dead_tup DESC, schemaname, relname
+	ORDER BY n_dead_tup DESC, schemaname, relname
 	LIMIT 5
 ) t`
 
