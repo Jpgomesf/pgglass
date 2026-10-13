@@ -1,64 +1,97 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+# Installs pgglass from a GitHub release on macOS or Linux, amd64 or arm64:
+# downloads the archive for this platform, checks its SHA-256 against the
+# release's checksums.txt and installs the binary only when they match.
+#
+#   curl -fsSL https://raw.githubusercontent.com/Jpgomesf/pgglass/main/install.sh | sh
+#
+# PGGLASS_VERSION       release to install, such as v1.0.0 (default: the latest)
+# PGGLASS_INSTALL_DIR   directory to install into (default: ~/.local/bin)
+# PGGLASS_RELEASES_URL  where the releases are (default: the GitHub releases)
+set -eu
 
-REPO="jpgomesf/pgglass"
-BINARY="pgglass"
-INSTALL_DIR="/usr/local/bin"
+fail() {
+	echo "install.sh: $*" >&2
+	exit 1
+}
 
-# Detect OS and architecture
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
+require() {
+	command -v "$1" >/dev/null 2>&1 || fail "$1 is required"
+}
 
-case "$ARCH" in
-  x86_64)  ARCH="amd64" ;;
-  aarch64) ARCH="arm64" ;;
-  arm64)   ARCH="arm64" ;;
-  *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
-esac
+platform() {
+	case $(uname -s) in
+	Darwin) os=darwin ;;
+	Linux) os=linux ;;
+	*) fail "unsupported system $(uname -s): pgglass runs on macOS and Linux" ;;
+	esac
+	case $(uname -m) in
+	x86_64 | amd64) arch=amd64 ;;
+	arm64 | aarch64) arch=arm64 ;;
+	*) fail "unsupported architecture $(uname -m): pgglass runs on amd64 and arm64" ;;
+	esac
+	echo "${os}_$arch"
+}
 
-# Validate supported platform
-if [[ "$OS" == "darwin" && "$ARCH" != "arm64" ]]; then
-  echo "Unsupported: macOS requires arm64 (Apple Silicon)"
-  exit 1
-fi
-if [[ "$OS" == "linux" && "$ARCH" != "amd64" ]]; then
-  echo "Unsupported: Linux requires amd64 (x86_64)"
-  exit 1
-fi
+latest_tag() {
+	url=$(curl -fsSLI -o /dev/null -w '%{url_effective}' "$releases/latest") ||
+		fail "cannot find the latest release at $releases"
+	case ${url##*/} in
+	v[0-9]*) echo "${url##*/}" ;;
+	*) fail "cannot find the latest release at $releases" ;;
+	esac
+}
 
-# Get latest version
-echo "Fetching latest release..."
-VERSION="$(gh release view --repo "$REPO" --json tagName -q .tagName)"
-echo "Latest version: $VERSION"
+download() {
+	curl -fsSL -o "$tmp/$1" "$releases/download/$tag/$1" ||
+		fail "cannot download $releases/download/$tag/$1"
+}
 
-# Download
-ASSET="${BINARY}_${VERSION#v}_${OS}_${ARCH}.tar.gz"
-CHECKSUM_FILE="checksums.txt"
-TMPDIR="$(mktemp -d)"
-trap 'rm -rf "$TMPDIR"' EXIT
+sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sum=$(sha256sum "$1")
+	elif command -v shasum >/dev/null 2>&1; then
+		sum=$(shasum -a 256 "$1")
+	else
+		fail "sha256sum or shasum is required to verify the download"
+	fi
+	echo "${sum%% *}"
+}
 
-echo "Downloading $ASSET..."
-gh release download "$VERSION" --repo "$REPO" --pattern "$ASSET" --dir "$TMPDIR"
-gh release download "$VERSION" --repo "$REPO" --pattern "$CHECKSUM_FILE" --dir "$TMPDIR"
+verify() {
+	want=$(awk -v name="$1" '$2 == name { print $1 }' "$tmp/checksums.txt")
+	[ -n "$want" ] || fail "checksums.txt of $tag lists no $1"
+	got=$(sha256 "$tmp/$1")
+	[ "$got" = "$want" ] || fail "checksum mismatch for $1: got $got, want $want"
+}
 
-# Verify checksum
-echo "Verifying checksum..."
-cd "$TMPDIR"
-if command -v sha256sum &>/dev/null; then
-  sha256sum --check --ignore-missing "$CHECKSUM_FILE"
-elif command -v shasum &>/dev/null; then
-  shasum -a 256 --check --ignore-missing "$CHECKSUM_FILE"
-else
-  echo "Warning: no sha256sum or shasum found, skipping verification"
-fi
+main() {
+	require curl
+	require tar
+	releases=${PGGLASS_RELEASES_URL:-https://github.com/Jpgomesf/pgglass/releases}
+	dir=${PGGLASS_INSTALL_DIR:-$HOME/.local/bin}
+	target=$(platform)
+	tag=${PGGLASS_VERSION:-}
+	[ -n "$tag" ] || tag=$(latest_tag)
+	tag=v${tag#v}
+	archive=pgglass_${tag#v}_$target.tar.gz
 
-# Extract and install
-tar -xzf "$ASSET"
-echo "Installing to $INSTALL_DIR/$BINARY (may require sudo)..."
-if [[ -w "$INSTALL_DIR" ]]; then
-  mv "$BINARY" "$INSTALL_DIR/$BINARY"
-else
-  sudo mv "$BINARY" "$INSTALL_DIR/$BINARY"
-fi
+	tmp=$(mktemp -d)
+	trap 'rm -rf "$tmp"' EXIT
 
-echo "Installed $BINARY $VERSION to $INSTALL_DIR/$BINARY"
+	echo "Downloading pgglass $tag for $target"
+	download "$archive"
+	download checksums.txt
+	verify "$archive"
+	tar -xzf "$tmp/$archive" -C "$tmp" pgglass || fail "$archive holds no pgglass binary"
+	mkdir -p "$dir" || fail "cannot create $dir"
+	install -m 0755 "$tmp/pgglass" "$dir/pgglass" ||
+		fail "cannot write $dir/pgglass: set PGGLASS_INSTALL_DIR to a directory you can write to"
+	echo "Installed pgglass $tag in $dir/pgglass"
+	case ":$PATH:" in
+	*":$dir:"*) ;;
+	*) echo "Add $dir to your PATH to run pgglass by name." ;;
+	esac
+}
+
+main

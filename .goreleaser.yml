@@ -9,16 +9,43 @@ builds:
       - darwin
       - linux
     goarch:
-      - arm64
       - amd64
-    ignore:
-      - goos: darwin
-        goarch: amd64
-      - goos: linux
-        goarch: arm64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
   - formats: [tar.gz]
 
 checksum:
   name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+dockers_v2:
+  - images:
+      - ghcr.io/jpgomesf/pgglass
+    tags:
+      - "{{ .Version }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    sbom: true
+    labels:
+      org.opencontainers.image.title: pgglass
+      org.opencontainers.image.description: Read-only PostgreSQL for AI agents across many databases, enforced by the server
+      org.opencontainers.image.source: https://github.com/jpgomesf/pgglass
+      org.opencontainers.image.url: https://github.com/jpgomesf/pgglass
+      org.opencontainers.image.licenses: MIT
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .FullCommit }}"
+      org.opencontainers.image.created: "{{ .CommitDate }}"
+      io.modelcontextprotocol.server.name: io.github.Jpgomesf/pgglass
+
+release:
+  prerelease: auto

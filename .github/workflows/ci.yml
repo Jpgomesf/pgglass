@@ -49,6 +49,8 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build ./...
           CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build ./...
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build ./...
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build ./...
 
   bench:
     runs-on: ubuntu-latest
@@ -59,3 +61,15 @@ jobs:
           go-version-file: go.mod
       - name: Token benchmark
         run: make bench
+
+  release-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check .goreleaser.yml
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: check
+      - name: Shellcheck install.sh
+        run: shellcheck install.sh
