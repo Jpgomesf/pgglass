@@ -187,7 +187,7 @@ func TestCheckListsSessionsIdleInOldTransactions(t *testing.T) {
 	}
 
 	long := checkAs(t, testdb.Superuser, name, time.Second)["long_running"]
-	// Longest first, then by pid: the two may be as many seconds old.
+	// In any order: the two may be as many seconds old, and then come by pid.
 	for _, want := range []string{
 		fmt.Sprintf(`pid %d, database health_idle, idle in transaction, transaction open for [1-9]\d*s, waiting on Client:ClientRead`, idlePID),
 		fmt.Sprintf(`pid %d, database health_idle, idle in transaction \(aborted\) for [1-9]\d*s, waiting on Client:ClientRead`, abortedPID),
