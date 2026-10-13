@@ -104,6 +104,82 @@ func TestDiffSchemaComparesTwoConnections(t *testing.T) {
 	}
 }
 
+// Views and materialized views whose columns match but whose queries differ
+// take one line each, with both queries.
+func TestDiffSchemaComparesViewQueries(t *testing.T) {
+	t.Parallel()
+	// Queries that read no table deparse alike on every supported server.
+	testdb.CreateDatabase(t, "tools_diff_views_old", `CREATE VIEW answer AS SELECT 41 AS n;
+		CREATE MATERIALIZED VIEW answers AS SELECT 41 AS n;`)
+	testdb.CreateDatabase(t, "tools_diff_views_new", `CREATE VIEW answer AS SELECT 42 AS n;
+		CREATE MATERIALIZED VIEW answers AS SELECT 42 AS n;`)
+	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{
+		"old": direct(testdb.DSN(t, testdb.Superuser, "tools_diff_views_old")),
+		"new": direct(testdb.DSN(t, testdb.Superuser, "tools_diff_views_new")),
+	}))
+
+	want := "schema public, old → new: 2 differences (- only in old, + only in new)\n" +
+		"~ view answer: SELECT 41 AS n; → SELECT 42 AS n;\n" +
+		"~ materialized view answers: SELECT 41 AS n; → SELECT 42 AS n;"
+	if got := s.ok(t, "pg_diff_schema", diffArgs("old", "new")); got != want {
+		t.Errorf("old against new:\n%s\nwant\n%s", got, want)
+	}
+}
+
+// Each side's structure is one catalog result, which max_bytes bounds: a
+// schema too large for it fails, naming its side and the setting to raise.
+func TestDiffSchemaNamesTheSideOverMaxBytes(t *testing.T) {
+	t.Parallel()
+	testdb.CreateDatabase(t, "tools_diff_small", "CREATE TABLE one (id int)")
+	testdb.CreateDatabase(t, "tools_diff_large", `DO $$ BEGIN FOR i IN 1..20 LOOP
+		EXECUTE format('CREATE TABLE table_%s (id int)', i);
+	END LOOP; END $$`)
+	cfg := newConfig(config.RoleCheckOff, map[string]config.Connection{
+		"small": direct(testdb.DSN(t, testdb.Superuser, "tools_diff_small")),
+		"large": direct(testdb.DSN(t, testdb.Superuser, "tools_diff_large")),
+	})
+	cfg.Defaults.MaxBytes = 1000 // small's structure fits, large's does not
+	s := connect(t, cfg)
+
+	const want = `large: read the structure of schema "public": catalog result exceeds the configured limits (max_bytes=1000); ` +
+		"raise defaults.max_bytes in config.json to read larger schemas"
+	for _, args := range []map[string]any{diffArgs("small", "large"), diffArgs("large", "small")} {
+		if got := s.fails(t, "pg_diff_schema", args); got != want {
+			t.Errorf("%v:\n%s\nwant\n%s", args, got, want)
+		}
+	}
+	for _, line := range s.auditLines(t) {
+		if line.Outcome != "db_error" || line.SQLState != "" {
+			t.Errorf("audit line %+v, want a db_error with no SQLSTATE", line)
+		}
+	}
+}
+
+// A Postgres error on one side starts with that side's name too.
+func TestDiffSchemaNamesTheSideOfAPostgresError(t *testing.T) {
+	t.Parallel()
+	testdb.CreateDatabase(t, "tools_diff_fine", "CREATE TABLE items (id int PRIMARY KEY)")
+	// The catalog query calls pg_get_constraintdef, which ro_clean may not call there.
+	testdb.CreateDatabase(t, "tools_diff_broken", `CREATE TABLE items (id int PRIMARY KEY);
+		REVOKE EXECUTE ON FUNCTION pg_catalog.pg_get_constraintdef(oid, boolean) FROM PUBLIC;`)
+	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{
+		"fine":   direct(testdb.DSN(t, testdb.RoleClean, "tools_diff_fine")),
+		"broken": direct(testdb.DSN(t, testdb.RoleClean, "tools_diff_broken")),
+	}))
+
+	const want = "broken: ERROR: permission denied for function pg_get_constraintdef (SQLSTATE 42501)"
+	for _, args := range []map[string]any{diffArgs("fine", "broken"), diffArgs("broken", "fine")} {
+		if got := s.fails(t, "pg_diff_schema", args); got != want {
+			t.Errorf("%v:\n%s\nwant\n%s", args, got, want)
+		}
+	}
+	for _, line := range s.auditLines(t) {
+		if line.Outcome != "db_error" || line.SQLState != "42501" {
+			t.Errorf("audit line %+v, want a db_error with SQLSTATE 42501", line)
+		}
+	}
+}
+
 // Both connections go through the role check: under warn, findings start
 // the result under the connection's name; under strict, either side with a
 // critical finding refuses the call.

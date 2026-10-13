@@ -32,8 +32,10 @@ func structure(t *testing.T, q engine.Querier, schema string) introspect.SchemaS
 }
 
 func TestStructureQueryPinsSearchPathAndDecodes(t *testing.T) {
-	q := &fakeQuerier{res: oneValue(`{"t": {"Kind": "table", "RLS": true, "Columns": {"id": "integer NOT NULL"},
-		"Constraints": null, "Indexes": null, "Policies": {"p": "FOR ALL TO public USING (true)"}}}`)}
+	q := &fakeQuerier{res: oneValue(`{"t": {"Kind": "table", "RLS": true, "Definition": null, "Columns": {"id": "integer NOT NULL"},
+		"Constraints": null, "Indexes": null, "Policies": {"p": "FOR ALL TO public USING (true)"}},
+		"v": {"Kind": "view", "RLS": false, "Definition": " SELECT 1 AS n;", "Columns": {"n": "integer"},
+		"Constraints": null, "Indexes": null, "Policies": null}}`)}
 	got, err := introspect.Structure(context.Background(), q, "app")
 	if err != nil {
 		t.Fatal(err)
@@ -41,8 +43,10 @@ func TestStructureQueryPinsSearchPathAndDecodes(t *testing.T) {
 	if q.got.SearchPath != "pg_catalog" || !reflect.DeepEqual(q.got.Params, []any{"app"}) {
 		t.Errorf("query search_path = %q, params = %#v; want pg_catalog and the schema", q.got.SearchPath, q.got.Params)
 	}
-	equal(t, "Structure", got, introspect.SchemaStructure{"t": {Kind: "table", RLS: true,
-		Columns: defs{"id": "integer NOT NULL"}, Policies: defs{"p": "FOR ALL TO public USING (true)"}}})
+	equal(t, "Structure", got, introspect.SchemaStructure{
+		"t": {Kind: "table", RLS: true, Columns: defs{"id": "integer NOT NULL"}, Policies: defs{"p": "FOR ALL TO public USING (true)"}},
+		"v": {Kind: "view", Definition: " SELECT 1 AS n;", Columns: defs{"n": "integer"}},
+	})
 
 	failure := errors.New("connection refused")
 	for _, tc := range []struct {
@@ -51,7 +55,8 @@ func TestStructureQueryPinsSearchPathAndDecodes(t *testing.T) {
 	}{
 		{&fakeQuerier{res: &result.Result{}}, `schema "app" does not exist or the current role lacks USAGE on it`},
 		{&fakeQuerier{res: &result.Result{Truncated: true, TruncatedReason: "max_bytes=1048576"}},
-			"catalog result exceeds the configured limits (max_bytes=1048576)"},
+			`read the structure of schema "app": catalog result exceeds the configured limits (max_bytes=1048576); ` +
+				"raise defaults.max_bytes in config.json to read larger schemas"},
 		{&fakeQuerier{err: failure}, "connection refused"},
 		{&fakeQuerier{res: oneValue(`{"t": {"Kind": "table", "Triggers": {}}}`)}, `unknown field "Triggers"`},
 	} {
@@ -67,7 +72,12 @@ func TestStructureQueryPinsSearchPathAndDecodes(t *testing.T) {
 }
 
 func TestStructureOfApp(t *testing.T) {
-	got := structure(t, testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app")
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
+	got := structure(t, q, "app")
+	// The view and the materialized view have their query as Table reads it,
+	// which TestTableDescribesViews checks; how the server version spells the
+	// materialized view's varies.
+	query := func(name string) string { return describe(t, q, "app", name).Definition }
 	equal(t, "Structure(app)", got, introspect.SchemaStructure{
 		"audit_log": {
 			Kind: "table",
@@ -79,8 +89,9 @@ func TestStructureOfApp(t *testing.T) {
 			Constraints: defs{"audit_log_pkey": "PRIMARY KEY (id)"},
 		},
 		"customer_order_totals": {
-			Kind:    "view",
-			Columns: defs{"customer_id": "uuid", "email": "text", "order_count": "bigint", "total_spent": "numeric"},
+			Kind:       "view",
+			Definition: query("customer_order_totals"),
+			Columns:    defs{"customer_id": "uuid", "email": "text", "order_count": "bigint", "total_spent": "numeric"},
 		},
 		"customers": {
 			Kind: "table",
@@ -104,8 +115,9 @@ func TestStructureOfApp(t *testing.T) {
 			},
 		},
 		"daily_event_counts": {
-			Kind:    "materialized view",
-			Columns: defs{"day": "timestamp with time zone", "kind": "text", "events": "bigint"},
+			Kind:       "materialized view",
+			Definition: query("daily_event_counts"),
+			Columns:    defs{"day": "timestamp with time zone", "kind": "text", "events": "bigint"},
 		},
 		"events": {
 			Kind: "table",
@@ -234,9 +246,19 @@ func TestDiffFindsChangesToACopyOfTheAppFixture(t *testing.T) {
 	app := structure(t, testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app")
 	changed := structure(t, testdb.Querier(t, testdb.RoleClean, name), "app")
 
+	// The view's query on one line, before and after the change.
+	const (
+		leftJoin = "SELECT c.id AS customer_id, c.email, count(o.id) AS order_count, " +
+			"COALESCE(sum(o.total), 0::numeric) AS total_spent FROM app.customers c " +
+			"LEFT JOIN app.orders o ON o.customer_id = c.id GROUP BY c.id, c.email;"
+		innerJoin = "SELECT c.id AS customer_id, c.email, count(o.id) AS order_count, " +
+			"COALESCE(sum(o.total), 0::numeric) AS total_spent FROM app.customers c " +
+			"JOIN app.orders o ON o.customer_id = c.id GROUP BY c.id, c.email;"
+	)
 	want := []string{
 		"- table audit_log",
 		"+ table coupons",
+		"~ view customer_order_totals: " + leftJoin + " → " + innerJoin,
 		"~ column customers.active: boolean NOT NULL DEFAULT true → boolean NOT NULL DEFAULT false",
 		"~ column customers.name: text NOT NULL → text",
 		"- index customers.customers_lower_name_idx",
@@ -254,6 +276,7 @@ func TestDiffFindsChangesToACopyOfTheAppFixture(t *testing.T) {
 	reversed := []string{
 		"+ table audit_log",
 		"- table coupons",
+		"~ view customer_order_totals: " + innerJoin + " → " + leftJoin,
 		"~ column customers.active: boolean NOT NULL DEFAULT false → boolean NOT NULL DEFAULT true",
 		"~ column customers.name: text → text NOT NULL",
 		"+ index customers.customers_lower_name_idx",

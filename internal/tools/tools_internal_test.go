@@ -42,6 +42,7 @@ func TestClassify(t *testing.T) {
 		{&blockedError{conn: "su", report: blockReport}, "preflight_block", ""},
 		{&dbError{queryErr}, "db_error", "42703"},
 		{&dbError{fmt.Errorf("role check failed: %w", queryErr)}, "db_error", "42703"},
+		{&dbError{&connError{conn: "staging", err: queryErr}}, "db_error", "42703"},
 		{&dbError{errors.New("dial tcp: connection refused")}, "db_error", ""},
 		{errors.New("invalid arguments: unexpected EOF"), "error", ""},
 	} {
@@ -63,6 +64,11 @@ func TestErrorText(t *testing.T) {
 		{&dbError{&engine.QueryError{SQLState: "22P02", Message: "invalid input syntax for type json", Detail: `Token "x" is invalid.`}},
 			"ERROR: invalid input syntax for type json (SQLSTATE 22P02)\nDETAIL: Token \"x\" is invalid."},
 		{&dbError{errors.New("query cancelled: context canceled")}, "query cancelled: context canceled"},
+		// The connection's name starts the text, a Postgres error's too.
+		{&dbError{&connError{conn: "staging", err: fmt.Errorf("read the structure of schema %q: %w", "public", queryErr)}},
+			`staging: ERROR: column "nam" does not exist (SQLSTATE 42703) at character 8` + "\n" +
+				`HINT: Perhaps you meant to reference the column "customers.name".`},
+		{&dbError{&connError{conn: "staging", err: errors.New(`schema "x" does not exist`)}}, `staging: schema "x" does not exist`},
 		{&blockedError{conn: "su", report: blockReport}, "connection \"su\" refused (role_check strict): its role can do more than read.\n" +
 			"role postgres: 1 finding(s)\n  critical superuser: bypasses every privilege check"},
 	} {

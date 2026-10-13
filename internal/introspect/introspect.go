@@ -119,6 +119,9 @@ type MatchList []Match
 // relation or one the role cannot read.
 var errNoRows = errors.New("no rows")
 
+// errTooLarge reports a catalog result that max_rows or max_bytes cut short.
+var errTooLarge = errors.New("catalog result exceeds the configured limits")
+
 // Schemas lists the non-system schemas the current role can see, by name.
 // The catalog result holds every one: FirstSchemas bounds it.
 func Schemas(ctx context.Context, q engine.Querier) (SchemaList, error) {
@@ -227,7 +230,7 @@ func queryJSON(ctx context.Context, q engine.Querier, dst any, sql string, param
 		return err
 	}
 	if res.Truncated {
-		return fmt.Errorf("catalog result exceeds the configured limits (%s)", res.TruncatedReason)
+		return fmt.Errorf("%w (%s)", errTooLarge, res.TruncatedReason)
 	}
 	if len(res.Rows) == 0 || len(res.Rows[0]) == 0 || res.Rows[0][0] == nil {
 		return errNoRows

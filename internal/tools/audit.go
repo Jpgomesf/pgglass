@@ -69,6 +69,18 @@ func (e *dbError) Error() string { return e.err.Error() }
 
 func (e *dbError) Unwrap() error { return e.err }
 
+// connError is the failure of a call on one of its connections, such as one
+// side of pg_diff_schema. Its text starts with the connection's name, a
+// Postgres error's too.
+type connError struct {
+	conn string
+	err  error
+}
+
+func (e *connError) Error() string { return e.conn + ": " + e.err.Error() }
+
+func (e *connError) Unwrap() error { return e.err }
+
 // classify returns the outcome of a call that ended with err and, for a
 // Postgres error, its SQLSTATE.
 func classify(err error) (outcome, sqlState string) {
@@ -97,10 +109,13 @@ func classify(err error) (outcome, sqlState string) {
 // errorText is the text of the result of a call that ended with err.
 func errorText(err error) string {
 	var (
+		connErr   *connError
 		violation *guard.Violation
 		queryErr  *engine.QueryError
 	)
 	switch {
+	case errors.As(err, &connErr):
+		return connErr.conn + ": " + errorText(connErr.err)
 	case errors.As(err, &violation):
 		return "query rejected: " + violation.Reason
 	case errors.As(err, &queryErr):

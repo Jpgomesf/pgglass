@@ -23,3 +23,10 @@ DROP INDEX app.customers_lower_name_idx;
 ALTER TABLE app.orders DROP CONSTRAINT orders_total_check,
     ADD CONSTRAINT orders_total_check CHECK (total > 0);
 ALTER POLICY tenant_notes_acme ON app.tenant_notes USING (tenant = 'globex');
+
+-- A view whose query changed but whose columns did not.
+CREATE OR REPLACE VIEW app.customer_order_totals AS
+SELECT c.id AS customer_id, c.email, count(o.id) AS order_count, coalesce(sum(o.total), 0) AS total_spent
+FROM app.customers AS c
+JOIN app.orders AS o ON o.customer_id = c.id
+GROUP BY c.id, c.email;
