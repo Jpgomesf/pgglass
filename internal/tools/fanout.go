@@ -156,8 +156,8 @@ func failureLines(failed []fanoutResult, room int) string {
 // merged when their columns match, otherwise one section per connection.
 // Either way, what does not fit is spilled to a file. A section names its
 // file even past its share, so when the sections take more than room, as
-// very long connection names can make them, they go to one more file, a line
-// each, and fanoutRows returns its summary.
+// long connection names and a long spill directory path can make them, they
+// go to one more file, a line each, and fanoutRows returns its summary.
 func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format, room int) (string, error) {
 	names := make([]string, len(ok))
 	for i, r := range ok {
