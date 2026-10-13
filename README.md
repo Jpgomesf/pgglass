@@ -6,7 +6,7 @@ pgglass is an [MCP](https://modelcontextprotocol.io) server that gives AI agents
 
 - **Read-only, enforced by the server.** Every statement the agent sends is parsed with the Postgres parser and must be one `SELECT`, `EXPLAIN` of one or `SHOW`. It runs in a `READ ONLY` transaction that is always rolled back, under a statement timeout, and each connection's role is audited on first use. See the [safety model](#safety-model).
 - **Many databases, one call.** `pg_query` runs a statement on up to 10 connections in parallel and merges their rows under a `connection` column. `pg_diff_schema` lists what differs in a schema between two connections, such as production and staging.
-- **Frugal with tokens.** Output is compact text, TSV by default. Plans, column statistics and server health come back as a few summary lines, not raw dumps. A query result past 10 KB is written to a private CSV file and summarized, so the agent reads or greps the file instead of the rows. The eight tool definitions fit in 6 KB of JSON.
+- **Frugal with tokens.** Output is compact text, TSV by default. Plans, column statistics and server health come back as a few summary lines, not raw dumps. A query result past 10 KB is written to a private CSV file and summarized, so the agent reads or greps the file instead of the rows. The eight tool definitions fit in 6 KB of JSON. The [token benchmark](docs/benchmark.md) puts numbers on this, and fails CI when they grow.
 
 ## Tools
 
@@ -103,6 +103,7 @@ What these layers do not cover:
 | [Configuration](docs/configuration.md) | Credential sources, connection options, defaults, PgBouncer |
 | [Extending](docs/extending.md) | How to add custom credential sources (Vault, GCP, etc.) |
 | [Contributing](CONTRIBUTING.md) | Branch strategy, commit conventions, development workflow |
+| [Token benchmark](docs/benchmark.md) | What pgglass puts in an agent's context, measured, and how other servers' tool lists compare |
 
 ## License
 
