@@ -49,7 +49,9 @@ type Relation struct {
 // RelationList is the result of FirstTables.
 type RelationList []Relation
 
-// Column is a column of a relation.
+// Column is a column of a relation. NotNull is set when a validated
+// constraint keeps nulls out of every row, not for a NOT VALID one
+// (PostgreSQL 18), which leaves older rows unchecked.
 type Column struct {
 	Name    string
 	Type    string // format_type, e.g. "numeric(12,2)", "integer[]", "app.order_status"

@@ -111,7 +111,7 @@ func TestProfileRendersSample(t *testing.T) {
 	p := &TableProfile{Schema: "lab", Name: "Mixed Case", Rows: -1, Sampled: true, Sample: 1, Percent: 12.5,
 		Columns: []ColumnProfile{{Name: "Weird Col", Type: "integer", Nulls: 1}}}
 	want := "lab.Mixed Case: sampled 1 row with TABLESAMPLE SYSTEM (12.5) LIMIT 10000, since pg_stats has nothing " +
-		"on these columns (never analyzed, or hidden by row-level security)"
+		"on these columns (never analyzed, hidden by row-level security, or virtual generated columns, which ANALYZE skips)"
 	if got := p.Summary(); got != want {
 		t.Errorf("Summary() =\n%s\nwant\n%s", got, want)
 	}

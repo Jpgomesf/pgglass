@@ -64,7 +64,7 @@ const ordersProfile = "app.orders: ~50 rows, from pg_stats\n" +
 	"(9 rows)"
 
 const sampledFrom = " with TABLESAMPLE SYSTEM (100) LIMIT 10000, since pg_stats has nothing on these columns " +
-	"(never analyzed, or hidden by row-level security)\n"
+	"(never analyzed, hidden by row-level security, or virtual generated columns, which ANALYZE skips)\n"
 
 func TestProfile(t *testing.T) {
 	t.Parallel()

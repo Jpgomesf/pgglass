@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        pg-image: [postgres:15-alpine, postgres:16-alpine, postgres:17-alpine]
+        pg-image: [postgres:15-alpine, postgres:16-alpine, postgres:17-alpine, postgres:18-alpine]
     env:
       PGGLASS_PG_IMAGE: ${{ matrix.pg-image }}
     steps:

@@ -283,3 +283,24 @@ func TestExplainChargesAnExistsItsFirstRow(t *testing.T) {
 		t.Errorf("analyze:\n%s", got)
 	}
 }
+
+// From PostgreSQL 18, pg_explain flags a window aggregate that kept its rows
+// on disk and shows the rows of each loop to two decimals, as EXPLAIN reports
+// them; earlier versions report neither.
+func TestExplainShowsWhatPostgreSQL18Reports(t *testing.T) {
+	t.Parallel()
+	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
+	spill, perLoop := `\nflags: none$`, `1 row × 20000 loops`
+	if testdb.Value[int](t, testdb.Conn(t, testdb.RoleClean, testdb.DBApp), "SELECT current_setting('server_version_num')::int") >= 180000 {
+		spill, perLoop = `\nflags:\n  WindowAgg: spilled to disk \(\d+ kB\)$`, `0\.8 rows × 20000 loops`
+	}
+	got := s.ok(t, "pg_explain", args("clean", "SELECT g, count(*) OVER () FROM generate_series(1, 500000) g", "analyze", true))
+	if !regexp.MustCompile(spill).MatchString(got) {
+		t.Errorf("window:\n%s\nwant it to match %s", got, spill)
+	}
+	got = s.ok(t, "pg_explain", args("clean", `SELECT e.id FROM events e CROSS JOIN LATERAL
+		(SELECT 1 FROM customers c WHERE c.id = (e.payload->>'customer')::uuid AND c.active LIMIT 1) x`, "analyze", true))
+	if !regexp.MustCompile(`\n  Limit: [0-9.]+ ms, ` + perLoop + `\n`).MatchString(got) {
+		t.Errorf("loops:\n%s\nwant a Limit of %s", got, perLoop)
+	}
+}

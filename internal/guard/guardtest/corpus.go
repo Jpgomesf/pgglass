@@ -580,6 +580,17 @@ var Rejected = []Case{
 	{`SELECT pg_file_write('x', 'y', false)`, "pg_file_write"},
 	// [policy] Server directory listings.
 	{`SELECT * FROM pg_ls_waldir()`, "pg_ls_waldir"},
+	{`SELECT * FROM pg_ls_summariesdir()`, "pg_ls_summariesdir"},
+
+	{`SELECT pg_stat_reset_backend_stats(pg_backend_pid())`, "pg_stat_reset_backend_stats"},
+	{`SELECT pg_restore_attribute_stats('schemaname', 'app', 'relname', 'orders', 'attname', 'status', 'inherited', false, 'null_frac', 0.5::real)`, "pg_restore_attribute_stats"},
+	{`SELECT pg_clear_relation_stats('app', 'orders')`, "pg_clear_relation_stats"},
+	{`SELECT * FROM pg_buffercache_evict_relation('app.events')`, "pg_buffercache_evict_relation"},
+	{`SELECT * FROM pg_buffercache_evict_all()`, "pg_buffercache_evict_all"},
+	{`SELECT pg_buffercache_evict(1)`, "pg_buffercache_evict"},
+	{`SELECT ('app.events'::regclass).pg_buffercache_evict_relation`, "function pg_buffercache_evict_relation"},
+	{`SELECT * FROM pg_get_logical_snapshot_info('0-40796E18.snap')`, "pg_get_logical_snapshot_info"},
+	{`SELECT * FROM public.pg_get_logical_snapshot_meta('0-40796E18.snap')`, "public.pg_get_logical_snapshot_meta"},
 }
 
 // Allowed is SQL the guard must accept: what an agent reading a database
@@ -674,4 +685,14 @@ var Allowed = []string{
 	`SELECT net.id FROM app.events AS net`,
 	`SELECT "dblink" FROM (SELECT 1 AS "dblink") s`,
 	`SELECT 'São Paulo' AS cidade`,
+
+	`SELECT uuidv7(), uuidv4(), casefold('Straße'), array_sort(ARRAY[3, 1, 2]), crc32c('pgglass'::bytea), pg_numa_available()`,
+	`SELECT module_name, file_name FROM pg_get_loaded_modules()`,
+	`SELECT pg_get_acl('pg_class'::regclass, 'app.orders'::regclass, 0), has_largeobject_privilege(1::oid, 'SELECT')`,
+	`SELECT last_value FROM pg_get_sequence_data('app.orders_id_seq')`,
+	`SELECT pid, state, target_desc FROM pg_aios`,
+	`SELECT name, numa_node, size FROM pg_shmem_allocations_numa`,
+	`SELECT count(*) FROM pg_buffercache`,
+	`SELECT * FROM pg_buffercache_summary(), pg_buffercache_numa_pages()`,
+	`SELECT * FROM pg_stat_get_backend_io(pg_backend_pid())`,
 }

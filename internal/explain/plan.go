@@ -58,12 +58,17 @@ type node struct {
 	share float64
 }
 
-// disk is what a sort or a hash aggregate reports about its use of disk.
+// disk is what a sort or a hash aggregate reports about its use of disk
+// and, from PostgreSQL 18, where a window aggregate, materialize, CTE scan
+// and the like kept their rows: Storage is "Disk" or "Memory", and
+// MaxStorage the most it took, in kB.
 type disk struct {
 	SortMethod    string  `json:"Sort Method"`
 	SortSpaceUsed float64 `json:"Sort Space Used"` // kB
 	SortSpaceType string  `json:"Sort Space Type"` // "Disk" or "Memory"
 	DiskUsage     float64 `json:"Disk Usage"`      // kB, of a hash aggregate
+	Storage       string  `json:"Storage"`
+	MaxStorage    float64 `json:"Maximum Storage"`
 }
 
 // relation names a relation by schema and name.
@@ -204,10 +209,10 @@ func (p *plan) summary(reltuples map[relation]float64) string {
 func (p *plan) totals() string {
 	r := &p.Root
 	if p.ExecutionTime == nil {
-		return "total cost " + num(r.TotalCost, 2) + ", ~" + rows(r.PlanRows)
+		return "total cost " + num(r.TotalCost, 2) + ", ~" + rows(r.PlanRows, 0)
 	}
 	return fmt.Sprintf("total cost %s, %s ms, %s, %s buffers hit, %s read", num(r.TotalCost, 2),
-		num(*p.ExecutionTime, 3), rows(r.ActualRows*r.Loops), num(r.SharedHit, 0), num(r.SharedRead, 0))
+		num(*p.ExecutionTime, 3), rows(r.ActualRows*r.Loops, 0), num(r.SharedHit, 0), num(r.SharedRead, 0))
 }
 
 // all returns n and every node under it, in plan order.
@@ -255,13 +260,13 @@ func (n *node) total(analyzed bool) float64 {
 func (n *node) measure(analyzed bool) string {
 	switch {
 	case !analyzed:
-		return "cost " + num(n.own(false), 2) + ", ~" + rows(n.PlanRows*n.share)
+		return "cost " + num(n.own(false), 2) + ", ~" + rows(n.PlanRows*n.share, 0)
 	case n.Loops == 0:
 		return "never executed"
 	case n.Loops == 1:
-		return num(n.own(true), 3) + " ms, " + rows(n.ActualRows)
+		return num(n.own(true), 3) + " ms, " + rows(n.ActualRows, 2)
 	default:
-		return num(n.own(true), 3) + " ms, " + rows(n.ActualRows) + " × " + num(n.Loops, 0) + " loops"
+		return num(n.own(true), 3) + " ms, " + rows(n.ActualRows, 2) + " × " + num(n.Loops, 0) + " loops"
 	}
 }
 
@@ -274,17 +279,17 @@ func (n *node) measure(analyzed bool) string {
 func (n *node) flags(analyzed bool, reltuples map[relation]float64) []string {
 	var flags []string
 	if analyzed && n.Loops > 0 && missed(n.ActualRows, n.PlanRows, n.share < 1) {
-		flags = append(flags, rows(n.ActualRows)+", planned "+num(n.PlanRows, 0))
+		flags = append(flags, rows(n.ActualRows, 2)+", planned "+num(n.PlanRows, 0))
 	}
 	if size := reltuples[n.relation()]; n.Type == "Seq Scan" && size > largeRows && n.read(analyzed, size) > largeRows {
-		flags = append(flags, "full scan of ~"+rows(size))
+		flags = append(flags, "full scan of ~"+rows(size, 0))
 	}
 	if spill := n.spilled(); spill != "" {
 		flags = append(flags, "spilled to disk ("+spill+")")
 	}
 	if n.Type == "Nested Loop" {
 		if outer := n.outerRows(analyzed); outer > largeRows {
-			flags = append(flags, "outer side of "+rows(outer)+", each running the inner side")
+			flags = append(flags, "outer side of "+rows(outer, 0)+", each running the inner side")
 		}
 	}
 	return flags
@@ -309,8 +314,8 @@ func (n *node) read(analyzed bool, size float64) float64 {
 }
 
 // spilled describes how n, or one of its parallel workers, spilled to disk:
-// a sort's method and space, a hash's batches or a hash aggregate's disk
-// use. It is empty when nothing did.
+// a sort's method and space, a hash's batches, a hash aggregate's disk use
+// or the storage a node that ran kept on disk. It is empty when nothing did.
 func (n *node) spilled() string {
 	if n.HashBatches > 1 {
 		return num(n.HashBatches, 0) + " batches"
@@ -321,6 +326,8 @@ func (n *node) spilled() string {
 			return d.SortMethod + ", " + num(d.SortSpaceUsed, 0) + " kB"
 		case d.DiskUsage > 0:
 			return num(d.DiskUsage, 0) + " kB"
+		case d.Storage == "Disk" && n.Loops > 0:
+			return num(d.MaxStorage, 0) + " kB"
 		}
 	}
 	return ""
@@ -372,9 +379,10 @@ func num(v float64, decimals int) string {
 	return s
 }
 
-// rows formats a row count: "1 row", "5000 rows".
-func rows(v float64) string {
-	if s := num(v, 0); s != "1" {
+// rows formats a row count with at most decimals digits after the point:
+// "1 row", "5000 rows", "0.8 rows".
+func rows(v float64, decimals int) string {
+	if s := num(v, decimals); s != "1" {
 		return s + " rows"
 	}
 	return "1 row"

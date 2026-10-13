@@ -107,10 +107,11 @@ WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r', 'p', 'm')`
 // alone when it is not empty. Names match exactly, as the catalog stores them.
 //
 // The figures come from pg_stats, which reads nothing from the table. When
-// it has nothing on any of the columns (the table was never analyzed, or
-// row-level security hides its statistics), Profile reads a sample of the
-// table instead, at most SampleRows rows taken with TABLESAMPLE SYSTEM, as
-// the role: privileges and row-level security apply.
+// it has nothing on any of the columns (the table was never analyzed,
+// row-level security hides its statistics, or they are virtual generated
+// columns, which ANALYZE skips), Profile reads a sample of the table instead,
+// at most SampleRows rows taken with TABLESAMPLE SYSTEM, as the role:
+// privileges and row-level security apply.
 func Profile(ctx context.Context, q engine.Querier, schema, name, column string) (*TableProfile, error) {
 	var found struct {
 		Rows     int64
@@ -211,7 +212,7 @@ func (p *TableProfile) Summary() string {
 	switch {
 	case p.Sampled:
 		s += fmt.Sprintf("sampled %s with TABLESAMPLE SYSTEM (%s) LIMIT %d, since pg_stats has nothing on these columns "+
-			"(never analyzed, or hidden by row-level security)", count(p.Sample, "row"), number(p.Percent), SampleRows)
+			"(never analyzed, hidden by row-level security, or virtual generated columns, which ANALYZE skips)", count(p.Sample, "row"), number(p.Percent), SampleRows)
 	case p.Rows >= 0:
 		s += "~" + count(p.Rows, "row") + ", from pg_stats"
 	default:
