@@ -652,3 +652,34 @@ func TestOutputCleansUpAtMostOnceAnHour(t *testing.T) {
 		t.Fatal("Output did not clean up an hour after the last cleanup")
 	}
 }
+
+// OutputWithin returns inline, summarizes and caps against its own limit,
+// not InlineMaxBytes.
+func TestOutputWithinUsesItsOwnLimit(t *testing.T) {
+	inline := inlineOf(t, people(), render.TSV, "(3 rows)")
+	store := newStore(t, 10_000)
+	if out, err := store.OutputWithin("pg_query", "prod", people(), render.TSV, len(inline)); err != nil || out != inline {
+		t.Errorf("at the limit: got %q, %v; want the inline rendering %q", out, err, inline)
+	}
+
+	out, err := store.OutputWithin("pg_query", "prod", people(), render.TSV, len(inline)-1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("Result too large to return inline (%d bytes, limit %d): 3 rows × 2 columns", len(inline), len(inline)-1)
+	if !strings.HasPrefix(out, want) {
+		t.Errorf("one byte over the limit: got\n%s\nwant it to start with\n%s", out, want)
+	}
+	if _, err := os.Stat(spillPath(t, out)); err != nil {
+		t.Errorf("one byte over the limit: want a spill file: %v", err)
+	}
+
+	store.Dir = "" // no file: as many rows as fit in the limit
+	out, err = store.OutputWithin("pg_query", "prod", numbered(1000), render.TSV, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, " of 1000 rows shown; could not write the spill file: ") || strings.HasPrefix(out, "(0 of") || len(out) > 300 {
+		t.Errorf("capped to 300 bytes: got %d bytes:\n%s", len(out), out)
+	}
+}

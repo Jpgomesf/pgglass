@@ -11,28 +11,47 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/guard"
 	"github.com/jpgomesf/mcp-postgres/internal/render"
+	"github.com/jpgomesf/mcp-postgres/internal/result"
 )
 
 type queryArgs struct {
-	Connection string `json:"connection"`
-	SQL        string `json:"sql"`
-	Params     []any  `json:"params"`
-	Schema     string `json:"schema"`
-	Format     string `json:"format"`
-	MaxRows    int    `json:"max_rows"`
+	Connection  string   `json:"connection"`
+	Connections []string `json:"connections"`
+	SQL         string   `json:"sql"`
+	Params      []any    `json:"params"`
+	Schema      string   `json:"schema"`
+	Format      string   `json:"format"`
+	MaxRows     int      `json:"max_rows"`
 }
 
 // query runs pg_query: the guard, the role check, the engine, then the
-// result inline or spilled to a file.
+// result inline or spilled to a file. With connections, it fans out.
 func (h *Handlers) query(ctx context.Context, raw json.RawMessage, c *call) (string, error) {
 	var args queryArgs
 	if err := decode(raw, &args); err != nil {
 		return "", err
 	}
 	c.sql = args.SQL
+	if args.Connections != nil {
+		return h.fanout(ctx, args, c)
+	}
 	if err := h.useConnection(args.Connection, c); err != nil {
 		return "", err
 	}
+	format, err := h.checkQuery(args)
+	if err != nil {
+		return "", err
+	}
+	res, err := h.queryOn(ctx, args.Connection, args, c)
+	if err != nil {
+		return "", err
+	}
+	return h.spill.Output("pg_query", args.Connection, res, format)
+}
+
+// checkQuery checks the arguments of a pg_query call that hold for every
+// connection, the guard last, and returns the format.
+func (h *Handlers) checkQuery(args queryArgs) (render.Format, error) {
 	format, err := h.format(args.Format)
 	if err != nil {
 		return "", err
@@ -43,27 +62,31 @@ func (h *Handlers) query(ctx context.Context, raw json.RawMessage, c *call) (str
 	if err := checkParams(args.Params); err != nil {
 		return "", err
 	}
-	if err := guard.Check(args.SQL); err != nil {
-		return "", err
-	}
-	searchPath, err := h.searchPath(args.Connection, args.Schema)
+	return format, guard.Check(args.SQL)
+}
+
+// queryOn runs the statement of args, which checkQuery accepted, on conn:
+// the search_path check, the role check, then the engine. It records the
+// role check's notice and the rows in c.
+func (h *Handlers) queryOn(ctx context.Context, conn string, args queryArgs, c *call) (*result.Result, error) {
+	searchPath, err := h.searchPath(conn, args.Schema)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if c.notice, err = h.checks.gate(ctx, args.Connection); err != nil {
-		return "", err
+	if c.notice, err = h.checks.gate(ctx, conn); err != nil {
+		return nil, err
 	}
-	res, err := h.engine.Query(ctx, args.Connection, engine.Query{
+	res, err := h.engine.Query(ctx, conn, engine.Query{
 		SQL:        args.SQL,
 		Params:     args.Params,
 		SearchPath: searchPath,
 		MaxRows:    args.MaxRows,
 	})
 	if err != nil {
-		return "", &dbError{err}
+		return nil, &dbError{err}
 	}
 	c.rows, c.truncated = len(res.Rows), res.Truncated
-	return h.spill.Output("pg_query", args.Connection, res, format)
+	return res, nil
 }
 
 // checkParams accepts strings, numbers, booleans and nulls. Each is sent as

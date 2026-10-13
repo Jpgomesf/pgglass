@@ -32,6 +32,7 @@ type call struct {
 	rows       int
 	truncated  bool
 	notice     string // shown before the result, success or error
+	audited    bool   // the call wrote its own audit lines, one per connection
 }
 
 // audit writes the audit line of c, which ended with err. It never logs SQL

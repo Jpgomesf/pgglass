@@ -29,7 +29,7 @@ var queryTool = &mcp.Tool{
 		"Other statements and functions with side effects are rejected. " +
 		"Rows past max_rows are cut; a result too large to return is saved to a CSV file and summarized.",
 	Annotations: annotations,
-	InputSchema: object([]string{"connection", "sql"}, map[string]any{
+	InputSchema: object([]string{"sql"}, map[string]any{
 		"connection": connectionArg,
 		"sql":        prop("string", "One statement; $1, $2, ... take params."),
 		"params":     prop("array", "Values for $1, $2, ..."),
@@ -44,6 +44,7 @@ var queryTool = &mcp.Tool{
 			"minimum":     1,
 			"description": "Row cap for this query; it can only lower the configured cap.",
 		},
+		"connections": fanoutConnectionsArg,
 	}),
 }
 
@@ -87,3 +88,11 @@ func prop(typ, description string) map[string]any {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// fanoutConnectionsArg lets pg_query fan out: see fanout.
+var fanoutConnectionsArg = map[string]any{
+	"type":        "array",
+	"items":       map[string]any{"type": "string"},
+	"maxItems":    maxFanout,
+	"description": "Instead of connection: run on each, in parallel; rows gain a first column, connection.",
+}
