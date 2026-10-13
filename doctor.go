@@ -83,7 +83,9 @@ func summarize(path string, cfg config.Config, checks []check) (string, bool) {
 }
 
 func checkConnection(ctx context.Context, eng *engine.Manager, name string, conn config.Connection) (preflight.Report, error) {
-	dsn, err := resolver.Resolve(ctx, name, conn)
+	connectCtx, cancel := context.WithTimeout(ctx, connectTimeout)
+	defer cancel()
+	dsn, err := resolver.Resolve(connectCtx, name, conn)
 	if err != nil {
 		return preflight.Report{}, fmt.Errorf("credentials: %w", err)
 	}
@@ -91,8 +93,6 @@ func checkConnection(ctx context.Context, eng *engine.Manager, name string, conn
 		return preflight.Report{}, errors.New("credentials: the DSN does not parse (not shown: it may hold a password)")
 	}
 	q := eng.Querier(name)
-	connectCtx, cancel := context.WithTimeout(ctx, connectTimeout)
-	defer cancel()
 	if _, err := q.Query(connectCtx, engine.Query{SQL: "SELECT 1"}); err != nil {
 		if errors.Is(connectCtx.Err(), context.DeadlineExceeded) {
 			return preflight.Report{}, fmt.Errorf("connect: no answer within %s", connectTimeout)

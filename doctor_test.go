@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"net"
 	"os"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/jpgomesf/pgglass/internal/config"
 	"github.com/jpgomesf/pgglass/internal/preflight"
+	"github.com/jpgomesf/pgglass/internal/resolver"
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
@@ -172,9 +174,27 @@ func TestDoctorRejectsABadConfig(t *testing.T) {
 	}
 }
 
-// A host that accepts the connection and never answers must not hold the
-// doctor up past its connect timeout.
-func TestDoctorGivesUpOnASilentHost(t *testing.T) {
+type stallingSource struct{}
+
+func (stallingSource) Type() string { return "stall" }
+
+func (stallingSource) Resolve(ctx context.Context, _ string, _ config.Connection) (string, error) {
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-time.After(20 * time.Second):
+		return "", errors.New("stalled for 20s")
+	}
+}
+
+func (stallingSource) Status(config.Connection) string { return "" }
+
+func init() { resolver.RegisterSource(stallingSource{}) }
+
+// Neither a host that accepts the connection and never answers, nor a
+// credential source that never returns, may hold the doctor up past its
+// timeout: the source used to have none.
+func TestDoctorGivesUpOnASilentHostOrStalledCredentials(t *testing.T) {
 	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -202,12 +222,15 @@ func TestDoctorGivesUpOnASilentHost(t *testing.T) {
 		}
 	})
 	path := writeConfig(t, connections(map[string]any{
-		"silent": direct("postgres://ro_clean:" + doctorSecret + "@" + ln.Addr().String() + "/app?sslmode=disable"),
+		"silent":  direct("postgres://ro_clean:" + doctorSecret + "@" + ln.Addr().String() + "/app?sslmode=disable"),
+		"stalled": map[string]any{"source": "stall"},
 	}))
 	start := time.Now()
 	code, out, _ := runCommand(t, "doctor", "--config", path)
-	if want := "FAIL silent: connect: no answer within 5s\n"; code != 1 || !strings.Contains(out, want) {
-		t.Errorf("doctor = %d, %q; want 1 and %q", code, out, want)
+	for _, want := range []string{"FAIL silent: connect: no answer within 5s\n", "FAIL stalled: credentials: context deadline exceeded\n"} {
+		if code != 1 || !strings.Contains(out, want) {
+			t.Errorf("doctor = %d, %q; want 1 and %q", code, out, want)
+		}
 	}
 	if elapsed := time.Since(start); elapsed > 15*time.Second {
 		t.Errorf("doctor took %s", elapsed)

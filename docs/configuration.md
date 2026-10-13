@@ -245,7 +245,7 @@ Flags go before or after `doctor`. The exit code is 0 when the server stops clea
 
 ## Doctor
 
-`pgglass doctor` reads the config as the server does, then checks every connection at once: it resolves the credentials, connects within 5 seconds and runs the [role check](#role-check). It prints one line per connection, in name order, and exits 1 if any fails:
+`pgglass doctor` reads the config as the server does, then checks every connection at once: it resolves the credentials and connects, within 5 seconds, then runs the [role check](#role-check). It prints one line per connection, in name order, and exits 1 if any fails:
 
 ```
 config /home/me/.config/pgglass/config.json (role_check warn)
@@ -256,7 +256,7 @@ warn staging-app: role app_reader: 1 finding(s)
 1 failed, 2 passed
 ```
 
-A connection fails when its credentials do not resolve or parse, its server does not answer or refuses it, or its role has a critical finding, whatever `role_check` says. Warnings alone pass. Doctor never prints a password or a whole DSN: an error names the user, database and host at most, and a DSN that does not parse is not shown. A config that does not load fails before any connection is tried, with the error the server would stop on.
+A connection fails when its credentials do not resolve in time or parse, its server does not answer or refuses it, or its role has a critical finding, whatever `role_check` says. Warnings alone pass. Doctor never prints a password or a whole DSN: an error names the user, database and host at most, and a DSN that does not parse is not shown. A config that does not load fails before any connection is tried, with the error the server would stop on.
 
 ## Streamable HTTP
 
