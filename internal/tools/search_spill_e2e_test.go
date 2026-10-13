@@ -9,12 +9,12 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
 
-// pg_search output must stay within InlineMaxBytes, as every other tool's
-// does. It returned all 900 matches below inline, 25 KB; past the limit they
-// are now written to a spill file, one per row, and summarized.
-func TestGapSearchExceedsInlineLimit(t *testing.T) {
+// pg_search output stays within InlineMaxBytes, as every tool's does: the
+// 900 matches below, 25 KB, are written to a spill file, one per row, and
+// summarized.
+func TestSearchSpillsMatchesPastTheInlineLimit(t *testing.T) {
 	t.Parallel()
-	const name = "secverify_search_reg"
+	const name = "tools_search_spill"
 	cols := make([]string, 900)
 	for i := range cols {
 		cols[i] = fmt.Sprintf("col_%03d_z text", i)
@@ -42,7 +42,7 @@ func TestGapSearchExceedsInlineLimit(t *testing.T) {
 		t.Errorf("audit lines = %+v, want one ok with 900 rows", lines)
 	}
 
-	// Within the limit, the matches come inline, one per line, as before.
+	// Within the limit, the matches come inline, one per line.
 	if got := s.ok(t, "pg_search", map[string]any{"connection": "db", "pattern": "col_899"}); got != "public.wide.col_899_z: text" {
 		t.Errorf("pg_search col_899 = %q", got)
 	}

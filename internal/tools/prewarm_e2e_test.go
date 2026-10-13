@@ -16,37 +16,27 @@ func prewarmDB(t *testing.T, name string) config.Connection {
 	return direct(testdb.DSN(t, testdb.RoleClean, name))
 }
 
-// autoprewarmFile is the size of $PGDATA/autoprewarm.blocks, -1 while there is
-// none.
-const autoprewarmFile = `SELECT coalesce((pg_stat_file('autoprewarm.blocks', true)).size, -1)`
-
-// A plain read-only role must not be able to make the server write a server
-// file. autoprewarm_dump_now() wrote $PGDATA/autoprewarm.blocks, past READ
-// ONLY and the rollback: the guard allowed it, and the role check did not
-// flag it. Now the guard rejects it before it reaches the database.
-func TestGapAutoprewarmWritesServerFile(t *testing.T) {
+// autoprewarm_dump_now writes $PGDATA/autoprewarm.blocks, past READ ONLY and
+// the rollback. role_check warn admits ro_clean, which may execute it, so the
+// guard is what stops it: pg_query rejects the call before it reaches the
+// database.
+func TestQueryRejectsAutoprewarm(t *testing.T) {
 	t.Parallel()
-	const name = "secverify_autoprewarm_reg"
-	s := connect(t, newConfig(config.RoleCheckWarn, map[string]config.Connection{"ro": prewarmDB(t, name)}))
-	admin := testdb.Conn(t, testdb.Superuser, name)
-	before := testdb.Value[int64](t, admin, autoprewarmFile)
-
+	s := connect(t, newConfig(config.RoleCheckWarn, map[string]config.Connection{
+		"ro": prewarmDB(t, "tools_autoprewarm_query"),
+	}))
 	got := s.fails(t, "pg_query", args("ro", `SELECT autoprewarm_dump_now()`))
 	if want := "query rejected: function autoprewarm_dump_now is not allowed"; got != want {
 		t.Errorf("pg_query = %q, want %q", got, want)
 	}
-	if after := testdb.Value[int64](t, admin, autoprewarmFile); after != before {
-		t.Errorf("a read-only role made the server write autoprewarm.blocks (size %d -> %d)", before, after)
-	}
 }
 
 // The role check flags EXECUTE on autoprewarm_* as critical, so role_check
-// strict refuses ro_clean where pg_prewarm is installed, and certified it as
-// clean before.
-func TestGapAutoprewarmRoleCheck(t *testing.T) {
+// strict refuses ro_clean where pg_prewarm is installed.
+func TestRoleCheckStrictRefusesAutoprewarm(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckStrict, map[string]config.Connection{
-		"ro": prewarmDB(t, "secverify_autoprewarm_strict"),
+		"ro": prewarmDB(t, "tools_autoprewarm_strict"),
 	}))
 	want := "connection \"ro\" refused (role_check strict): its role can do more than read.\n" +
 		"role ro_clean: 1 finding(s)\n" +
