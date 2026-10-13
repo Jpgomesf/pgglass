@@ -1,110 +1,88 @@
-// Command pgglass is a stdio MCP server that gives AI agents read-only
-// access to the PostgreSQL connections in config.json.
+// Command pgglass is an MCP server that gives AI agents read-only access to
+// the PostgreSQL connections of its config file, over stdio.
 package main
 
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
-	"io/fs"
-	"log/slog"
+	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
-	"strconv"
-	"strings"
-	"time"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
-	"github.com/jpgomesf/pgglass/internal/config"
-	"github.com/jpgomesf/pgglass/internal/engine"
-	"github.com/jpgomesf/pgglass/internal/resolver"
-	"github.com/jpgomesf/pgglass/internal/spill"
-	"github.com/jpgomesf/pgglass/internal/tools"
+	"runtime/debug"
+	"syscall"
 )
 
-// version is set at release time (goreleaser's -X main.version).
-var version = "dev"
+var version string
+
+const usage = `Usage:
+  pgglass [--config FILE]  serve the tools over stdio
+  pgglass --version        print the version
+
+Flags:
+  --config FILE  config file (default ~/.config/pgglass/config.json)
+  --version      print the version
+`
+
+type options struct {
+	config  string
+	version bool
+}
 
 func main() {
-	// stdout carries the protocol: every log line goes to stderr.
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
-	if err := run(context.Background(), logger); err != nil {
-		logger.Error("pgglass stopped", slog.String("error", err.Error()))
-		os.Exit(1)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	context.AfterFunc(ctx, stop)
+	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
+}
+
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	opts, err := parseArgs(args)
+	switch {
+	case errors.Is(err, flag.ErrHelp):
+		fmt.Fprint(stdout, usage)
+		return 0
+	case err != nil:
+		fmt.Fprintf(stderr, "pgglass: %v\n\n%s", err, usage)
+		return 2
+	case opts.version:
+		fmt.Fprintln(stdout, "pgglass", buildVersion())
+		return 0
+	default:
+		return serve(ctx, opts, stdin, stdout, stderr)
 	}
 }
 
-// run loads config.json and serves the tools over stdin and stdout until the
-// client disconnects.
-func run(ctx context.Context, logger *slog.Logger) error {
-	cfg, err := config.Load()
+func parseArgs(args []string) (options, error) {
+	opts := options{config: defaultConfigPath()}
+	fs := flag.NewFlagSet("pgglass", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&opts.config, "config", opts.config, "")
+	fs.BoolVar(&opts.version, "version", false, "")
+	if err := fs.Parse(args); err != nil {
+		return opts, err
+	}
+	if fs.NArg() > 0 {
+		return opts, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	}
+	return opts, nil
+}
+
+func defaultConfigPath() string {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return err
+		return ""
 	}
-	if err := validateSources(cfg); err != nil {
-		return err
-	}
-	if cfg.UsesReadonly() {
-		logger.Warn("config: readonly is deprecated and ignored: the server is always read-only")
-	}
-
-	dir, err := spillDir()
-	if err != nil {
-		return fmt.Errorf("spill directory: %w", err)
-	}
-	store := &spill.Store{
-		Dir:            dir,
-		TTL:            time.Duration(cfg.Defaults.SpillTTLHours) * time.Hour,
-		InlineMaxBytes: config.InlineMaxBytes,
-	}
-	if err := store.Cleanup(); err != nil {
-		logger.Warn("spill cleanup failed", slog.String("error", err.Error()))
-	}
-
-	eng := engine.New(&cfg)
-	defer eng.Close()
-	server := tools.NewServer(tools.New(cfg, eng, store, os.Stderr), version)
-	return server.Run(ctx, &mcp.StdioTransport{})
+	return filepath.Join(home, ".config", "pgglass", "config.json")
 }
 
-// spillDir returns the directory for spill files: pgglass under the
-// user cache directory or, without one (HOME unset), pgglass-<euid> in
-// the temp directory, which it creates. In a shared temp directory, another
-// user could create that one first and read or replace the files the agent
-// is told to read, so it must be a directory, not a symlink, that only this
-// user may use.
-func spillDir() (string, error) {
-	if cache, err := os.UserCacheDir(); err == nil {
-		return filepath.Join(cache, "pgglass"), nil
+func buildVersion() string {
+	if version != "" {
+		return version
 	}
-	dir := filepath.Join(os.TempDir(), "pgglass-"+strconv.Itoa(os.Geteuid()))
-	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-		return "", err
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" && info.Main.Version != "(devel)" {
+		return info.Main.Version
 	}
-	info, err := os.Lstat(dir)
-	if err != nil {
-		return "", err
-	}
-	if !private(info, os.Geteuid()) {
-		return "", fmt.Errorf("%s must be a directory of this user's with mode 0700", dir)
-	}
-	return dir, nil
-}
-
-// private reports whether info describes a directory, not a symlink, that
-// uid owns and that no one else may use: mode 0700.
-func private(info fs.FileInfo, uid int) bool {
-	owner, ok := fileOwner(info)
-	return ok && owner == uid && info.IsDir() && info.Mode().Perm() == 0o700
-}
-
-func validateSources(cfg config.Config) error {
-	for name, conn := range cfg.Connections {
-		if !resolver.IsRegistered(conn.Source) {
-			return fmt.Errorf("connection %q: unknown source %q (registered: %s)",
-				name, conn.Source, strings.Join(resolver.RegisteredSourceTypes(), ", "))
-		}
-	}
-	return nil
+	return "dev"
 }

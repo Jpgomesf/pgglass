@@ -1,5 +1,7 @@
 # Configuration
 
+pgglass reads `~/.config/pgglass/config.json`, or the file `--config` names (see [Command line](#command-line)).
+
 ## Connection Structure
 
 Each entry in the `connections` map is a named, self-contained database connection. The connection name (the JSON key) is what you pass to the tools as `connection`, or in `connections`, `left` and `right`. It takes at most 63 bytes, as a Postgres name does: the tools repeat it in their output, which keeps to 10 KB, and the server refuses to start with a longer one.
@@ -224,3 +226,17 @@ We recommend `{environment}-{database}`:
   }
 }
 ```
+
+## Command line
+
+```
+pgglass [--config FILE]  serve the tools over stdio
+pgglass --version        print the version
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--config FILE` | `~/.config/pgglass/config.json` | The config file. Without `HOME`, it must be given |
+| `--version` | — | Print the version: the release's, else the module version Go records in the build, else `dev` |
+
+The exit code is 0 when the server stops cleanly, 1 when it fails, and 2 for a usage error. While serving, stderr carries JSON lines only: the audit log, warnings and why the server stopped.

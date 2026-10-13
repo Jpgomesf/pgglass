@@ -9,7 +9,6 @@ import (
 	"maps"
 	"math"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -207,22 +206,11 @@ func checkNames(conns map[string]Connection) error {
 	return errors.Join(errs...)
 }
 
-// Load reads config.json from the same directory as the executable,
-// falling back to the current working directory, and parses it with Parse.
-func Load() (Config, error) {
-	exe, err := os.Executable()
+// Load reads the config file at path and parses it with Parse.
+func Load(path string) (Config, error) {
+	data, err := os.ReadFile(path) //nolint:gosec
 	if err != nil {
-		return Config{}, fmt.Errorf("resolve executable path: %w", err)
+		return Config{}, fmt.Errorf("read config: %w", err)
 	}
-	configPath := filepath.Join(filepath.Dir(exe), "config.json")
-
-	data, err := os.ReadFile(configPath) //nolint:gosec // path derived from executable location
-	if err != nil {
-		data, err = os.ReadFile("config.json")
-		if err != nil {
-			return Config{}, fmt.Errorf("read config.json: %w", err)
-		}
-	}
-
 	return Parse(data)
 }

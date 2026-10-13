@@ -39,7 +39,7 @@ Download the binary for your platform from [Releases](https://github.com/Jpgomes
 
 ## Configure
 
-Put the binary in a directory of its own, such as `~/.config/pgglass`, and create `config.json` next to it:
+Create `~/.config/pgglass/config.json`, or pass another file with `--config`:
 
 ```json
 {
@@ -60,22 +60,17 @@ Credentials come from `direct`, `env`, `dotenv` or `aws_secrets_manager`. See [C
 
 ## Add to Claude Code
 
-```json
-{
-  "mcpServers": {
-    "pgglass": {
-      "type": "stdio",
-      "command": "/path/to/pgglass"
-    }
-  }
-}
+Over stdio, Claude Code starts the server itself:
+
+```bash
+claude mcp add --transport stdio --scope user pgglass -- /path/to/pgglass
 ```
 
-Add to `~/.claude.json` (every project) or to `.mcp.json` at the root of a project.
+Put `--config /path/to/config.json` after the binary for a config file elsewhere. `--scope user` adds the server to every project; leave it out for the current project alone, or use `--scope project` to share it in the project's `.mcp.json`. Other MCP clients take the same command.
 
 ## Upgrading from mcp-postgres
 
-pgglass was called mcp-postgres; its tools and `config.json` format are unchanged. Move `~/.config/mcp-postgres` to `~/.config/pgglass`, replace the `mcp-postgres` binary in it with `pgglass`, and update any path in `config.json` that names the old directory, such as a `dotenv_path`. Then rename the server to `pgglass` in your MCP client and point its `command` at the new binary: in Claude Code, tool permissions such as `mcp__mcp-postgres__pg_query` become `mcp__pgglass__pg_query`. Spill files now go to `pgglass` under the user cache directory, so the old `mcp-postgres` one can be deleted.
+pgglass was called mcp-postgres; its tools and `config.json` format are unchanged. Move `~/.config/mcp-postgres` to `~/.config/pgglass`, replace the `mcp-postgres` binary in it with `pgglass`, and update any path in `config.json` that names the old directory, such as a `dotenv_path`. pgglass reads `~/.config/pgglass/config.json`, or the file `--config` names, never a `config.json` next to the binary or in the working directory. Then rename the server to `pgglass` in your MCP client and point its `command` at the new binary: in Claude Code, tool permissions such as `mcp__mcp-postgres__pg_query` become `mcp__pgglass__pg_query`. Spill files now go to `pgglass` under the user cache directory, so the old `mcp-postgres` one can be deleted.
 
 ## Safety model
 
