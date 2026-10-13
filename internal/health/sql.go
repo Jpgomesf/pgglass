@@ -71,19 +71,19 @@ SELECT (SELECT json_build_object('Database', datname, 'Hit', blks_hit, 'Read', b
 	FROM pg_stat_database
 	WHERE datname = current_database())`
 
-// deadTuplesSQL lists the 5 tables with the highest share of dead rows, and
-// how long ago autovacuum last processed each.
+// deadTuplesSQL lists the 5 tables with the most dead rows, their live rows,
+// and how long ago autovacuum last processed each. Ranked by their share of
+// dead rows instead, a tiny table with a few would crowd out large ones.
 const deadTuplesSQL = `
 SELECT coalesce(json_agg(json_build_object(
 		'Name', format('%I.%I', schemaname, relname), 'Dead', n_dead_tup, 'Live', n_live_tup,
 		'AutovacuumSecondsAgo', extract(epoch FROM now() - last_autovacuum)::bigint)
-	ORDER BY ratio DESC, n_dead_tup DESC, schemaname, relname), '[]')
+	ORDER BY n_dead_tup DESC, schemaname, relname), '[]')
 FROM (
-	SELECT schemaname, relname, n_dead_tup, n_live_tup, last_autovacuum,
-		n_dead_tup::float8 / (n_live_tup + n_dead_tup) AS ratio
+	SELECT schemaname, relname, n_dead_tup, n_live_tup, last_autovacuum
 	FROM pg_stat_user_tables
 	WHERE n_dead_tup > 0
-	ORDER BY ratio DESC, n_dead_tup DESC, schemaname, relname
+	ORDER BY n_dead_tup DESC, schemaname, relname
 	LIMIT 5
 ) t`
 

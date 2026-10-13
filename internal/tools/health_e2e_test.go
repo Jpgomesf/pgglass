@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
@@ -115,6 +116,40 @@ func TestHealthShowsBlockedSessions(t *testing.T) {
 	_, _, clean := healthReport(t, s, "clean")
 	if want := fmt.Sprintf("pid %d, database %s, state not visible to role ro_clean, blocked by %d", waiter, name, holder); !slices.Contains(clean["blocked"], want) {
 		t.Errorf("blocked = %q, want it to contain %q", clean["blocked"], want)
+	}
+}
+
+// dead_tuples ranks tables by their dead rows, so a tiny table with a high
+// share of them comes after a large one with more.
+func TestHealthRanksTablesByDeadRows(t *testing.T) {
+	t.Parallel()
+	const name = "tools_health_dead"
+	testdb.CreateDatabase(t, name, `
+		CREATE TABLE large (id int) WITH (autovacuum_enabled = off);
+		CREATE TABLE tiny (id int) WITH (autovacuum_enabled = off);
+		INSERT INTO large SELECT generate_series(1, 1000);
+		DELETE FROM large WHERE id <= 10;
+		INSERT INTO tiny VALUES (1), (2), (3), (4);
+		DELETE FROM tiny WHERE id <= 3;`)
+	// The statistics reach other sessions some time after the statements
+	// that change them.
+	conn := testdb.Conn(t, testdb.Superuser, name)
+	for deadline := time.Now().Add(10 * time.Second); !testdb.Value[bool](t, conn, `SELECT
+		(SELECT n_dead_tup = 10 AND n_live_tup = 990 FROM pg_stat_user_tables WHERE relname = 'large') AND
+		(SELECT n_dead_tup = 3 AND n_live_tup = 1 FROM pg_stat_user_tables WHERE relname = 'tiny')`); time.Sleep(50 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for the statistics")
+		}
+	}
+	s := connect(t, newConfig(config.RoleCheckWarn, map[string]config.Connection{"clean": direct(testdb.DSN(t, testdb.RoleClean, name))}))
+
+	_, _, got := healthReport(t, s, "clean")
+	want := []string{
+		"public.large: 1.0% dead (10 dead, 990 live), never autovacuumed",
+		"public.tiny: 75.0% dead (3 dead, 1 live), never autovacuumed",
+	}
+	if !slices.Equal(got["dead_tuples"], want) {
+		t.Errorf("dead_tuples = %q, want %q", got["dead_tuples"], want)
 	}
 }
 

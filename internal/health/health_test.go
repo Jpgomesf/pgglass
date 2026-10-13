@@ -108,23 +108,29 @@ func TestCheckFindsDeadTuplesAndUnusedIndexes(t *testing.T) {
 		CREATE UNIQUE INDEX churn_v_id_key ON churn (v, id);
 		CREATE TABLE scanned (id int, v int) WITH (autovacuum_enabled = off);
 		CREATE INDEX scanned_v_idx ON scanned (v);
+		CREATE TABLE tiny (id int) WITH (autovacuum_enabled = off);
 		CREATE TABLE bookings (during int4range, EXCLUDE USING gist (during WITH &&));
 		INSERT INTO churn SELECT g, g FROM generate_series(1, 100) g;
 		DELETE FROM churn WHERE id <= 25;
 		INSERT INTO scanned SELECT g, g FROM generate_series(1, 1000) g;
 		UPDATE scanned SET v = v WHERE id <= 10;
+		INSERT INTO tiny VALUES (1), (2), (3), (4);
+		DELETE FROM tiny WHERE id <= 3;
 		SET enable_seqscan = off;
 		SELECT count(*) FROM scanned WHERE v = 5;`)
 	waitFor(t, testdb.Conn(t, testdb.Superuser, name), `SELECT
 		(SELECT n_dead_tup = 25 AND n_live_tup = 75 FROM pg_stat_user_tables WHERE relname = 'churn') AND
 		(SELECT n_dead_tup = 10 AND n_live_tup = 1000 FROM pg_stat_user_tables WHERE relname = 'scanned') AND
+		(SELECT n_dead_tup = 3 AND n_live_tup = 1 FROM pg_stat_user_tables WHERE relname = 'tiny') AND
 		(SELECT idx_scan > 0 FROM pg_stat_user_indexes WHERE indexrelname = 'scanned_v_idx')`)
 
-	// The statistics views show every table to every role.
+	// The statistics views show every table to every role. Tables rank by
+	// their dead rows: tiny has the highest share of them, but the fewest.
 	got := checkAs(t, testdb.RoleClean, name, longRunning)
 	equal(t, got["dead_tuples"], []string{
 		"public.churn: 25.0% dead (25 dead, 75 live), never autovacuumed",
 		"public.scanned: 1.0% dead (10 dead, 1000 live), never autovacuumed",
+		"public.tiny: 75.0% dead (3 dead, 1 live), never autovacuumed",
 	})
 	equal(t, got["unused_indexes"], []string{"public.churn_v_idx on public.churn: 16 kB"})
 }
