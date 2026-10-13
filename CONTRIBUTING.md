@@ -133,7 +133,8 @@ go test ./internal/resolver/...  # single package
 
 Integration tests run a throwaway Postgres container through `internal/testdb`
 (one per test package; set `PGGLASS_PG_IMAGE` to pick the image, default
-`postgres:17-alpine`, which `testdb.Image()` returns). Without Docker they fail
+`postgres:17-alpine`, which `testdb.Image()` returns; CI runs PostgreSQL 15,
+16, 17 and 18). Without Docker they fail
 rather than skip. A package that uses `testdb` needs
 `func TestMain(m *testing.M) { testdb.Main(m) }`. Read through the engine, as
 the server does, with `testdb.Querier(t, role, db)`; set up or observe from

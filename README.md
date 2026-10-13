@@ -25,6 +25,8 @@ Calls run in parallel, across connections and on the same one. Each tool has a d
 
 ## Install
 
+pgglass supports PostgreSQL 15, 16, 17 and 18, and CI tests each.
+
 ### From source
 
 ```bash
