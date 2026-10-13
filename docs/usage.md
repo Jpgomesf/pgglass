@@ -171,10 +171,10 @@ total	numeric(12,2)	0%	100%	6		12.34	617.00
 (9 rows)
 ```
 
-When `pg_stats` has nothing on the columns, because the table was never analyzed or row-level security hides its statistics from the role, `pg_profile` samples the table instead, at most 10,000 rows taken with `TABLESAMPLE SYSTEM`, and counts each column's nulls and distinct values in the sample:
+When `pg_stats` has nothing on the columns, because the table was never analyzed, row-level security hides its statistics from the role or they are virtual generated columns (PostgreSQL 18), which ANALYZE skips, `pg_profile` samples the table instead, at most 10,000 rows taken with `TABLESAMPLE SYSTEM`, and counts each column's nulls and distinct values in the sample:
 
 ```
-public.fresh: sampled 300 rows with TABLESAMPLE SYSTEM (100) LIMIT 10000, since pg_stats has nothing on these columns (never analyzed, or hidden by row-level security)
+public.fresh: sampled 300 rows with TABLESAMPLE SYSTEM (100) LIMIT 10000, since pg_stats has nothing on these columns (never analyzed, hidden by row-level security, or virtual generated columns, which ANALYZE skips)
 column	type	nulls	distinct
 id	integer	0	300
 note	text	100	7
