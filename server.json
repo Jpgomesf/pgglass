@@ -1,0 +1,44 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.Jpgomesf/pgglass",
+  "title": "pgglass",
+  "description": "Read-only PostgreSQL for AI agents across many databases, enforced by the server",
+  "repository": {
+    "url": "https://github.com/Jpgomesf/pgglass",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/jpgomesf/pgglass:1.0.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "runtimeHint": "docker",
+      "runtimeArguments": [
+        {
+          "type": "named",
+          "name": "--mount",
+          "description": "Mount the directory holding config.json, read-only",
+          "value": "type=bind,src={config_dir},dst=/etc/pgglass,readonly",
+          "isRequired": true,
+          "variables": {
+            "config_dir": {
+              "description": "Directory holding pgglass's config.json, such as ~/.config/pgglass",
+              "format": "filepath",
+              "isRequired": true
+            }
+          }
+        }
+      ],
+      "packageArguments": [
+        {
+          "type": "named",
+          "name": "--config",
+          "value": "/etc/pgglass/config.json"
+        }
+      ]
+    }
+  ]
+}
