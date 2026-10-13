@@ -2,12 +2,10 @@
 // Each query runs alone in a READ ONLY transaction that is always rolled
 // back, under timeouts and result limits: Postgres refuses its table writes,
 // and the rollback undoes what else it changes transactionally. Neither
-// reaches what acts outside the transaction (dblink, server files and
-// programs, session advisory locks, the seed setseed gives random()), writes
-// in place (pg_log_standby_snapshot's WAL record, pg_surgery, BRIN and GIN
-// index maintenance) or takes a transaction id, which no rollback gives back
-// (txid_current): internal/guard rejects those, and the connection's role
-// should lack most of them.
+// reaches what acts outside the transaction, writes in place or takes a
+// transaction id that no rollback gives back: internal/guard rejects the
+// functions that do (see its denylists), and the connection's role should
+// lack most of them.
 package engine
 
 import (
@@ -193,29 +191,56 @@ func (b boundQuerier) Query(ctx context.Context, q Query) (*result.Result, error
 
 // pool returns the pool of the connection named name, opening it on first
 // use. A failed open is retried by the next call.
-func (m *Manager) pool(ctx context.Context, name string) (*pgxpool.Pool, error) {
+func (m *Manager) pool(ctx context.Context, name string) (connPool, error) {
 	lp, err := m.lazyPool(name)
 	if err != nil {
-		return nil, err
+		return connPool{}, err
 	}
 	select {
 	case lp.lock <- struct{}{}:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return connPool{}, ctx.Err()
 	}
 	defer func() { <-lp.lock }()
 	if lp.pool == nil {
 		// Close may have run since lazyPool returned; a pool opened now would leak.
 		if m.isClosed() {
-			return nil, errClosed
+			return connPool{}, errClosed
 		}
 		p, err := open(ctx, name, m.cfg.Connections[name], m.limits.MaxBytes)
 		if err != nil {
-			return nil, err
+			return connPool{}, err
 		}
 		lp.pool = p
 	}
-	return lp.pool, nil
+	return connPool{pool: lp.pool, conn: m.cfg.Connections[name]}, nil
+}
+
+// connPool is the pool of one configured connection.
+type connPool struct {
+	pool *pgxpool.Pool
+	conn config.Connection
+}
+
+// acquire returns a database connection from the pool. When opening a new
+// one fails because the server refuses its credentials, the source may have
+// answered from a cache that a rotation made stale: if it caches, acquire
+// has it drop them and tries once more, with credentials resolved afresh.
+// Nothing ran on the server yet, so the second try is safe.
+func (p connPool) acquire(ctx context.Context) (*pgxpool.Conn, error) {
+	c, err := p.pool.Acquire(ctx)
+	if authFailed(err) && resolver.Invalidate(p.conn) {
+		c, err = p.pool.Acquire(ctx)
+	}
+	return c, err
+}
+
+// authFailed reports whether err is the server refusing the credentials of
+// a connection: invalid_password (28P01) or invalid_authorization_specification
+// (28000).
+func authFailed(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && (pgErr.Code == "28P01" || pgErr.Code == "28000")
 }
 
 func (m *Manager) lazyPool(name string) (*lazyPool, error) {
@@ -259,11 +284,12 @@ const rowByteHeadroom = 1 << 20
 // open resolves the DSN of the connection named name and creates its pool,
 // which dials on first use. Each new database connection resolves the DSN
 // again and takes its password and TLS settings from it, so rotated
-// credentials reach it without a restart. A DSN that names another user,
-// database or host than the first fails the connection instead, since the
-// role check audits a connection once. The rest of the DSN, pool settings
-// included, is read once, here. maxBytes is the result byte budget, used to
-// bound one wire message.
+// credentials reach it without a restart, even from a source that caches
+// them (see connPool.acquire). A DSN that names another user, database or
+// host than the first fails the connection instead, since the role check
+// audits a connection once. The rest of the DSN, pool settings included, is
+// read once, here. maxBytes is the result byte budget, used to bound one wire
+// message.
 func open(ctx context.Context, name string, conn config.Connection, maxBytes int) (*pgxpool.Pool, error) {
 	cfg, err := parseDSN(ctx, name, conn)
 	if err != nil {

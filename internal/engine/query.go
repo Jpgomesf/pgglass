@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/jpgomesf/mcp-postgres/internal/result"
 )
@@ -21,8 +20,13 @@ import (
 const typeNamesSQL = "SELECT oid, typname FROM pg_catalog.pg_type WHERE oid = ANY($1::pg_catalog.oid[])"
 
 // run executes q alone in a READ ONLY transaction that it always rolls back.
-func run(ctx context.Context, p *pgxpool.Pool, q Query, l limits) (*result.Result, error) {
-	tx, err := p.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+func run(ctx context.Context, p connPool, q Query, l limits) (*result.Result, error) {
+	c, err := p.acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Release()
+	tx, err := c.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +170,7 @@ func columns(types *pgtype.Map, fields []pgconn.FieldDescription) []result.Colum
 
 // nameTypes looks up in pg_type the names of the column types pgx does not
 // know. It runs after the query's transaction, which a truncation aborts.
-func nameTypes(ctx context.Context, p *pgxpool.Pool, cols []result.Column) error {
+func nameTypes(ctx context.Context, p connPool, cols []result.Column) error {
 	var unknown []uint32
 	for _, c := range cols {
 		if c.TypeName == "" {
@@ -177,7 +181,12 @@ func nameTypes(ctx context.Context, p *pgxpool.Pool, cols []result.Column) error
 		return nil
 	}
 
-	rows, err := p.Query(ctx, typeNamesSQL, unknown)
+	conn, err := p.acquire(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	rows, err := conn.Query(ctx, typeNamesSQL, unknown)
 	if err != nil {
 		return err
 	}

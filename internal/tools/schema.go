@@ -14,6 +14,11 @@ import (
 // defaultSearchLimit is how many matches pg_search returns without a limit.
 const defaultSearchLimit = 50
 
+// listLimit is how many schemas or relations pg_schema reads from the
+// catalog for a listing: more lines than the inline limit shows in practice,
+// and a catalog result well within max_bytes however large the database.
+const listLimit = 500
+
 type schemaArgs struct {
 	Connection string `json:"connection"`
 	Schema     string `json:"schema"`
@@ -42,49 +47,58 @@ func (h *Handlers) schema(ctx context.Context, raw json.RawMessage, c *call) (st
 	}
 	key := args.Connection + "\x00" + args.Schema + "\x00" + args.Table
 	text, err := h.schemas.Get(key, func() (string, error) {
-		return describe(ctx, h.engine.Querier(args.Connection), args.Schema, args.Table)
+		return describe(ctx, h.engine.Querier(args.Connection), args.Schema, args.Table, h.spill.InlineMaxBytes)
 	})
 	if err != nil {
 		return "", &dbError{err}
 	}
-	return firstLines(text, h.spill.InlineMaxBytes), nil
+	return text, nil
 }
 
-// firstLines returns text when it fits in limit bytes. Otherwise it returns
-// as many of its first lines as fit, then a line saying how many were shown.
-func firstLines(text string, limit int) string {
-	if len(text) <= limit {
+// firstLines returns text when it fits in limit bytes and holds all total
+// lines, or all of its own when total is lower. Otherwise it returns as many
+// of its first lines as fit, then a line saying how many were shown.
+func firstLines(text string, total, limit int) string {
+	lines := strings.Split(text, "\n")
+	total = max(total, len(lines))
+	if len(lines) == total && len(text) <= limit {
 		return text
 	}
-	lines := strings.Split(text, "\n")
 	note := func(shown int) string {
-		return fmt.Sprintf("… %d of %d lines shown (output limit %d bytes): use pg_search to find names", shown, len(lines), limit)
+		return fmt.Sprintf("… %d of %d lines shown (output limit %d bytes): use pg_search to find names", shown, total, limit)
 	}
-	budget, n := limit-len(note(len(lines))), 0
+	budget, n := limit-len(note(total)), 0
 	for size := 0; n < len(lines) && size+len(lines[n])+1 <= budget; n++ {
 		size += len(lines[n]) + 1
 	}
 	return strings.Join(append(lines[:n:n], note(n)), "\n")
 }
 
-// describe renders what the arguments ask for: the schemas, the relations of
-// schema, or the relation schema.table.
-func describe(ctx context.Context, q engine.Querier, schema, table string) (string, error) {
+// describe renders what the arguments ask for, cut to limit bytes: the
+// schemas, the relations of schema, or the relation schema.table. A listing
+// reads at most listLimit schemas or relations from the catalog, and the
+// note of a cut listing counts them all.
+func describe(ctx context.Context, q engine.Querier, schema, table string, limit int) (string, error) {
 	switch {
 	case schema == "":
-		return rendered(introspect.Schemas(ctx, q))
+		list, total, err := introspect.FirstSchemas(ctx, q, listLimit)
+		return rendered(list, total, limit, err)
 	case table == "":
-		return rendered(introspect.Tables(ctx, q, schema))
+		list, total, err := introspect.FirstTables(ctx, q, schema, listLimit)
+		return rendered(list, total, limit, err)
 	default:
-		return rendered(introspect.Table(ctx, q, schema, table))
+		d, err := introspect.Table(ctx, q, schema, table)
+		return rendered(d, 0, limit, err)
 	}
 }
 
-func rendered[T interface{ Render() string }](v T, err error) (string, error) {
+// rendered renders v, which holds the first lines of total, cut to limit
+// bytes.
+func rendered[T interface{ Render() string }](v T, total, limit int, err error) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return v.Render(), nil
+	return firstLines(v.Render(), total, limit), nil
 }
 
 type searchArgs struct {

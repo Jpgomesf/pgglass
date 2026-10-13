@@ -119,28 +119,70 @@ type MatchList []Match
 // relation or one the role cannot read.
 var errNoRows = errors.New("no rows")
 
-// Schemas lists the non-system schemas the current role can see.
+// Schemas lists the non-system schemas the current role can see, by name.
+// The catalog result holds every one: FirstSchemas bounds it.
 func Schemas(ctx context.Context, q engine.Querier) (SchemaList, error) {
-	var list SchemaList
-	if err := queryJSON(ctx, q, &list, schemasSQL); err != nil {
-		return nil, fmt.Errorf("list schemas: %w", err)
+	list, _, err := schemas(ctx, q, nil)
+	return list, err
+}
+
+// FirstSchemas lists the first limit schemas that Schemas lists, and returns
+// how many Schemas lists, so the catalog result stays small however many
+// schemas there are.
+func FirstSchemas(ctx context.Context, q engine.Querier, limit int) (SchemaList, int, error) {
+	if limit < 1 {
+		return nil, 0, fmt.Errorf("limit must be at least 1, got %d", limit)
 	}
-	return list, nil
+	return schemas(ctx, q, &limit)
+}
+
+// schemas lists the first limit schemas, or every one when limit is nil, and
+// counts them all.
+func schemas(ctx context.Context, q engine.Querier, limit *int) (SchemaList, int, error) {
+	var page struct {
+		Schemas SchemaList
+		Total   int
+	}
+	if err := queryJSON(ctx, q, &page, schemasSQL, limit); err != nil {
+		return nil, 0, fmt.Errorf("list schemas: %w", err)
+	}
+	return page.Schemas, page.Total, nil
 }
 
 // Tables lists the relations in schema that the current role can read, by
 // name, leaving out partitions. It returns an error if the schema does not
-// exist or the role lacks USAGE on it.
+// exist or the role lacks USAGE on it. The catalog result holds every
+// relation: FirstTables bounds it.
 func Tables(ctx context.Context, q engine.Querier, schema string) (RelationList, error) {
-	var list RelationList
-	err := queryJSON(ctx, q, &list, tablesSQL, schema)
+	list, _, err := tables(ctx, q, schema, nil)
+	return list, err
+}
+
+// FirstTables lists the first limit relations that Tables lists, and returns
+// how many Tables lists, so the catalog result stays small however many
+// relations the schema holds.
+func FirstTables(ctx context.Context, q engine.Querier, schema string, limit int) (RelationList, int, error) {
+	if limit < 1 {
+		return nil, 0, fmt.Errorf("limit must be at least 1, got %d", limit)
+	}
+	return tables(ctx, q, schema, &limit)
+}
+
+// tables lists the first limit relations of schema, or every one when limit
+// is nil, and counts them all.
+func tables(ctx context.Context, q engine.Querier, schema string, limit *int) (RelationList, int, error) {
+	var page struct {
+		Relations RelationList
+		Total     int
+	}
+	err := queryJSON(ctx, q, &page, tablesSQL, schema, limit)
 	if errors.Is(err, errNoRows) {
-		return nil, fmt.Errorf("schema %q does not exist or the current role lacks USAGE on it", schema)
+		return nil, 0, fmt.Errorf("schema %q does not exist or the current role lacks USAGE on it", schema)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("list relations in schema %q: %w", schema, err)
+		return nil, 0, fmt.Errorf("list relations in schema %q: %w", schema, err)
 	}
-	return list, nil
+	return page.Relations, page.Total, nil
 }
 
 // Table describes the relation schema.name, or returns an error if the

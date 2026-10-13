@@ -17,8 +17,9 @@ import (
 
 func init() { RegisterSource(&AWSSecretsSource{}) }
 
-// AWSSecretsSource resolves credentials from AWS Secrets Manager.
-// Secrets are cached in memory for secretCacheTTL.
+// AWSSecretsSource resolves credentials from AWS Secrets Manager. Secrets
+// are cached in memory for secretCacheTTL, per AWS profile and secret name,
+// unless Invalidate drops them first.
 type AWSSecretsSource struct{}
 
 func (AWSSecretsSource) Type() string { return "aws_secrets_manager" }
@@ -65,15 +66,25 @@ func (AWSSecretsSource) Status(conn config.Connection) string {
 	if conn.SecretName == "" {
 		return ""
 	}
-	if awsSecrets.IsCached(conn.SecretName) {
+	if awsSecrets.IsCached(conn.AWSProfile, conn.SecretName) {
 		return "loaded"
 	}
 	return "not loaded"
 }
 
+// Invalidate drops the cached secret of conn, so that the next Resolve
+// fetches it again: after a rotation, the server refuses the cached password.
+func (AWSSecretsSource) Invalidate(conn config.Connection) {
+	awsSecrets.Invalidate(conn.AWSProfile, conn.SecretName)
+}
+
 // --- AWS secrets cache ---
 
 const secretCacheTTL = 24 * time.Hour
+
+// secretKey identifies a cached secret: one name can hold different secrets
+// in the accounts or regions that different AWS profiles reach.
+type secretKey struct{ profile, name string }
 
 type secretEntry struct {
 	value     map[string]string
@@ -81,32 +92,62 @@ type secretEntry struct {
 }
 
 type awsSecretsCache struct {
+	// fetch gets a secret from AWS Secrets Manager; tests replace it.
+	fetch func(ctx context.Context, awsProfile, secretName string) (map[string]string, error)
+
 	mu    sync.RWMutex
-	cache map[string]*secretEntry
+	cache map[secretKey]*secretEntry
 }
 
 var awsSecrets = &awsSecretsCache{
-	cache: make(map[string]*secretEntry),
+	fetch: fetchSecret,
+	cache: make(map[secretKey]*secretEntry),
 }
 
 // IsCached returns true if the secret is cached and not expired.
-func (sc *awsSecretsCache) IsCached(secretName string) bool {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-	entry, ok := sc.cache[secretName]
-	return ok && time.Since(entry.fetchedAt) < secretCacheTTL
+func (sc *awsSecretsCache) IsCached(awsProfile, secretName string) bool {
+	_, ok := sc.cached(secretKey{awsProfile, secretName})
+	return ok
 }
 
-// Get fetches a secret from AWS Secrets Manager, returning cached values
-// if available and not older than 24 hours.
+// Get returns the secret from the cache when it was fetched less than
+// secretCacheTTL ago, and from AWS Secrets Manager otherwise.
 func (sc *awsSecretsCache) Get(ctx context.Context, awsProfile, secretName string) (map[string]string, error) {
-	sc.mu.RLock()
-	if entry, ok := sc.cache[secretName]; ok && time.Since(entry.fetchedAt) < secretCacheTTL {
-		sc.mu.RUnlock()
-		return entry.value, nil
+	key := secretKey{awsProfile, secretName}
+	if secret, ok := sc.cached(key); ok {
+		return secret, nil
 	}
-	sc.mu.RUnlock()
+	secret, err := sc.fetch(ctx, awsProfile, secretName)
+	if err != nil {
+		return nil, err
+	}
+	sc.mu.Lock()
+	sc.cache[key] = &secretEntry{value: secret, fetchedAt: time.Now()}
+	sc.mu.Unlock()
+	return secret, nil
+}
 
+// Invalidate drops the secret from the cache, if it is there.
+func (sc *awsSecretsCache) Invalidate(awsProfile, secretName string) {
+	sc.mu.Lock()
+	delete(sc.cache, secretKey{awsProfile, secretName})
+	sc.mu.Unlock()
+}
+
+// cached returns the secret cached under key, unless it is missing or expired.
+func (sc *awsSecretsCache) cached(key secretKey) (map[string]string, bool) {
+	sc.mu.RLock()
+	defer sc.mu.RUnlock()
+	entry, ok := sc.cache[key]
+	if !ok || time.Since(entry.fetchedAt) >= secretCacheTTL {
+		return nil, false
+	}
+	return entry.value, true
+}
+
+// fetchSecret gets a secret from AWS Secrets Manager, with the credentials of
+// awsProfile or, when it is empty, of the default credential chain.
+func fetchSecret(ctx context.Context, awsProfile, secretName string) (map[string]string, error) {
 	opts := []func(*awsconfig.LoadOptions) error{}
 	if awsProfile != "" {
 		opts = append(opts, awsconfig.WithSharedConfigProfile(awsProfile))
@@ -124,16 +165,7 @@ func (sc *awsSecretsCache) Get(ctx context.Context, awsProfile, secretName strin
 	if err != nil {
 		return nil, fmt.Errorf("get secret %q: %w", secretName, err)
 	}
-	secret, err := secretValue(secretName, result)
-	if err != nil {
-		return nil, err
-	}
-
-	sc.mu.Lock()
-	sc.cache[secretName] = &secretEntry{value: secret, fetchedAt: time.Now()}
-	sc.mu.Unlock()
-
-	return secret, nil
+	return secretValue(secretName, result)
 }
 
 // secretValue decodes the JSON object a secret holds as its string value. A

@@ -16,12 +16,21 @@ type CredentialSource interface {
 
 	// Resolve returns a libpq-compatible DSN string for the given connection.
 	// The engine calls it when the connection is first used and again for each
-	// new database connection, so a source should cache what is slow to fetch.
+	// new database connection, so a source should cache what is slow to fetch,
+	// and implement Invalidator if it does.
 	Resolve(ctx context.Context, connName string, conn config.Connection) (string, error)
 
 	// Status returns a short status hint for display in pg_list_connections.
 	// Return "" if the source has no meaningful status to report.
 	Status(conn config.Connection) string
+}
+
+// Invalidator is implemented by a CredentialSource that caches credentials.
+type Invalidator interface {
+	// Invalidate drops what the source cached for conn, so that its next
+	// Resolve fetches the credentials afresh. The engine calls it when the
+	// server refuses the credentials of a new database connection.
+	Invalidate(conn config.Connection)
 }
 
 // sources maps source type strings to their implementations.
@@ -65,4 +74,15 @@ func Resolve(ctx context.Context, connName string, conn config.Connection) (stri
 			connName, conn.Source, strings.Join(RegisteredSourceTypes(), ", "))
 	}
 	return src.Resolve(ctx, connName, conn)
+}
+
+// Invalidate makes the source of conn drop what it cached for conn. It
+// reports whether the source caches credentials: only then can resolving
+// conn again return others.
+func Invalidate(conn config.Connection) bool {
+	inv, ok := sources[conn.Source].(Invalidator)
+	if ok {
+		inv.Invalidate(conn)
+	}
+	return ok
 }

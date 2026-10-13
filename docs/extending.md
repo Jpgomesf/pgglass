@@ -59,7 +59,7 @@ func (VaultSource) Status(conn config.Connection) string { return "" }
 
 No changes to `resolver.go`, `main.go`, or any other source files are needed. The server validates source types at startup, so an unregistered source fails fast with a clear error.
 
-Since `Resolve` runs for each new database connection, a source can return rotated passwords, such as those of a Vault static role under `database/static-creds/readonly`. Cache them while they are valid, as the AWS source caches its secrets. The user, database and host must stay the same, since the role check audits a connection once: a DSN that names others fails new database connections until the server restarts. So prefer a Vault static role, whose user stays, to dynamic `database/creds/...` leases, which each bring a new user.
+Since `Resolve` runs for each new database connection, a source can return rotated passwords, such as those of a Vault static role under `database/static-creds/readonly`. Cache them while they are valid, as the AWS source caches its secrets, and implement `resolver.Invalidator`: when the server refuses the credentials of a new database connection, the engine calls `Invalidate(conn)` and tries once more, so a rotated password reaches the cache. The user, database and host must stay the same, since the role check audits a connection once: a DSN that names others fails new database connections until the server restarts. So prefer a Vault static role, whose user stays, to dynamic `database/creds/...` leases, which each bring a new user.
 
 ## Validation
 

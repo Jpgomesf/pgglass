@@ -100,16 +100,31 @@ func TestSearchLimit(t *testing.T) {
 
 func TestFirstLines(t *testing.T) {
 	text := strings.Repeat("0123456789\n", 99) + "0123456789" // 100 lines, 1099 bytes
-	if got := firstLines(text, len(text)); got != text {
-		t.Errorf("text that fits was cut:\n%s", got)
+	// A total lower than the lines of text counts those lines instead.
+	for _, total := range []int{0, 100} {
+		if got := firstLines(text, total, len(text)); got != text {
+			t.Errorf("text that fits, total %d, was cut:\n%s", total, got)
+		}
 	}
 	// 38 lines and the note take 497 bytes; a 39th line would not fit.
 	want := strings.Repeat("0123456789\n", 38) + "… 38 of 100 lines shown (output limit 500 bytes): use pg_search to find names"
-	if got := firstLines(text, 500); got != want || len(got) > 500 {
-		t.Errorf("firstLines(text, 500) =\n%s\nwant\n%s", got, want)
+	if got := firstLines(text, 100, 500); got != want || len(got) > 500 {
+		t.Errorf("firstLines(text, 100, 500) =\n%s\nwant\n%s", got, want)
 	}
-	if got, want := firstLines(strings.Repeat("x", 1000), 100), "… 0 of 1 lines shown (output limit 100 bytes): use pg_search to find names"; got != want {
+	if got, want := firstLines(strings.Repeat("x", 1000), 1, 100), "… 0 of 1 lines shown (output limit 100 bytes): use pg_search to find names"; got != want {
 		t.Errorf("a line longer than the limit: %q, want %q", got, want)
+	}
+}
+
+// Text that fits but holds only the first lines of a listing says how many
+// there are in all; so does text cut to the limit.
+func TestFirstLinesOfALongerListing(t *testing.T) {
+	text := "a.t1: table\na.t2: table"
+	if got, want := firstLines(text, 5000, 1000), text+"\n… 2 of 5000 lines shown (output limit 1000 bytes): use pg_search to find names"; got != want {
+		t.Errorf("firstLines = %q, want %q", got, want)
+	}
+	if got, want := firstLines(text, 5000, 100), "a.t1: table\n… 1 of 5000 lines shown (output limit 100 bytes): use pg_search to find names"; got != want {
+		t.Errorf("firstLines = %q, want %q", got, want)
 	}
 }
 

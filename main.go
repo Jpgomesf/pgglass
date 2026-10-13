@@ -4,10 +4,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,14 +49,12 @@ func run(ctx context.Context, logger *slog.Logger) error {
 		logger.Warn("config: readonly is deprecated and ignored: the server is always read-only")
 	}
 
-	// A per-user directory: in a shared temp directory, another user could
-	// create it first and replace the files the agent is told to read.
-	cacheDir, err := os.UserCacheDir()
+	dir, err := spillDir()
 	if err != nil {
 		return fmt.Errorf("spill directory: %w", err)
 	}
 	store := &spill.Store{
-		Dir:            filepath.Join(cacheDir, "mcp-postgres"),
+		Dir:            dir,
 		TTL:            time.Duration(cfg.Defaults.SpillTTLHours) * time.Hour,
 		InlineMaxBytes: config.InlineMaxBytes,
 	}
@@ -65,6 +66,37 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	defer eng.Close()
 	server := tools.NewServer(tools.New(cfg, eng, store, os.Stderr), version)
 	return server.Run(ctx, &mcp.StdioTransport{})
+}
+
+// spillDir returns the directory for spill files: mcp-postgres under the
+// user cache directory or, without one (HOME unset), mcp-postgres-<euid> in
+// the temp directory, which it creates. In a shared temp directory, another
+// user could create that one first and read or replace the files the agent
+// is told to read, so it must be a directory, not a symlink, that only this
+// user may use.
+func spillDir() (string, error) {
+	if cache, err := os.UserCacheDir(); err == nil {
+		return filepath.Join(cache, "mcp-postgres"), nil
+	}
+	dir := filepath.Join(os.TempDir(), "mcp-postgres-"+strconv.Itoa(os.Geteuid()))
+	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return "", err
+	}
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return "", err
+	}
+	if !private(info, os.Geteuid()) {
+		return "", fmt.Errorf("%s must be a directory of this user's with mode 0700", dir)
+	}
+	return dir, nil
+}
+
+// private reports whether info describes a directory, not a symlink, that
+// uid owns and that no one else may use: mode 0700.
+func private(info fs.FileInfo, uid int) bool {
+	owner, ok := fileOwner(info)
+	return ok && owner == uid && info.IsDir() && info.Mode().Perm() == 0o700
 }
 
 func validateSources(cfg config.Config) error {

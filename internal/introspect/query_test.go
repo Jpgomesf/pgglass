@@ -41,20 +41,23 @@ func call(q engine.Querier) map[string]error {
 
 func TestQueriesPinSearchPathAndPassParameters(t *testing.T) {
 	ctx := context.Background()
+	limit, all := 3, (*int)(nil) // a listing's limit, or none
 	for _, tc := range []struct {
 		name string
 		run  func(engine.Querier) error
 		want []any
 	}{
-		{"Schemas", func(q engine.Querier) error { _, err := introspect.Schemas(ctx, q); return err }, nil},
-		{"Tables", func(q engine.Querier) error { _, err := introspect.Tables(ctx, q, "app"); return err }, []any{"app"}},
+		{"Schemas", func(q engine.Querier) error { _, err := introspect.Schemas(ctx, q); return err }, []any{all}},
+		{"FirstSchemas", func(q engine.Querier) error { _, _, err := introspect.FirstSchemas(ctx, q, 3); return err }, []any{&limit}},
+		{"Tables", func(q engine.Querier) error { _, err := introspect.Tables(ctx, q, "app"); return err }, []any{"app", all}},
+		{"FirstTables", func(q engine.Querier) error { _, _, err := introspect.FirstTables(ctx, q, "app", 3); return err }, []any{"app", &limit}},
 		{"Table", func(q engine.Querier) error { _, err := introspect.Table(ctx, q, "app", "orders"); return err }, []any{"app", "orders"}},
 		// The pattern matches literally: ILIKE wildcards and the escape are escaped.
 		{"Search", func(q engine.Querier) error { _, err := introspect.Search(ctx, q, `a_b%c\d`, 5); return err }, []any{`%a\_b\%c\\d%`, 5}},
 	} {
-		q := &fakeQuerier{res: oneValue("[]")}
-		if tc.name == "Table" {
-			q.res = oneValue("{}")
+		q := &fakeQuerier{res: oneValue("{}")}
+		if tc.name == "Search" {
+			q.res = oneValue("[]")
 		}
 		if err := tc.run(q); err != nil {
 			t.Errorf("%s: %v", tc.name, err)
@@ -99,7 +102,12 @@ func TestNoRowMeansNotFound(t *testing.T) {
 }
 
 func TestUnexpectedJSONIsAnError(t *testing.T) {
-	for _, value := range []string{`[{"Name": "app", "Owner": "postgres"}]`, `{"Name": `, `"app"`} {
+	for _, value := range []string{
+		`{"Schemas": [{"Name": "app", "Owner": "postgres"}], "Total": 1}`,
+		`{"Schemas": [], "Count": 0}`,
+		`{"Schemas": `,
+		`[]`,
+	} {
 		_, err := introspect.Schemas(context.Background(), &fakeQuerier{res: oneValue(value)})
 		if err == nil {
 			t.Errorf("Schemas decoded %s without error", value)

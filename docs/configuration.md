@@ -51,7 +51,7 @@ Read DSN from a `.env` file. Supports `KEY=VALUE`, quoted values, and comments.
 
 ### AWS Secrets Manager
 
-Fetch credentials from AWS Secrets Manager. Secrets are cached in memory for 24 hours: new database connections use the cached secret until it expires, so restart the server to pick up a rotated secret sooner. Alternating-users rotation changes the user, so new database connections fail after it until a restart (see [DSN Formats](#dsn-formats)).
+Fetch credentials from AWS Secrets Manager. Each secret is cached in memory for 24 hours, per `aws_profile` and `secret_name`. When the server refuses the credentials of a new database connection (SQLSTATE `28P01` or `28000`), the secret is fetched again and the connection tried once more, so a rotated password needs no restart. Alternating-users rotation is different: it switches the secret to another user and leaves the cached user's password valid, so new database connections go on as the cached user until the cached secret expires, then fail until a restart, since the role check audited the first user (see [DSN Formats](#dsn-formats)). Single-user rotation keeps the user.
 
 ```json
 {
@@ -98,7 +98,7 @@ postgres://user:password@host:5432/dbname?sslmode=require
 host=localhost port=5432 dbname=mydb user=admin password=secret
 ```
 
-Whatever the DSN says, every session starts with `default_transaction_read_only=on` and `client_encoding=UTF8`, and each query sets `statement_timeout`, `lock_timeout` and `standard_conforming_strings=on` for its own transaction.
+Whatever the DSN says, every session asks at startup for `default_transaction_read_only=on` and `client_encoding=UTF8`, and each query runs in a READ ONLY transaction that sets `statement_timeout`, `lock_timeout` and `standard_conforming_strings=on` for itself. Behind PgBouncer, `ignore_startup_parameters` drops the former, and the READ ONLY transaction alone remains (see [PgBouncer](#pgbouncer)).
 
 Each connection's DSN is resolved on first use and again for every new database connection, which takes its password and TLS settings from it: a rotated password needs no restart. A DSN that comes to name another user, database or host fails new database connections until the server restarts, since the [role check](#role-check) audited the first one. The rest of the DSN, such as `pool_max_conns`, is read on first use only.
 
@@ -143,7 +143,7 @@ Every field is optional: a missing or zero value takes the default. Numbers must
 | `lock_timeout_seconds` | `5` | Max time a query waits for a lock |
 | `max_rows` | `1000` | Rows a query returns before its result is truncated. A `pg_query` call can lower it with `max_rows`, never raise it. Also caps `pg_search` |
 | `max_bytes` | `1048576` (1 MiB) | Bytes a query's result holds before it is truncated: each value counts its length plus 24, so empty and NULL values count too. A server message larger than `max_bytes` plus 1 MiB is not read: the connection is reset and, once the columns are described, the result is truncated there; before, the query fails |
-| `spill_ttl_hours` | `24` | How long spill files of large results are kept. They live in `mcp-postgres` under the user cache directory, and cleanup removes every spill file there older than this, including those of other server instances that share the directory |
+| `spill_ttl_hours` | `24` | How long spill files of large results are kept. They live in `mcp-postgres` under the user cache directory (or `mcp-postgres-<uid>` in the temp directory without one), and cleanup removes every spill file there older than this, including those of other server instances that share the directory |
 | `format` | `tsv` | Default result format of `pg_query`: `tsv`, `json` or `markdown` |
 | `role_check` | `warn` | What to do when a connection's role can do more than read (see below) |
 | `readonly` | — | Deprecated and ignored: the server is always read-only. Logs a warning at startup |
@@ -158,7 +158,7 @@ On a connection's first use, the server audits the role it connects as, once, an
 | `warn` | Findings are shown once, at the top of the first response on the connection |
 | `off` | No audit |
 
-Critical findings, each a way out of the read-only transaction: superuser; membership in a superuser role, which `SET ROLE` reaches; membership in `pg_execute_server_program` or `pg_write_server_files`; `EXECUTE` on `dblink*`, `pg_background*`, `http*`, `net.*`, `aws_s3.*`, `aws_lambda.*` or `lo_export`. Warnings: `BYPASSRLS`, `CREATEROLE`, `CREATEDB`; membership in `pg_read_server_files` or `pg_signal_backend`; `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on a relation; `EXECUTE` on `lo_import`, `pg_read_file`, `pg_read_binary_file` or `pg_log_backend_memory_contexts`. Only objects in schemas the role can use count.
+Critical findings, each a way out of the read-only transaction: superuser; membership in a superuser role, which `SET ROLE` reaches; membership in `pg_execute_server_program` or `pg_write_server_files`; `EXECUTE` on `dblink*`, `pg_background*`, `http*`, `net.*`, `aws_s3.*`, `aws_lambda.*` or `lo_export`, or on a function that writes in place: `heap_force_*` (pg_surgery), `pg_truncate_visibility_map` (pg_visibility) or `pg_log_standby_snapshot`. Warnings: `BYPASSRLS`, `CREATEROLE`, `CREATEDB`; membership in `pg_read_server_files` or `pg_signal_backend`; `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on a relation; `EXECUTE` on `lo_import`, `pg_read_file`, `pg_read_binary_file` or `pg_log_backend_memory_contexts`. Only objects in schemas the role can use count.
 
 If the audit itself fails, it is retried on the next call; meanwhile `strict` refuses the connection and `warn` lets calls through with a note.
 
