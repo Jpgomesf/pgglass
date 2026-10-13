@@ -167,13 +167,19 @@ func TestRegisterSource(t *testing.T) {
 	}
 }
 
+// Only aws_secrets_manager has a status: pg_list_connections shows none for
+// the other sources, nor for an unknown one.
 func TestStatusForUnknownAndStatusless(t *testing.T) {
 	t.Parallel()
-	if got := resolver.StatusFor(config.Connection{Source: "nope"}); got != "" {
-		t.Errorf("StatusFor(unknown) = %q, want empty", got)
-	}
-	if got := resolver.StatusFor(config.Connection{Source: "direct", DSN: "x"}); got != "" {
-		t.Errorf("StatusFor(direct) = %q, want empty", got)
+	for _, conn := range []config.Connection{
+		{Source: "nope"},
+		{Source: "direct", DSN: "x"},
+		{Source: "env", DSNEnvVar: "RESOLVER_TEST_UNSET"},
+		{Source: "dotenv", DSNEnvVar: "APP_DSN"},
+	} {
+		if got := resolver.StatusFor(conn); got != "" {
+			t.Errorf("StatusFor(%s) = %q, want empty", conn.Source, got)
+		}
 	}
 }
 
