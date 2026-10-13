@@ -177,6 +177,17 @@ func TestStatusForUnknownAndStatusless(t *testing.T) {
 	}
 }
 
+// Only a source that caches credentials can return others once invalidated.
+func TestInvalidateReportsWhetherTheSourceCaches(t *testing.T) {
+	t.Parallel()
+	for source, want := range map[string]bool{"aws_secrets_manager": true, "direct": false, "env": false, "dotenv": false, "nope": false} {
+		conn := config.Connection{Source: source, SecretName: "resolver_test_invalidate"}
+		if got := resolver.Invalidate(conn); got != want {
+			t.Errorf("Invalidate(%s) = %v, want %v", source, got, want)
+		}
+	}
+}
+
 type fakeSource struct{}
 
 func (fakeSource) Type() string { return "resolver_test_fake" }
