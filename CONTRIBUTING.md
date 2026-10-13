@@ -107,7 +107,7 @@ No changes to `resolver.go`, `main.go`, or any other source files should be need
 │   ├── introspect/                      # schema descriptions from the system catalogs
 │   ├── explain/                         # summarizes a SELECT's plan: cost, costliest nodes, flags
 │   ├── health/                          # checks a server from its statistics views and catalogs
-│   ├── tools/                           # MCP tool handlers and audit log
+│   ├── tools/                           # MCP tool and resource handlers, audit log
 │   └── testdb/                          # disposable Postgres for integration tests
 ```
 

@@ -23,6 +23,8 @@ pgglass is an [MCP](https://modelcontextprotocol.io) server that gives AI agents
 
 Calls run in parallel, across connections and on the same one. Each tool has a display title, and on connecting the server gives the agent short instructions on using the tools well. It speaks MCP revisions 2024-11-05 to 2026-07-28 and settles on the newest the client speaks too. See the [usage guide](docs/usage.md).
 
+Tables are also MCP resources, `pgglass://<connection>/<schema>/<table>`, read through the same role check, limits and audit log as the tools: in Claude Code, `@`-mention one to add it to a prompt as `pg_schema` describes it. See [resources](docs/usage.md#mention-tables-as-resources).
+
 ## Install
 
 ### From source

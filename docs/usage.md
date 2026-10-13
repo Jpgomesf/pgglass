@@ -237,6 +237,15 @@ replication	not a replica
 
 `long_running`, `blocked` and `unused_indexes` stop at 10 rows and say how many more there are. Sessions are those of the whole server, and their query text is never shown: it can hold secrets. A role without the privileges of `pg_read_all_stats` sees the type, state, timing and wait event of its own sessions only, as above: `connections` then also counts the other backends connected to a database, which may be workers rather than client backends, and says `up to`. A section whose view or function the role may not use says `not visible to role <name>`, and the other sections still run. Unlike `pg_query`, `pg_health` does not cut values at 200 characters: an unused index with long schema, table and index names would lose its table and size.
 
+## Mention tables as resources
+
+Every table, view, materialized view and foreign table is also an MCP resource, `pgglass://<connection>/<schema>/<table>`, each name percent-encoded as in `pgglass://my%20db/app/caf%C3%A9`. In Claude Code, type `@` and pick one, such as `@pgglass:pgglass://prod-app/app/orders`, to add the relation to the prompt as `pg_schema` describes it, in `text/plain`.
+
+- `resources/list` names, for each connection, the first 200 relations its role can read, by schema and then name: `prod-app: app.orders`, described by its kind, `table`. It checks the role of every connection and reads its catalog, all at once, so a client that lists resources when it connects opens every connection then. A connection that fails, or that `role_check: strict` refuses, is left out. Each connection's list is cached for 5 minutes.
+- The resource template `pgglass://{connection}/{schema}/{table}` reads any relation, listed or not.
+- A read goes through the role check and keeps to 10 KB, as `pg_schema` does: when it is the first response on a connection, the role check's findings start it. A listing cannot show them, so it leaves them to the next response.
+- An unknown connection, or a schema or relation that does not exist or that the role cannot read, is a resource-not-found error (code `-32602`, with the URI in its data). A connection that `role_check: strict` refuses, or a database error, is an internal error (`-32603`) whose message is the error a tool would return.
+
 ## Errors
 
 A failed call returns a result with `isError` set and the reason as text:
@@ -265,6 +274,8 @@ Each tool call writes one JSON line to stderr, or one per connection for a [fan-
 ```
 
 `connection` names both connections of a `pg_diff_schema` call, `prod,staging`. `sql_sha256` is the first 12 hex digits of the statement's SHA-256, so repeated statements can be matched without logging them; it is empty, and `sql_len` 0, for tools that take no SQL. `outcome` is `ok`, `guard_reject`, `db_error` (with `sqlstate` when Postgres raised it), `preflight_block` or `error` (for example, invalid arguments). SQL text, parameters and values are never logged.
+
+[Resources](#mention-tables-as-resources) are audited too: each read writes a line whose `tool` is `resource`, and each listing one line per connection whose `tool` is `resource_list`, with the relations it listed as `rows`.
 
 ## Parallel calls
 
