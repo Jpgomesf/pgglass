@@ -25,8 +25,7 @@ func TestAuditWarnsOfWhatPostgreSQL18Adds(t *testing.T) {
 	}
 	want := []preflight.Finding{warning("function_execute",
 		"EXECUTE on 2 functions: inspect.pg_get_logical_snapshot_info, inspect.pg_get_logical_snapshot_meta")}
-	conn := testdb.Conn(t, testdb.Superuser, database)
-	if testdb.Value[int](t, conn, "SELECT current_setting('server_version_num')::int") >= 180000 {
+	if testdb.ServerVersion(t) >= 180000 {
 		want = append([]preflight.Finding{warning("role_membership", "member of pg_signal_autovacuum_worker")}, want...)
 	}
 	wantFindings(t, report, want...)

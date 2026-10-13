@@ -191,8 +191,7 @@ func TestExplainUnderAWindowOverTheWholePartition(t *testing.T) {
 	if got := s.ok(t, "pg_explain", args("clean", sql, "analyze", true)); !strings.HasSuffix(got, flag) {
 		t.Errorf("analyze:\n%s", got)
 	}
-	version := testdb.Value[int](t, testdb.Conn(t, testdb.RoleClean, testdb.DBApp), "SELECT current_setting('server_version_num')::int")
-	if version < 170000 {
+	if testdb.ServerVersion(t) < 170000 {
 		return // earlier planners give the window no startup cost that shows it
 	}
 	got := s.ok(t, "pg_explain", args("clean", sql))
@@ -291,7 +290,7 @@ func TestExplainShowsWhatPostgreSQL18Reports(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
 	spill, perLoop := `\nflags: none$`, `1 row × 20000 loops`
-	if testdb.Value[int](t, testdb.Conn(t, testdb.RoleClean, testdb.DBApp), "SELECT current_setting('server_version_num')::int") >= 180000 {
+	if testdb.ServerVersion(t) >= 180000 {
 		spill, perLoop = `\nflags:\n  WindowAgg: spilled to disk \(\d+ kB\)$`, `0\.8 rows × 20000 loops`
 	}
 	got := s.ok(t, "pg_explain", args("clean", "SELECT g, count(*) OVER () FROM generate_series(1, 500000) g", "analyze", true))

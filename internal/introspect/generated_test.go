@@ -25,7 +25,7 @@ func TestVirtualGeneratedColumns(t *testing.T) {
 	const name = "introspect_generated"
 	testdb.CreateDatabase(t, name, generatedSQL)
 	q := testdb.Querier(t, testdb.Superuser, name)
-	virtual := testdb.Value[int](t, testdb.Conn(t, testdb.Superuser, name), "SELECT current_setting('server_version_num')::int") >= 180000
+	virtual := testdb.ServerVersion(t) >= 180000
 	generated := "GENERATED ALWAYS AS (net * 2::numeric) STORED"
 	if virtual {
 		generated = "GENERATED ALWAYS AS (net * 2::numeric) VIRTUAL"

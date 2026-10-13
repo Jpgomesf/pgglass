@@ -122,6 +122,13 @@ func Value[T any](t testing.TB, conn *pgx.Conn, sql string, args ...any) T {
 	return v
 }
 
+// ServerVersion returns the shared server's server_version_num, such as
+// 180001, for expectations that differ between major versions.
+func ServerVersion(t testing.TB) int {
+	t.Helper()
+	return Value[int](t, Conn(t, Superuser, maintenanceDB), "SELECT current_setting('server_version_num')::int")
+}
+
 // CreateDatabase creates database name, runs fixtureSQL in it as the superuser
 // and drops the database, closing any open connections, when t finishes.
 // fixtureSQL may hold several statements. Roles are cluster-wide and survive

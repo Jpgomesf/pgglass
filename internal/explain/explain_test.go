@@ -287,7 +287,7 @@ func TestALimitAboveAWindowOverTheWholePartition(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	const sql = "SELECT id, count(*) OVER () FROM app.events LIMIT 10"
 	wantFlags(t, flagsOf(t, q, sql, true), `Seq Scan on app\.events: full scan of ~20000 rows`)
-	if serverVersion(t) < 170000 {
+	if testdb.ServerVersion(t) < 170000 {
 		return
 	}
 	summaryOf(t, q, sql, false,
@@ -298,12 +298,6 @@ func TestALimitAboveAWindowOverTheWholePartition(t *testing.T) {
 		`  Limit: cost 0, ~10 rows`,
 		`flags:`,
 		`  Seq Scan on app\.events: full scan of ~20000 rows`)
-}
-
-// serverVersion returns server_version_num of the shared test server.
-func serverVersion(t *testing.T) int {
-	t.Helper()
-	return testdb.Value[int](t, testdb.Conn(t, testdb.RoleClean, testdb.DBApp), "SELECT current_setting('server_version_num')::int")
 }
 
 // Neither a lookup by primary key nor a seq scan of a small table is
@@ -455,7 +449,7 @@ func TestAnExistsReadsItsSubqueryUpToItsFirstRow(t *testing.T) {
 func TestAnalyzeFlagsAWindowThatSpilled(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	const sql = "SELECT g, count(*) OVER () FROM generate_series(1, 500000) g"
-	if serverVersion(t) < 180000 {
+	if testdb.ServerVersion(t) < 180000 {
 		if got, err := run(t, q, sql, true); err != nil || !strings.HasSuffix(got, "\nflags: none") {
 			t.Errorf("%s: %v\n%s", sql, err, got)
 		}
@@ -472,7 +466,7 @@ func TestAnalyzeShowsTheRowsOfEachLoop(t *testing.T) {
 	const sql = `SELECT e.id FROM app.events e CROSS JOIN LATERAL
 		(SELECT 1 FROM app.customers c WHERE c.id = (e.payload->>'customer')::uuid AND c.active LIMIT 1) x`
 	perLoop := `1 row × 20000 loops`
-	if serverVersion(t) >= 180000 {
+	if testdb.ServerVersion(t) >= 180000 {
 		perLoop = `0\.8 rows × 20000 loops`
 	}
 	got, err := run(t, q, sql, true)

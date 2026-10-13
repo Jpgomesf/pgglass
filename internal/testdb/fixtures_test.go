@@ -3,6 +3,8 @@ package testdb
 import (
 	"errors"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -175,5 +177,16 @@ func TestCreateDatabase(t *testing.T) {
 	conn := Conn(t, Superuser, DBApp)
 	if Value[bool](t, conn, "SELECT EXISTS (SELECT FROM pg_database WHERE datname = $1)", name) {
 		t.Errorf("database %s still exists after its test finished", name)
+	}
+}
+
+// ServerVersion reports the server the image runs: postgres:18-alpine is
+// PostgreSQL 18, and every supported image is 15 or later.
+func TestServerVersionIsTheImages(t *testing.T) {
+	got := ServerVersion(t)
+	_, tag, _ := strings.Cut(Image(), ":")
+	major, _, _ := strings.Cut(tag, "-")
+	if want, err := strconv.Atoi(major); got < 150000 || (err == nil && got/10000 != want) {
+		t.Errorf("ServerVersion = %d on %s", got, Image())
 	}
 }
