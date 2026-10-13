@@ -14,10 +14,6 @@ import (
 // defaultDiffSchema is the schema pg_diff_schema compares when given none.
 const defaultDiffSchema = "public"
 
-// maxNameBytes is the longest name Postgres keeps (NAMEDATALEN - 1). It cuts
-// a longer one, so a schema argument past it would match another schema.
-const maxNameBytes = 63
-
 type diffSchemaArgs struct {
 	Left   string `json:"left"`
 	Right  string `json:"right"`
@@ -38,8 +34,8 @@ func (h *Handlers) diffSchema(ctx context.Context, raw json.RawMessage, c *call)
 	if args.Schema == "" {
 		args.Schema = defaultDiffSchema
 	}
-	if len(args.Schema) > maxNameBytes {
-		return "", fmt.Errorf("schema is %d bytes: Postgres names take at most %d, and it cuts a longer one", len(args.Schema), maxNameBytes)
+	if err := checkName("schema", args.Schema); err != nil {
+		return "", err
 	}
 	if err := h.gatePair(ctx, args.Left, args.Right, c); err != nil {
 		return "", err

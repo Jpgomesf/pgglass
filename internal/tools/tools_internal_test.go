@@ -170,6 +170,32 @@ func TestSearchPath(t *testing.T) {
 			t.Errorf("searchPath(%q, %q): err = %v, want a *guard.Violation", tc.conn, tc.schema, err)
 		}
 	}
+	// Postgres would cut a longer name to the first 63 bytes, which may name
+	// another schema.
+	long := strings.Repeat("s", 64)
+	h.cfg.Connections["long"] = config.Connection{DefaultSchema: long}
+	for _, tc := range []struct{ conn, schema string }{{"app", long}, {"long", ""}} {
+		const want = "schema is 64 bytes: Postgres names take at most 63, and it cuts a longer one"
+		if _, err := h.searchPath(tc.conn, tc.schema); err == nil || err.Error() != want {
+			t.Errorf("searchPath(%q, %d bytes) = %v, want %q", tc.conn, len(tc.schema), err, want)
+		}
+	}
+}
+
+// Postgres keeps names of at most 63 bytes and cuts a longer one to its
+// first 63, which may name another object: checkName refuses it.
+func TestCheckName(t *testing.T) {
+	for _, name := range []string{"", "orders", strings.Repeat("n", 63), strings.Repeat("é", 31) + "x"} {
+		if err := checkName("table", name); err != nil {
+			t.Errorf("checkName of %d bytes: %v", len(name), err)
+		}
+	}
+	for _, name := range []string{strings.Repeat("n", 64), strings.Repeat("é", 32), strings.Repeat("n", 12000)} {
+		want := fmt.Sprintf("table is %d bytes: Postgres names take at most 63, and it cuts a longer one", len(name))
+		if err := checkName("table", name); err == nil || err.Error() != want {
+			t.Errorf("checkName of %d bytes = %v, want %q", len(name), err, want)
+		}
+	}
 }
 
 func TestDecode(t *testing.T) {

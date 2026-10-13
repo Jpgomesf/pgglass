@@ -55,18 +55,17 @@ func numbered(n int) *result.Result {
 	return res
 }
 
-func newStore(t *testing.T, inlineMaxBytes int) *spill.Store {
+func newStore(t *testing.T) *spill.Store {
 	t.Helper()
 	return &spill.Store{
-		Dir:            filepath.Join(t.TempDir(), "spill"),
-		TTL:            24 * time.Hour,
-		InlineMaxBytes: inlineMaxBytes,
-		Now:            func() time.Time { return t0 },
+		Dir: filepath.Join(t.TempDir(), "spill"),
+		TTL: 24 * time.Hour,
+		Now: func() time.Time { return t0 },
 	}
 }
 
-// inlineOf is what Output returns inline for res: the rendering with cells cut
-// at 200 characters and the given footer.
+// inlineOf is what OutputWithin returns inline for res: the rendering with
+// cells cut at 200 characters and the given footer.
 func inlineOf(t *testing.T, res *result.Result, f render.Format, footer string) string {
 	t.Helper()
 	body, err := render.Render(res, f, 200)
@@ -102,8 +101,8 @@ func dirNames(t *testing.T, dir string) []string {
 }
 
 func TestOutputReturnsSmallResultsInline(t *testing.T) {
-	store := newStore(t, 1000)
-	out, err := store.Output("pg_query", "prod", people(), render.TSV)
+	store := newStore(t)
+	out, err := store.OutputWithin("pg_query", "prod", people(), render.TSV, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +135,7 @@ func TestOutputFooterCountsRowsAndNotesTruncation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			out, err := newStore(t, 1000).Output("pg_query", "prod", tt.res, tt.f)
+			out, err := newStore(t).OutputWithin("pg_query", "prod", tt.res, tt.f, 1000)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -150,7 +149,7 @@ func TestOutputFooterCountsRowsAndNotesTruncation(t *testing.T) {
 func TestOutputCutsInlineCellsAt200Characters(t *testing.T) {
 	res := people()
 	res.Rows[0][1] = str(strings.Repeat("é", 1000))
-	out, err := newStore(t, 10_000).Output("pg_query", "prod", res, render.TSV)
+	out, err := newStore(t).OutputWithin("pg_query", "prod", res, render.TSV, 10_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,8 +162,8 @@ func TestOutputCutsInlineCellsAt200Characters(t *testing.T) {
 func TestOutputInlineBoundary(t *testing.T) {
 	inline := inlineOf(t, people(), render.Markdown, "(3 rows)")
 
-	atLimit := newStore(t, len(inline))
-	out, err := atLimit.Output("pg_query", "prod", people(), render.Markdown)
+	store := newStore(t)
+	out, err := store.OutputWithin("pg_query", "prod", people(), render.Markdown, len(inline))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,8 +171,7 @@ func TestOutputInlineBoundary(t *testing.T) {
 		t.Errorf("at the limit: got %q, want the inline rendering %q", out, inline)
 	}
 
-	overLimit := newStore(t, len(inline)-1)
-	out, err = overLimit.Output("pg_query", "prod", people(), render.Markdown)
+	out, err = store.OutputWithin("pg_query", "prod", people(), render.Markdown, len(inline)-1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,9 +183,9 @@ func TestOutputInlineBoundary(t *testing.T) {
 func TestOutputSpillsTheFullResultAsCSV(t *testing.T) {
 	res := numbered(50)
 	res.Rows[0][1] = str(strings.Repeat("wide ", 100))
-	store := newStore(t, 200)
+	store := newStore(t)
 
-	out, err := store.Output("pg_query", "prod", res, render.Markdown)
+	out, err := store.OutputWithin("pg_query", "prod", res, render.Markdown, 200)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -252,9 +250,7 @@ func TestOutputSummary(t *testing.T) {
 		}
 		res.Rows = append(res.Rows, cells)
 	}
-	store := newStore(t, 1500)
-
-	out, err := store.Output("pg_query", "prod", res, render.TSV)
+	out, err := newStore(t).OutputWithin("pg_query", "prod", res, render.TSV, 1500)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +300,7 @@ func TestOutputSummaryStaysWithinTheLimit(t *testing.T) {
 
 	summary := func(limit int) string {
 		t.Helper()
-		out, err := newStore(t, limit).Output("pg_query", "prod", res, render.TSV)
+		out, err := newStore(t).OutputWithin("pg_query", "prod", res, render.TSV, limit)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -370,7 +366,7 @@ func listedColumns(t *testing.T, out string) []string {
 // so long column names cannot push it past the limit. The file holds every
 // column.
 func TestOutputSummaryListsTheColumnsThatFit(t *testing.T) {
-	out, err := newStore(t, 10_000).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 1000)
+	out, err := newStore(t).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +390,7 @@ func TestOutputSummaryListsTheColumnsThatFit(t *testing.T) {
 // with the path, the summary only names the file and counts the rows, as an
 // inline result ends. The file holds every column and row.
 func TestOutputSummaryInASmallLimitOnlyNamesTheFile(t *testing.T) {
-	out, err := newStore(t, 10_000).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 300)
+	out, err := newStore(t).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 300)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -429,23 +425,28 @@ func wholeOf(t *testing.T, res *result.Result, footer string) string {
 	return body + footer
 }
 
-// Spill writes the file and summarizes it even when the inline rendering,
-// its cells cut, would fit: the caller found the output too large to return
-// as it is, and the file holds every line whole.
-func TestSpillAlwaysWritesTheFile(t *testing.T) {
-	res := lines(40, 300) // 12 kB whole, under 9 kB cut
-	store := newStore(t, 10_000)
-	if out, err := store.Output("pg_explain", "prod", res, render.TSV); err != nil || strings.Contains(out, "Full result") {
-		t.Fatalf("Output = %v, want the lines inline, cut:\n%s", err, out)
+// OutputWhole returns cells inline whole, and spills a result that only fits
+// with its cells cut, as lines a tool found too large to return inline: the
+// file holds them whole.
+func TestOutputWholeKeepsCellsWhole(t *testing.T) {
+	store := newStore(t)
+	res := people()
+	res.Rows[0][1] = str(strings.Repeat("é", 300))
+	if out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV, 10_000); err != nil || out != wholeOf(t, res, "(3 rows)") {
+		t.Errorf("OutputWhole = %v:\n%s\nwant the cell whole", err, out)
 	}
 
-	out, err := store.Spill("pg_explain", "prod", res, render.TSV, 10_000)
+	res = lines(20, 600) // 12 kB whole, under 5 kB cut
+	if out, err := store.OutputWithin("pg_explain", "prod", res, render.TSV, 10_000); err != nil || strings.Contains(out, "Full result") {
+		t.Fatalf("OutputWithin = %v, want the lines inline, cut:\n%s", err, out)
+	}
+	out, err := store.OutputWhole("pg_explain", "prod", res, render.TSV, 10_000)
 	if err != nil {
 		t.Fatal(err)
 	}
-	size := len(wholeOf(t, res, "(40 rows)"))
-	if want := fmt.Sprintf("Result too large to return inline (%d bytes, limit 10000): 40 rows × 1 column, truncated=false.\n", size); !strings.HasPrefix(out, want) || len(out) > 10_000 {
-		t.Errorf("summary (%d bytes):\n%s\nwant it to start with\n%s", len(out), out, want)
+	size := len(wholeOf(t, res, "(20 rows)"))
+	if want := fmt.Sprintf("Result too large to return inline (%d bytes, limit 10000): 20 rows × 1 column, truncated=false.\n", size); !strings.HasPrefix(out, want) || len(out) > 10_000 {
+		t.Errorf("OutputWhole (%d bytes):\n%s\nwant it to start with\n%s", len(out), out, want)
 	}
 	want, err := render.Render(res, render.CSV, 0)
 	if err != nil {
@@ -456,43 +457,17 @@ func TestSpillAlwaysWritesTheFile(t *testing.T) {
 	}
 
 	store.Dir = "" // no file: as many leading lines as fit
-	if out, err = store.Spill("pg_explain", "prod", res, render.TSV, 10_000); err != nil ||
-		!strings.Contains(out, " of 40 rows shown; could not write the spill file: ") || len(out) > 10_000 {
+	if out, err = store.OutputWhole("pg_explain", "prod", res, render.TSV, 10_000); err != nil ||
+		!strings.Contains(out, " of 20 rows shown; could not write the spill file: ") || len(out) > 10_000 {
 		t.Errorf("without a file = %v: %d bytes:\n%s", err, len(out), out)
 	}
 }
 
-// OutputWhole returns cells inline whole, and spills a result that only fits
-// with its cells cut.
-func TestOutputWholeKeepsCellsWhole(t *testing.T) {
-	store := newStore(t, 10_000)
-	res := people()
-	res.Rows[0][1] = str(strings.Repeat("é", 300))
-	if out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV, 10_000); err != nil || out != wholeOf(t, res, "(3 rows)") {
-		t.Errorf("OutputWhole = %v:\n%s\nwant the cell whole", err, out)
-	}
-
-	res = lines(20, 600) // 12 kB whole, under 5 kB cut
-	if out, err := store.Output("pg_profile", "prod", res, render.TSV); err != nil || strings.Contains(out, "Full result") {
-		t.Fatalf("Output = %v, want the lines inline, cut:\n%s", err, out)
-	}
-	out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV, 10_000)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := fmt.Sprintf("Result too large to return inline (%d bytes, limit 10000): 20 rows × 1 column", len(wholeOf(t, res, "(20 rows)"))); !strings.HasPrefix(out, want) {
-		t.Errorf("OutputWhole:\n%s\nwant it to start with\n%s", out, want)
-	}
-	if records, err := csv.NewReader(strings.NewReader(readFile(t, spillPath(t, out)))).ReadAll(); err != nil || len(records) != 21 || records[20][0] != *res.Rows[19][0] {
-		t.Errorf("spill file: %d records, %v; want a header and 20 whole lines", len(records), err)
-	}
-}
-
-// OutputWhole and Spill fit what they return in the limit they are given, not
-// in InlineMaxBytes: a tool lowers it to leave room for what comes before
-// its output, such as the role check's findings.
-func TestOutputWholeAndSpillUseTheirLimit(t *testing.T) {
-	store := newStore(t, 10_000)
+// OutputWhole fits what it returns in the limit it is given: a tool lowers
+// it to leave room for what comes before its output, such as the role
+// check's findings.
+func TestOutputWholeUsesItsLimit(t *testing.T) {
+	store := newStore(t)
 	res := lines(10, 300)
 	whole := wholeOf(t, res, "(10 rows)") // 3 kB
 	if out, err := store.OutputWhole("pg_health", "prod", res, render.TSV, len(whole)); err != nil || out != whole {
@@ -503,10 +478,6 @@ func TestOutputWholeAndSpillUseTheirLimit(t *testing.T) {
 		out, err := store.OutputWhole("pg_health", "prod", res, render.TSV, limit)
 		if err != nil || !strings.HasPrefix(out, want) || len(out) > limit {
 			t.Errorf("OutputWhole within %d = %v, %d bytes:\n%s", limit, err, len(out), out)
-		}
-		out, err = store.Spill("pg_explain", "prod", res, render.TSV, limit)
-		if err != nil || !strings.HasPrefix(out, want) || len(out) > limit {
-			t.Errorf("Spill within %d = %v, %d bytes:\n%s", limit, err, len(out), out)
 		}
 	}
 }
@@ -522,9 +493,9 @@ func readFile(t *testing.T, path string) string {
 }
 
 func TestSpillFilePermissions(t *testing.T) {
-	store := newStore(t, 10)
+	store := newStore(t)
 	store.Dir = filepath.Join(t.TempDir(), "a", "b")
-	out, err := store.Output("pg_query", "prod", people(), render.TSV)
+	out, err := store.OutputWithin("pg_query", "prod", people(), render.TSV, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,8 +529,8 @@ func TestOutputMakesNamesSafe(t *testing.T) {
 		{"", "", "spill---"},
 	}
 	for _, tt := range tests {
-		store := newStore(t, 10)
-		out, err := store.Output(tt.tool, tt.conn, people(), render.TSV)
+		store := newStore(t)
+		out, err := store.OutputWithin(tt.tool, tt.conn, people(), render.TSV, 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -572,7 +543,7 @@ func TestOutputMakesNamesSafe(t *testing.T) {
 
 func TestConcurrentSpillsGetUniqueFiles(t *testing.T) {
 	const n = 100
-	store := newStore(t, 10)
+	store := newStore(t)
 	res := numbered(20)
 	want, err := render.Render(res, render.CSV, 0)
 	if err != nil {
@@ -586,7 +557,7 @@ func TestConcurrentSpillsGetUniqueFiles(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			outs[i], errs[i] = store.Output("pg_query", "prod", res, render.TSV)
+			outs[i], errs[i] = store.OutputWithin("pg_query", "prod", res, render.TSV, 10)
 		}()
 	}
 	wg.Wait()
@@ -622,14 +593,15 @@ func TestOutputFallsBackToCappedInlineWhenTheFileCannotBeWritten(t *testing.T) {
 
 	for _, f := range []render.Format{render.TSV, render.CSV, render.Markdown, render.JSON} {
 		t.Run(string(f), func(t *testing.T) {
-			store := newStore(t, 600)
+			const limit = 600
+			store := newStore(t)
 			store.Dir = filepath.Join(file, "spill") // below a regular file: cannot be created
-			out, err := store.Output("pg_query", "prod", res, f)
+			out, err := store.OutputWithin("pg_query", "prod", res, f, limit)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(out) > store.InlineMaxBytes {
-				t.Errorf("output has %d bytes, more than InlineMaxBytes %d", len(out), store.InlineMaxBytes)
+			if len(out) > limit {
+				t.Errorf("output has %d bytes, more than its limit %d", len(out), limit)
 			}
 			body, note, shown := splitCapped(t, out)
 			if body != inlineOf(t, firstRows(shown), f, "") {
@@ -639,9 +611,9 @@ func TestOutputFallsBackToCappedInlineWhenTheFileCannotBeWritten(t *testing.T) {
 				t.Errorf("capped JSON is not valid: %s", body)
 			}
 			// One row more must not fit next to the longest note, which is
-			// what Output budgets for.
+			// what OutputWithin budgets for.
 			longest := strings.Replace(note, fmt.Sprintf("(%d of", shown), "(50 of", 1)
-			if len(inlineOf(t, firstRows(shown+1), f, ""))+len(longest) <= store.InlineMaxBytes {
+			if len(inlineOf(t, firstRows(shown+1), f, ""))+len(longest) <= limit {
 				t.Errorf("%d rows shown, but %d fit", shown, shown+1)
 			}
 		})
@@ -670,9 +642,9 @@ func TestOutputFallbackStaysBoundedWhenNothingFits(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		store := newStore(t, 10)
+		store := newStore(t)
 		store.Dir = dir
-		out, err := store.Output("pg_query", "prod", numbered(1000), render.TSV)
+		out, err := store.OutputWithin("pg_query", "prod", numbered(1000), render.TSV, 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -682,16 +654,52 @@ func TestOutputFallbackStaysBoundedWhenNothingFits(t *testing.T) {
 	}
 }
 
+// When the spill file cannot be written, the rows that fit come back cut as
+// the call cuts them inline: OutputWithin at 200 characters, OutputWhole not
+// at all. OutputWhole cut them at 200 too, and lost the ends it keeps.
+func TestOutputFallbackCutsCellsAsTheCallDoes(t *testing.T) {
+	const limit = 3000
+	res := lines(20, 600) // 12 kB whole, 4.3 kB cut
+	store := newStore(t)
+	store.Dir = "" // no file
+	for _, tc := range []struct {
+		name    string
+		output  func(tool, conn string, res *result.Result, f render.Format, limit int) (string, error)
+		maxCell int
+	}{
+		{"OutputWithin", store.OutputWithin, 200},
+		{"OutputWhole", store.OutputWhole, 0},
+	} {
+		out, err := tc.output("pg_profile", "prod", res, render.TSV, limit)
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := strings.LastIndex(out, "\n(")
+		body, note := out[:i+1], out[i+1:]
+		var shown int
+		if _, err := fmt.Sscanf(note, "(%d of 20 rows shown;", &shown); err != nil || shown < 1 || shown >= 20 {
+			t.Fatalf("%s: want some but not all rows shown, got %q (%v)", tc.name, note, err)
+		}
+		want, err := render.Render(&result.Result{Columns: res.Columns, Rows: res.Rows[:shown]}, render.TSV, tc.maxCell)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body != want || len(out) > limit {
+			t.Errorf("%s: %d bytes, want the first %d rows cut at %d characters (0: whole):\n%.400s", tc.name, len(out), shown, tc.maxCell, out)
+		}
+	}
+}
+
 func TestOutputRejectsAnUnknownFormat(t *testing.T) {
-	store := newStore(t, 10)
-	if _, err := store.Output("pg_query", "prod", people(), render.Format("xml")); err == nil {
+	store := newStore(t)
+	if _, err := store.OutputWithin("pg_query", "prod", people(), render.Format("xml"), 10); err == nil {
 		t.Error("want an error for an unknown format")
 	}
-	if _, err := store.Output("pg_query", "prod", nil, render.TSV); err == nil {
+	if _, err := store.OutputWithin("pg_query", "prod", nil, render.TSV, 10); err == nil {
 		t.Error("want an error for a nil result")
 	}
 	if _, err := os.Stat(store.Dir); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("a failed Output created the spill directory: %v", err)
+		t.Errorf("a failed OutputWithin created the spill directory: %v", err)
 	}
 }
 
@@ -712,7 +720,7 @@ func TestCleanupRemovesOnlyItsOwnStaleFiles(t *testing.T) {
 	// The clock runs two days ahead, so the directory and the symlink below,
 	// whose times the test cannot set, are stale too.
 	now := time.Now().Add(48 * time.Hour).Truncate(time.Second)
-	store := newStore(t, 10)
+	store := newStore(t)
 	store.Now = func() time.Time { return now }
 	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -759,9 +767,9 @@ func TestCleanupRemovesOnlyItsOwnStaleFiles(t *testing.T) {
 
 func TestOutputNamesTheFileByAbsolutePath(t *testing.T) {
 	t.Chdir(t.TempDir())
-	store := newStore(t, 10)
+	store := newStore(t)
 	store.Dir = "spill"
-	out, err := store.Output("pg_query", "prod", people(), render.TSV)
+	out, err := store.OutputWithin("pg_query", "prod", people(), render.TSV, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -775,7 +783,7 @@ func TestOutputNamesTheFileByAbsolutePath(t *testing.T) {
 }
 
 func TestCleanupReportsAnUnreadableDir(t *testing.T) {
-	store := newStore(t, 10)
+	store := newStore(t)
 	store.Dir = filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(store.Dir, nil, 0o600); err != nil {
 		t.Fatal(err)
@@ -786,7 +794,7 @@ func TestCleanupReportsAnUnreadableDir(t *testing.T) {
 }
 
 func TestCleanupWithoutWorkToDo(t *testing.T) {
-	missing := newStore(t, 10)
+	missing := newStore(t)
 	if err := missing.Cleanup(); err != nil {
 		t.Errorf("missing directory: %v", err)
 	}
@@ -794,7 +802,7 @@ func TestCleanupWithoutWorkToDo(t *testing.T) {
 		t.Errorf("zero Store: %v", err)
 	}
 
-	keep := newStore(t, 10)
+	keep := newStore(t)
 	keep.TTL = 0
 	if err := os.MkdirAll(keep.Dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -810,14 +818,14 @@ func TestCleanupWithoutWorkToDo(t *testing.T) {
 
 func TestOutputCleansUpAtMostOnceAnHour(t *testing.T) {
 	now := t0
-	store := newStore(t, 1000)
+	store := newStore(t)
 	store.Now = func() time.Time { return now }
 	if err := os.MkdirAll(store.Dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	output := func() {
 		t.Helper()
-		if _, err := store.Output("pg_query", "prod", people(), render.TSV); err != nil {
+		if _, err := store.OutputWithin("pg_query", "prod", people(), render.TSV, 1000); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -829,29 +837,29 @@ func TestOutputCleansUpAtMostOnceAnHour(t *testing.T) {
 	first := touch(t, store.Dir, "spill-pg_query-prod-20261010T000000Z-1.csv", now.Add(-48*time.Hour))
 	output()
 	if exists(first) {
-		t.Fatal("the first Output must clean up stale files")
+		t.Fatal("the first call must clean up stale files")
 	}
 
 	second := touch(t, store.Dir, "spill-pg_query-prod-20261010T000000Z-2.csv", now.Add(-48*time.Hour))
 	now = now.Add(59 * time.Minute)
 	output()
 	if !exists(second) {
-		t.Fatal("Output cleaned up again within the hour")
+		t.Fatal("a call cleaned up again within the hour")
 	}
 
 	now = now.Add(time.Minute)
 	output()
 	if exists(second) {
-		t.Fatal("Output did not clean up an hour after the last cleanup")
+		t.Fatal("no call cleaned up an hour after the last cleanup")
 	}
 }
 
-// OutputWithin returns inline, summarizes and caps against its own limit,
-// not InlineMaxBytes. The result takes about 1 kB inline, room enough for
-// what a summary says of its file.
+// OutputWithin returns inline, summarizes and caps against its limit. The
+// result takes about 1 kB inline, room enough for what a summary says of its
+// file.
 func TestOutputWithinUsesItsOwnLimit(t *testing.T) {
 	inline := inlineOf(t, numbered(50), render.TSV, "(50 rows)")
-	store := newStore(t, 10_000)
+	store := newStore(t)
 	if out, err := store.OutputWithin("pg_query", "prod", numbered(50), render.TSV, len(inline)); err != nil || out != inline {
 		t.Errorf("at the limit: got %q, %v; want the inline rendering %q", out, err, inline)
 	}

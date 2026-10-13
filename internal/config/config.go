@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"os"
 	"path/filepath"
@@ -32,6 +33,11 @@ const (
 	MaxTimeoutSeconds = math.MaxInt32 / 1000
 	// MaxSpillTTLHours bounds spill_ttl_hours, which becomes a time.Duration.
 	MaxSpillTTLHours = int(math.MaxInt64 / int64(time.Hour))
+
+	// MaxNameBytes is the longest name Postgres keeps (NAMEDATALEN - 1): it
+	// cuts a longer one. Connection names take at most as many, since the
+	// tools repeat them in output that must stay within InlineMaxBytes.
+	MaxNameBytes = 63
 )
 
 // Values of Defaults.RoleCheck: what to do when the connected role can do
@@ -183,10 +189,22 @@ func Parse(data []byte) (Config, error) {
 		return Config{}, errors.New("parse config.json: unexpected data after the top-level object")
 	}
 	cfg.Defaults = cfg.Defaults.WithDefaults()
-	if err := cfg.Defaults.Validate(); err != nil {
+	if err := errors.Join(cfg.Defaults.Validate(), checkNames(cfg.Connections)); err != nil {
 		return Config{}, fmt.Errorf("invalid config.json: %w", err)
 	}
 	return cfg, nil
+}
+
+// checkNames reports every connection name longer than MaxNameBytes.
+func checkNames(conns map[string]Connection) error {
+	var errs []error
+	for _, name := range slices.Sorted(maps.Keys(conns)) {
+		if len(name) > MaxNameBytes {
+			errs = append(errs, fmt.Errorf("connection name %q is %d bytes: connection names take at most %d, as Postgres names do",
+				name, len(name), MaxNameBytes))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Load reads config.json from the same directory as the executable,
