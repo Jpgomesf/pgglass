@@ -252,6 +252,7 @@ A failed call returns a result with `isError` set and the reason as text:
   ```
 
 - `connection "prod" refused (role_check strict): its role can do more than read.`, followed by the findings
+- `role check failed, and role_check strict refuses connections it cannot check: `, followed by why, such as a Postgres error
 - invalid arguments, such as an unknown connection or argument name, or a name over 63 bytes
 
 An error, with the role check's findings that may start it, keeps to the 10 KB of a response. A Postgres error can quote a value whole, and an unknown connection's lists every configured name: one longer than that is cut in the middle, keeping its start and its end, where the SQLSTATE, position, detail and hint are, as in `ERROR: invalid input syntax for type integer: "yyyy…[10088 bytes cut]…yyyy" (SQLSTATE 22P02)`.
