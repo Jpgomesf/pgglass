@@ -1,7 +1,7 @@
 BINARY := pgglass
 MODULE := github.com/jpgomesf/pgglass
 
-.PHONY: build lint vet test test-short clean all release-local
+.PHONY: build lint vet test test-short clean all release-local bench bench-baseline
 
 all: lint build
 
@@ -34,3 +34,12 @@ build-all: build-linux build
 
 release-local:
 	goreleaser release --snapshot --clean
+
+# Token benchmark (docs/benchmark.md): fails when a response grows more than
+# 10% past internal/bench/testdata/bench-baseline.json. Needs Docker.
+bench:
+	go test -race -count=1 -v ./internal/bench
+
+# Rewrites the benchmark baseline and the table in docs/benchmark.md.
+bench-baseline:
+	go test -count=1 -run '^TestTokenBudget$$' -v ./internal/bench -update
