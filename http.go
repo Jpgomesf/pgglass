@@ -91,7 +91,7 @@ func endListensOn(shutdown context.Context) mcp.Middleware {
 func httpHandler(server *mcp.Server, token string) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(mcpPath, mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server },
-		&mcp.StreamableHTTPOptions{Stateless: true}))
+		&mcp.StreamableHTTPOptions{Stateless: true, PropagateRequestCancellation: true}))
 	var handler http.Handler = mux
 	if token != "" {
 		handler = auth.RequireBearerToken(tokenVerifier(token), &auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(handler)

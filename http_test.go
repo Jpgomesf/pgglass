@@ -197,7 +197,7 @@ func TestHTTPServesTheTools(t *testing.T) {
 	}
 	slow := make(chan string, 1)
 	go func() { slow <- query(session, "SELECT 1 AS slept FROM pg_sleep(1)") }()
-	awaitActiveQuery(t, "pg_sleep(1)")
+	awaitActiveQuery(t, "pg_sleep(1)", true)
 	if code := srv.stop(); code != 0 {
 		t.Errorf("run = %d after shutdown, want 0", code)
 	}
@@ -238,15 +238,15 @@ func query(session *mcp.ClientSession, sql string) string {
 	return b.String()
 }
 
-func awaitActiveQuery(t *testing.T, fragment string) {
+func awaitActiveQuery(t *testing.T, fragment string, active bool) {
 	t.Helper()
 	conn := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
 	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
-		if testdb.Value[int64](t, conn, "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND strpos(query, $1) > 0 AND pid <> pg_backend_pid()", fragment) > 0 {
+		if testdb.Value[int64](t, conn, "SELECT count(*) FROM pg_stat_activity WHERE state = 'active' AND strpos(query, $1) > 0 AND pid <> pg_backend_pid()", fragment) > 0 == active {
 			return
 		}
 	}
-	t.Fatalf("no active query holds %q after 10s", fragment)
+	t.Fatalf("after 10s, an active query holding %q is still %t, want %t", fragment, !active, active)
 }
 
 // With PGGLASS_HTTP_TOKEN set, a request without that bearer token is
