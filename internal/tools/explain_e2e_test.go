@@ -152,6 +152,28 @@ flags: none`},
 	}
 }
 
+// count(*) OVER () reads the whole partition before its first row, so the
+// Limit above it does not stop the seq scan under it: with analyze the scan
+// is flagged, and without it too from PostgreSQL 17, whose planner costs the
+// window's startup to cover the scan.
+func TestExplainUnderAWindowOverTheWholePartition(t *testing.T) {
+	t.Parallel()
+	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
+	const sql = "SELECT id, count(*) OVER () FROM events LIMIT 10"
+	const flag = "\nflags:\n  Seq Scan on app.events: full scan of ~20000 rows"
+	if got := s.ok(t, "pg_explain", args("clean", sql, "analyze", true)); !strings.HasSuffix(got, flag) {
+		t.Errorf("analyze:\n%s", got)
+	}
+	version := testdb.Value[int](t, testdb.Conn(t, testdb.RoleClean, testdb.DBApp), "SELECT current_setting('server_version_num')::int")
+	if version < 170000 {
+		return // earlier planners give the window no startup cost that shows it
+	}
+	got := s.ok(t, "pg_explain", args("clean", sql))
+	if !regexp.MustCompile(`\n  Seq Scan on app\.events: cost [0-9.]+, ~20000 rows\n`).MatchString(got) || !strings.HasSuffix(got, flag) {
+		t.Errorf("plan only:\n%s", got)
+	}
+}
+
 // A summary over the inline limit is saved to a file, one line per row: here
 // 250 subqueries, each scanning app.events, which EXPLAIN tells apart by
 // alias.

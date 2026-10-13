@@ -109,11 +109,15 @@ func (n *node) setShare(share float64) {
 // streams reports whether n reads its child c only as far as its own output
 // needs. It does not when n reads all of c before returning a row, as a
 // sort, a hash, a plain or hashed aggregate or set operation and a bitmap
-// heap scan do, nor when c is the inner side of a nested loop or hash join,
+// heap scan do, and a window aggregate whose startup cost covers c: from
+// PostgreSQL 17, the planner costs one whose frame is the whole partition
+// so. Nor does it when c is the inner side of a nested loop or hash join,
 // which runs in full, or a subplan.
 func (n *node) streams(c *node) bool {
 	switch {
 	case n.Type == "Sort", n.Type == "Hash", n.Type == "Bitmap Heap Scan", n.Strategy != "" && n.Strategy != "Sorted":
+		return false
+	case n.Type == "WindowAgg" && n.ownStartupCost() >= c.TotalCost:
 		return false
 	case c.Parent == "Inner":
 		return n.Type == "Merge Join"
@@ -122,19 +126,25 @@ func (n *node) streams(c *node) bool {
 	}
 }
 
+// ownStartupCost is n's startup cost less its initplans', which the planner
+// adds to it: they run in full before n returns a row.
+func (n *node) ownStartupCost() float64 {
+	cost := n.StartupCost
+	for i := range n.Plans {
+		if n.Plans[i].Parent == "InitPlan" {
+			cost -= n.Plans[i].TotalCost
+		}
+	}
+	return cost
+}
+
 // limitShare is the part of its input c that Limit n reads, as the planner
 // costs n: the rows it skips, whose cost is what n's startup cost adds to
 // c's and to its initplans', then the rows it returns.
 func (n *node) limitShare(c *node) float64 {
 	share := n.PlanRows / max(c.PlanRows, 1)
 	if run := c.TotalCost - c.StartupCost; run > 0 {
-		skipped := n.StartupCost - c.StartupCost
-		for i := range n.Plans {
-			if n.Plans[i].Parent == "InitPlan" {
-				skipped -= n.Plans[i].TotalCost
-			}
-		}
-		share += max(skipped, 0) / run
+		share += max(n.ownStartupCost()-c.StartupCost, 0) / run
 	}
 	return min(share, 1)
 }

@@ -288,6 +288,19 @@ func TestShare(t *testing.T) {
 		{"a subplan", limit(0, 30.26, 10,
 			outer(`"Node Type": "Seq Scan"`, 0, 60528, 20000,
 				planNode(`"Node Type": "Seq Scan", "Parent Relationship": "SubPlan"`, 0, 3, 1))), []float64{1, 0.0005, 1}},
+		// count(*) OVER (): the window aggregate reads the whole partition
+		// before its first row, and its startup cost covers the scan.
+		{"a window over the whole partition", limit(777.96, 777.96, 10,
+			outer(`"Node Type": "WindowAgg"`, 777.96, 778, 20000, scan)), []float64{1, 0.0005, 1}},
+		// row_number() OVER () returns a row as it reads one.
+		{"a window that streams", limit(0, 0.39, 10,
+			outer(`"Node Type": "WindowAgg"`, 0, 778, 20000, scan)), []float64{1, 0.0005, 0.0005}},
+		// The window's startup cost holds its initplan's, which is no read of
+		// the scan.
+		{"a window with an initplan", limit(628.01, 628.4, 10,
+			outer(`"Node Type": "WindowAgg"`, 628.01, 1406.01, 20000,
+				planNode(`"Node Type": "Aggregate", "Strategy": "Plain", "Parent Relationship": "InitPlan"`, 628, 628.01, 1, scan),
+				scan)), []float64{1, 0.0005, 1, 1, 0.0005}},
 	} {
 		var got []float64
 		for _, n := range parseNode(t, tc.plan).all() {

@@ -229,6 +229,34 @@ func TestALimitStillFlagsAFullScan(t *testing.T) {
 	}
 }
 
+// count(*) OVER () reads the whole partition before its first row, so the
+// Limit above it does not stop the scan under it. With analyze, the rows the
+// scan read flag it on every version. Without, PostgreSQL 17 and later cost
+// the window's startup to cover the scan, which is then costed and flagged in
+// full; earlier planners give the window no such startup cost.
+func TestALimitAboveAWindowOverTheWholePartition(t *testing.T) {
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
+	const sql = "SELECT id, count(*) OVER () FROM app.events LIMIT 10"
+	wantFlags(t, flagsOf(t, q, sql, true), `Seq Scan on app\.events: full scan of ~20000 rows`)
+	if serverVersion(t) < 170000 {
+		return
+	}
+	summaryOf(t, q, sql, false,
+		`total cost `+cost+`, ~10 rows`,
+		`top nodes by own cost:`,
+		`  Seq Scan on app\.events: cost `+cost+`, ~20000 rows`,
+		`  WindowAgg: cost `+cost+`, ~10 rows`,
+		`  Limit: cost 0, ~10 rows`,
+		`flags:`,
+		`  Seq Scan on app\.events: full scan of ~20000 rows`)
+}
+
+// serverVersion returns server_version_num of the shared test server.
+func serverVersion(t *testing.T) int {
+	t.Helper()
+	return testdb.Value[int](t, testdb.Conn(t, testdb.RoleClean, testdb.DBApp), "SELECT current_setting('server_version_num')::int")
+}
+
 // Neither a lookup by primary key nor a seq scan of a small table is
 // flagged.
 func TestSmallAndIndexedScansAreNotFlagged(t *testing.T) {
