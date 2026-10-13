@@ -39,7 +39,7 @@ The findings also start the first response on the connection, which keeps to 10 
 
 - no `schema`: one line per schema, `app: 7 relations -- Fixture application schema`
 - `schema`: one line per table, view, materialized view or foreign table, `app.orders: table, ~50 rows, 48 kB`, with `RLS` when row-level security is on
-- `schema` and `table`: the relation in a compact DDL-like form, with column types, defaults, identity and generated columns, enum labels, comments, constraints, indexes, policies, triggers and, for views, the definition
+- `schema` and `table`: the relation in a compact DDL-like form, with column types, defaults, identity and generated columns, enum labels, comments, constraints, indexes, policies, triggers and, for views, the definition. A column is `NOT NULL` only when Postgres has checked every row, so not under a `NOT VALID` not-null constraint (PostgreSQL 18), whose older rows may hold nulls; `pg_diff_schema` compares columns the same way
 
 `table` without `schema` looks in the connection's `default_schema`. Names are matched exactly, unquoted, as the catalog stores them. Results are cached for 5 minutes. Output longer than 10 KB is cut after the last whole line that fits, followed by `… 312 of 4000 lines shown (output limit 10000 bytes): use pg_search to find names`. A listing reads only its first 500 schemas or relations from the catalog, however many there are; the note counts them all. A comment longer than 200 characters is cut to its first 200, with a note of how many it drops, `...[+1234 chars]`: so cut, the comments of 500 relations, or of a relation's hundreds of columns, keep well within the default `max_bytes`.
 

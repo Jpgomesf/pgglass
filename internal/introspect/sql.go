@@ -75,12 +75,15 @@ SELECT json_build_object(
 FROM pg_namespace n
 WHERE n.nspname = $1 AND has_schema_privilege(n.oid, 'USAGE')`
 
+const notNull = `(a.attnotnull AND NOT EXISTS (SELECT FROM pg_constraint k
+	WHERE k.conrelid = a.attrelid AND k.contype = 'n' AND k.conkey[1] = a.attnum AND NOT k.convalidated))`
+
 // columnsSQL lists the columns of pg_class c the role can SELECT. A generated
 // column keeps its expression in pg_attrdef, so it has no default.
 const columnsSQL = `SELECT json_agg(json_build_object(
 		'Name', a.attname,
 		'Type', format_type(a.atttypid, a.atttypmod),
-		'NotNull', a.attnotnull,
+		'NotNull', ` + notNull + `,
 		'Default', CASE WHEN a.attgenerated = '' THEN pg_get_expr(d.adbin, d.adrelid, true) END,
 		'Generated', CASE
 			WHEN a.attidentity = 'a' THEN 'GENERATED ALWAYS AS IDENTITY'
