@@ -458,6 +458,32 @@ func TestSpillAlwaysWritesTheFile(t *testing.T) {
 	}
 }
 
+// OutputWhole returns cells inline whole, and spills a result that only fits
+// with its cells cut.
+func TestOutputWholeKeepsCellsWhole(t *testing.T) {
+	store := newStore(t, 10_000)
+	res := people()
+	res.Rows[0][1] = str(strings.Repeat("é", 300))
+	if out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV); err != nil || out != wholeOf(t, res, "(3 rows)") {
+		t.Errorf("OutputWhole = %v:\n%s\nwant the cell whole", err, out)
+	}
+
+	res = lines(20, 600) // 12 kB whole, under 5 kB cut
+	if out, err := store.Output("pg_profile", "prod", res, render.TSV); err != nil || strings.Contains(out, "Full result") {
+		t.Fatalf("Output = %v, want the lines inline, cut:\n%s", err, out)
+	}
+	out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("Result too large to return inline (%d bytes, limit 10000): 20 rows × 1 column", len(wholeOf(t, res, "(20 rows)"))); !strings.HasPrefix(out, want) {
+		t.Errorf("OutputWhole:\n%s\nwant it to start with\n%s", out, want)
+	}
+	if records, err := csv.NewReader(strings.NewReader(readFile(t, spillPath(t, out)))).ReadAll(); err != nil || len(records) != 21 || records[20][0] != *res.Rows[19][0] {
+		t.Errorf("spill file: %d records, %v; want a header and 20 whole lines", len(records), err)
+	}
+}
+
 // readFile returns what the file at path holds.
 func readFile(t *testing.T, path string) string {
 	t.Helper()

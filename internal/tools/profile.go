@@ -45,7 +45,9 @@ func (h *Handlers) profile(ctx context.Context, raw json.RawMessage, c *call) (s
 		return "", &dbError{err}
 	}
 	c.rows = len(p.Columns)
-	out, err := h.spill.Output("pg_profile", args.Connection, p.Result(), render.Format(h.cfg.Defaults.Format))
+	// Whole: five uuids among the most common values alone take more than the
+	// 200 characters a query's inline cells are cut to.
+	out, err := h.spill.OutputWhole("pg_profile", args.Connection, p.Result(), render.Format(h.cfg.Defaults.Format))
 	if err != nil {
 		return "", err
 	}

@@ -175,7 +175,7 @@ note	text	100	7
 (2 rows)
 ```
 
-Both read as the connection's role: `pg_stats` shows only the columns the role can `SELECT`, and `pg_profile` says so when that leaves none; the sample is subject to privileges and row-level security. Relations the guard denies, such as `pg_authid`, are refused, since their statistics hold their values. Output over 10 KB is written to a file, as `pg_query`'s is.
+Both read as the connection's role: `pg_stats` shows only the columns the role can `SELECT`, and `pg_profile` says so when that leaves none; the sample is subject to privileges and row-level security. Relations the guard denies, such as `pg_authid`, are refused, since their statistics hold their values. Unlike `pg_query`, it does not cut values at 200 characters: five `uuid`s among the most common values alone take more. Output over 10 KB is written to a file, as `pg_query`'s is.
 
 ## Compare a schema across connections
 

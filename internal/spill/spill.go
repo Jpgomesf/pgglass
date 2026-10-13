@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	inlineMaxCell   = 200 // characters kept per cell in inline output
+	inlineMaxCell   = 200 // characters Output keeps per cell inline
 	cleanupInterval = time.Hour
 	stampLayout     = "20060102T150405Z"
 	maxNamePart     = 32 // bytes kept of the tool and connection names in a file name
@@ -62,15 +62,13 @@ func (s *Store) Output(tool, conn string, res *result.Result, f render.Format) (
 // OutputWithin is Output with limit in place of InlineMaxBytes, for an
 // output that shares the inline space with others.
 func (s *Store) OutputWithin(tool, conn string, res *result.Result, f render.Format, limit int) (string, error) {
-	s.maybeCleanup()
-	inline, err := inlineText(res, f, inlineMaxCell)
-	if err != nil {
-		return "", err
-	}
-	if len(inline) <= limit {
-		return inline, nil
-	}
-	return s.spill(tool, conn, res, f, len(inline), limit)
+	return s.output(tool, conn, res, f, limit, inlineMaxCell)
+}
+
+// OutputWhole is Output without the cut of inline cells, for a result of a
+// few rows whose every value counts, such as pg_profile's.
+func (s *Store) OutputWhole(tool, conn string, res *result.Result, f render.Format) (string, error) {
+	return s.output(tool, conn, res, f, s.InlineMaxBytes, 0)
 }
 
 // Spill writes res to a file and returns its summary, as Output does when
@@ -84,6 +82,20 @@ func (s *Store) Spill(tool, conn string, res *result.Result, f render.Format) (s
 		return "", err
 	}
 	return s.spill(tool, conn, res, f, len(inline), s.InlineMaxBytes)
+}
+
+// output returns res inline, its cells cut to maxCell characters (0 keeps
+// them whole), when that fits in limit bytes, and spills it otherwise.
+func (s *Store) output(tool, conn string, res *result.Result, f render.Format, limit, maxCell int) (string, error) {
+	s.maybeCleanup()
+	inline, err := inlineText(res, f, maxCell)
+	if err != nil {
+		return "", err
+	}
+	if len(inline) <= limit {
+		return inline, nil
+	}
+	return s.spill(tool, conn, res, f, len(inline), limit)
 }
 
 // spill writes res to a file and returns its summary within limit bytes,
