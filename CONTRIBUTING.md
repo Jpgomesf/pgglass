@@ -4,6 +4,8 @@ Thanks for your interest in contributing! This document covers the workflow and 
 
 ## Getting Started
 
+You need Go 1.26 or later, [golangci-lint](https://golangci-lint.run) v2 and, for the integration tests, Docker.
+
 1. **Fork** the repository
 2. **Clone** your fork locally
 3. **Build** and verify tests pass:
