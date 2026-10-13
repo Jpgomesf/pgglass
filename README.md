@@ -25,17 +25,61 @@ Calls run in parallel, across connections and on the same one. Each tool has a d
 
 ## Install
 
+pgglass runs on macOS and Linux, amd64 and arm64. Windows is not supported: see [Platforms](docs/releasing.md#platforms).
+
+### Install script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Jpgomesf/pgglass/main/install.sh | sh
+```
+
+The script downloads the latest release for your platform, checks its SHA-256 against the release's `checksums.txt`, and installs `pgglass` in `~/.local/bin` only if they match. To pick a release or a directory, set `PGGLASS_VERSION` or `PGGLASS_INSTALL_DIR` for `sh`: `... | PGGLASS_VERSION=v1.0.0 sh`.
+
+### Release archive
+
+Download your platform's `pgglass_<version>_<os>_<arch>.tar.gz` and `checksums.txt` from [Releases](https://github.com/Jpgomesf/pgglass/releases), verify the archive, then unpack the binary:
+
+```bash
+sha256sum --ignore-missing -c checksums.txt
+gh attestation verify pgglass_1.0.0_linux_amd64.tar.gz --repo Jpgomesf/pgglass
+tar -xzf pgglass_1.0.0_linux_amd64.tar.gz pgglass
+```
+
+`gh attestation verify` checks that the release workflow of this repository built the archive.
+
+### Docker
+
+The image `ghcr.io/jpgomesf/pgglass` (linux/amd64 and linux/arm64, distroless, non-root) serves stdio. Mount the directory holding `config.json` read-only:
+
+```bash
+docker run --rm -i --user "$(id -u):$(id -g)" \
+  -v ~/.config/pgglass:/etc/pgglass:ro \
+  ghcr.io/jpgomesf/pgglass --config /etc/pgglass/config.json
+```
+
+- Give your MCP client that command, as in `claude mcp add pgglass -- docker run --rm -i ...`, and pin a version with a tag such as `:1.0.0`.
+- `--user` runs the server as you, so it can read a `config.json` only you can read.
+- Credentials resolve inside the container: pass `env` sources with `-e`, and keep `.env` files in the mounted directory.
+- A result past 10 KB is written to a file inside the container, out of the agent's reach. To share these files, run `mkdir -p ~/.cache/pgglass` and add `-v "$HOME/.cache/pgglass:$HOME/.cache/pgglass" -e XDG_CACHE_HOME="$HOME/.cache"`: the directory has the same path on both sides, so the agent can open the path the server reports.
+
+To serve Streamable HTTP instead:
+
+```bash
+export PGGLASS_HTTP_TOKEN="$(openssl rand -hex 32)"
+docker run --rm -p 127.0.0.1:8411:8411 -e PGGLASS_HTTP_TOKEN --user "$(id -u):$(id -g)" \
+  -v ~/.config/pgglass:/etc/pgglass:ro \
+  ghcr.io/jpgomesf/pgglass --config /etc/pgglass/config.json --http 0.0.0.0:8411
+```
+
+In the container the server has to listen on every interface, which requires the token; publishing the port on `127.0.0.1` keeps it on this machine. Clients connect to `http://127.0.0.1:8411/mcp` with the header `Authorization: Bearer $PGGLASS_HTTP_TOKEN`.
+
 ### From source
 
 ```bash
-git clone git@github.com:Jpgomesf/pgglass.git
-cd pgglass
-make build
+go install github.com/jpgomesf/pgglass@latest
 ```
 
-### From release
-
-Download the binary for your platform from [Releases](https://github.com/Jpgomesf/pgglass/releases).
+Or clone the repository and run `make build`.
 
 ## Configure
 
@@ -103,6 +147,7 @@ What these layers do not cover:
 | [Configuration](docs/configuration.md) | Credential sources, connection options, defaults, PgBouncer |
 | [Extending](docs/extending.md) | How to add custom credential sources (Vault, GCP, etc.) |
 | [Contributing](CONTRIBUTING.md) | Branch strategy, commit conventions, development workflow |
+| [Releasing](docs/releasing.md) | What a release publishes, cutting one, the MCP Registry, platforms |
 
 ## License
 

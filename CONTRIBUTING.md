@@ -141,14 +141,7 @@ outside it with `testdb.Conn(t, role, db)` and `testdb.Value`.
 
 ## Releases
 
-Releases are automated via GitHub Actions and GoReleaser. To create a release:
-
-```bash
-git tag v1.2.0
-git push origin v1.2.0
-```
-
-Binaries for Linux (amd64) and macOS (arm64) are built and published automatically.
+A `v*` tag releases through GitHub Actions and GoReleaser: archives for macOS and Linux on amd64 and arm64, SBOMs, a GHCR image and build-provenance attestations. [Releasing](docs/releasing.md) has the steps, including the `server.json` version bump before the tag.
 
 ## Questions?
 
