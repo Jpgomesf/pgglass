@@ -238,8 +238,11 @@ func planNode(fields string, startup, total, rows float64, children ...string) s
 }
 
 // A Limit reads its input as far as the rows it skips and returns, and so
-// does each node that passes it rows as it asks for them. The plans are
-// PostgreSQL 17's on the app fixture, cut to the fields that matter.
+// does each node that passes it rows as it asks for them. An EXISTS, a
+// subplan that returns no column, reads up to its first row, as the planner
+// charges it, and that row is all a Limit's startup cost holds of it. The
+// plans are PostgreSQL 17's on the app fixture, cut to the fields that
+// matter.
 func TestShare(t *testing.T) {
 	limit := func(startup, total, rows float64, children ...string) string {
 		return planNode(`"Node Type": "Limit"`, startup, total, rows, children...)
@@ -247,7 +250,11 @@ func TestShare(t *testing.T) {
 	outer := func(fields string, startup, total, rows float64, children ...string) string {
 		return planNode(fields+`, "Parent Relationship": "Outer"`, startup, total, rows, children...)
 	}
+	exists := func(parent string, total, rows float64) string {
+		return planNode(`"Node Type": "Seq Scan", "Parent Relationship": "`+parent+`", "Plan Width": 0`, 0, total, rows)
+	}
 	scan := outer(`"Node Type": "Seq Scan"`, 0, 528, 20000)
+	skipped := (396.12-578.0/5000)/528 + 10.0/20000
 	for _, tc := range []struct {
 		name, plan string
 		want       []float64
@@ -264,7 +271,7 @@ func TestShare(t *testing.T) {
 			planNode(`"Node Type": "Aggregate", "Strategy": "Plain", "Parent Relationship": "InitPlan"`, 578, 578.01, 1, scan),
 			outer(`"Node Type": "Seq Scan"`, 0, 628, 6667)), []float64{1, 1, 1, 10.0 / 6667}},
 		{"a CTE", limit(528, 528.2, 10,
-			planNode(`"Node Type": "Seq Scan", "Parent Relationship": "InitPlan"`, 0, 528, 20000),
+			planNode(`"Node Type": "Seq Scan", "Parent Relationship": "InitPlan", "Subplan Name": "CTE x"`, 0, 528, 20000),
 			outer(`"Node Type": "CTE Scan"`, 0, 400, 20000)), []float64{1, 1, 0.0005}},
 		{"a sort", limit(960.19, 960.22, 10, outer(`"Node Type": "Sort"`, 960.19, 1010.19, 20000, scan)), []float64{1, 0.0005, 1}},
 		{"a sorted aggregate", limit(0.29, 0.87, 10,
@@ -304,6 +311,16 @@ func TestShare(t *testing.T) {
 			outer(`"Node Type": "WindowAgg"`, 628.01, 1406.01, 20000,
 				planNode(`"Node Type": "Aggregate", "Strategy": "Plain", "Parent Relationship": "InitPlan"`, 628, 628.01, 1, scan),
 				scan)), []float64{1, 0.0005, 1, 1, 0.0005}},
+		{"an EXISTS initplan", planNode(`"Node Type": "Result"`, 0.12, 0.13, 1, exists("InitPlan", 578, 5000)), []float64{1, 0.0002}},
+		{"an EXISTS subplan", planNode(`"Node Type": "Seq Scan"`, 0, 366.5, 50, exists("SubPlan", 728, 100)), []float64{1, 0.01}},
+		{"an EXISTS planned to find one row", planNode(`"Node Type": "Result"`, 578, 578.01, 1, exists("InitPlan", 578, 1)), []float64{1, 1}},
+		{"an ARRAY subplan", planNode(`"Node Type": "Seq Scan"`, 0, 36402.5, 50,
+			planNode(`"Node Type": "Seq Scan", "Parent Relationship": "SubPlan", "Plan Width": 8`, 0, 728, 100)), []float64{1, 1}},
+		{"a CTE that selects no column", planNode(`"Node Type": "Aggregate", "Strategy": "Plain"`, 978, 978.01, 1,
+			planNode(`"Node Type": "Seq Scan", "Parent Relationship": "InitPlan", "Subplan Name": "CTE x", "Plan Width": 0`, 0, 528, 20000),
+			outer(`"Node Type": "CTE Scan", "Plan Width": 0`, 0, 400, 20000)), []float64{1, 1, 1}},
+		{"an EXISTS initplan of a Limit that skips rows", limit(396.12, 396.38, 10, exists("InitPlan", 578, 5000),
+			outer(`"Node Type": "Result"`, 0, 528, 20000, scan)), []float64{1, 0.0002, skipped, skipped}},
 	} {
 		var got []float64
 		for _, n := range parseNode(t, tc.plan).all() {

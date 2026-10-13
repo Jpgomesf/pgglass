@@ -117,7 +117,7 @@ track_extra_parameters = default_transaction_read_only
 | `source` | string | *required* | `direct`, `env`, `dotenv`, or `aws_secrets_manager` |
 | `readonly` | bool | — | Deprecated and ignored: the server is always read-only. Logs a warning at startup |
 | `requires_vpn` | bool | `false` | TCP reachability check before each new database connection |
-| `default_schema` | string | `""` | `search_path` for `pg_query` and `pg_explain` when the call names no `schema`, and the schema `pg_schema` and `pg_profile` look a `table` up in. `net`, `aws_s3` and `aws_lambda`, whose functions the guard denies, are refused as the `search_path`: with one of them here, `pg_query` and `pg_explain` calls that name no `schema` fail. Over 63 bytes, the longest name Postgres keeps, it is refused as a `schema` argument is, so the calls that use it fail |
+| `default_schema` | string | `""` | `search_path` for `pg_query` and `pg_explain` when the call names no `schema`, and the schema `pg_schema` and `pg_profile` look a `table` up in. `net`, `aws_s3` and `aws_lambda`, whose functions the guard denies, are refused as the `search_path`: with one of them here, `pg_query` and `pg_explain` calls that name no `schema` fail. The server refuses to start with one over 63 bytes, the longest name Postgres keeps |
 
 ## Defaults
 
@@ -171,6 +171,7 @@ If the audit itself fails, it is retried on the next call; meanwhile `strict` re
 | Startup | Every key must be known: a misspelled one is not ignored | `json: unknown field "role_chek"` |
 | Startup | `defaults` values must be valid | `defaults.max_rows must be positive, got -1` |
 | Startup | Connection names take at most 63 bytes | `connection name "…" is 64 bytes: connection names take at most 63, as Postgres names do` |
+| Startup | `default_schema` takes at most 63 bytes | `connection "x": default_schema is 64 bytes: Postgres names take at most 63, and it cuts a longer one` |
 | Startup | `source` must be a registered type | `unknown source "foo" (registered: ...)` |
 | Connect | `direct`: `dsn` must be non-empty | `missing required fields: dsn` |
 | Connect | `env`: `dsn_env_var` must be set, variable must exist | `environment variable "X" is not set` |

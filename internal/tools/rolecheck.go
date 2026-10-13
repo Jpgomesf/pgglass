@@ -55,6 +55,14 @@ func (e *blockedError) Error() string {
 	return fmt.Sprintf("connection %q refused (role_check strict): its role can do more than read.\n%s", e.conn, e.report)
 }
 
+const roleCheckFailed = "role check failed, and role_check strict refuses connections it cannot check: "
+
+type roleCheckError struct{ err error }
+
+func (e *roleCheckError) Error() string { return roleCheckFailed + e.err.Error() }
+
+func (e *roleCheckError) Unwrap() error { return e.err }
+
 // gate audits the role of conn on first use and decides whether a call may
 // go on. The notice it returns starts the call's result: the findings, the
 // first time they are known, or why the audit failed under role_check warn.
@@ -67,7 +75,7 @@ func (rc *roleChecks) gate(ctx context.Context, conn string) (notice string, err
 	})
 	switch {
 	case err != nil && rc.mode == config.RoleCheckStrict:
-		return "", &dbError{fmt.Errorf("role check failed, and role_check strict refuses connections it cannot check: %w", err)}
+		return "", &dbError{&roleCheckError{err}}
 	case err != nil:
 		return fmt.Sprintf("role check failed (role_check warn, so the call goes on): %v\n\n", err), nil
 	case rc.mode == config.RoleCheckStrict && report.Blocking():

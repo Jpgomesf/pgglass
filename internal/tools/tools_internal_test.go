@@ -408,3 +408,23 @@ func TestGateAuditsOnceUnderConcurrency(t *testing.T) {
 		t.Errorf("%d audits and %d notices, want one of each", calls.Load(), notices.Load())
 	}
 }
+
+// Under role_check strict, an audit that Postgres refused showed the Postgres
+// error alone, as if the call's own query had failed. The text now says the
+// role check failed first, and pg_diff_schema names its side before that.
+func TestStrictRoleCheckFailureKeepsItsContext(t *testing.T) {
+	denied := &engine.QueryError{SQLState: "42501", Message: "permission denied for table pg_proc"}
+	rc, _ := fakeChecks(config.RoleCheckStrict, failure(fmt.Errorf("preflight: function grants: %w", denied)))
+	_, err := rc.gate(t.Context(), "db")
+	const want = "role check failed, and role_check strict refuses connections it cannot check: " +
+		"ERROR: permission denied for table pg_proc (SQLSTATE 42501)"
+	if got := errorText(err); got != want {
+		t.Errorf("errorText =\n%s\nwant\n%s", got, want)
+	}
+	if got := errorText(&connError{conn: "staging", err: err}); got != "staging: "+want {
+		t.Errorf("errorText of one side =\n%s\nwant\nstaging: %s", got, want)
+	}
+	if outcome, sqlState := classify(err); outcome != outcomeDBError || sqlState != "42501" {
+		t.Errorf("classify = %s %q, want db_error 42501", outcome, sqlState)
+	}
+}

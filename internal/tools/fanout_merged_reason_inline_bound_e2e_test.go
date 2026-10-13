@@ -51,7 +51,7 @@ func TestFanoutMergedTruncationReasonStaysWithinTheInlineLimit(t *testing.T) {
 		t.Errorf("config.json with names of 299 bytes: %v", err)
 	}
 	longest := names(63)
-	s := sectionsRoom(t, "tools_fanout_merged_reason", longest)
+	s := sectionsRoom(t, "tools_fanout_merged_reason", longest, t.TempDir())
 
 	// The whole-row reference reads v in s0, whose cast fails, and gives every
 	// other connection the same column. max_rows cuts each of them, and their

@@ -147,7 +147,11 @@ func (h *Handlers) search(ctx context.Context, raw json.RawMessage, c *call) (st
 	matches = matches[:min(len(matches), limit)]
 	c.rows, c.truncated = len(matches), cut != ""
 	room := h.room(c)
-	if text := matches.Render(); len(text) <= room {
+	text := matches.Render()
+	if cut != "" {
+		text += "\n(truncated: " + cut + ")"
+	}
+	if len(text) <= room {
 		return text, nil
 	}
 	return h.linesOutput("pg_search", args.Connection, "match", matches.Lines(), cut, room)

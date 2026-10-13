@@ -38,14 +38,15 @@ FROM (
 // and no xact_start, which least skips: it is as old as its last query.
 const longRunningSQL = `
 SELECT json_build_object('Total', coalesce(max(total), 0), 'Items', coalesce(json_agg(json_build_object(
-		'PID', pid, 'Database', datname, 'State', state, 'Seconds', seconds, 'Wait', wait, 'App', application_name)
+		'PID', pid, 'Database', datname, 'State', state, 'Seconds', seconds, 'FromTransaction', from_transaction,
+		'Wait', wait, 'App', application_name)
 	ORDER BY seconds DESC, pid), '[]'))
 FROM (
-	SELECT pid, datname, state, extract(epoch FROM now() - since)::bigint AS seconds,
+	SELECT pid, datname, state, extract(epoch FROM now() - since)::bigint AS seconds, from_transaction,
 		concat_ws(':', wait_event_type, wait_event) AS wait, application_name, count(*) OVER () AS total
 	FROM (
 		SELECT pid, datname, state, wait_event_type, wait_event, application_name,
-			least(xact_start, query_start) AS since
+			least(xact_start, query_start) AS since, xact_start < query_start AS from_transaction
 		FROM pg_stat_activity
 		WHERE backend_type = 'client backend' AND state <> 'idle'
 	) a

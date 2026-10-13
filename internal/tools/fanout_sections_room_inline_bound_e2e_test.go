@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -31,14 +32,14 @@ func sectionsRoomFixture() string {
 // sectionsRoom creates database db from sectionsRoomFixture and connects to
 // it under role_check warn, as ro_clean, through a connection named names[i]
 // whose default_schema is s<i>.
-func sectionsRoom(t *testing.T, db string, names []string) *session {
+func sectionsRoom(t *testing.T, db string, names []string, spillDir string) *session {
 	t.Helper()
 	testdb.CreateDatabase(t, db, sectionsRoomFixture())
 	conns := map[string]config.Connection{}
 	for i, name := range names {
 		conns[name] = config.Connection{Source: "direct", DSN: testdb.DSN(t, testdb.RoleClean, db), DefaultSchema: fmt.Sprintf("s%d", i)}
 	}
-	return connect(t, newConfig(config.RoleCheckWarn, conns))
+	return connectSpillingTo(t, newConfig(config.RoleCheckWarn, conns), spillDir)
 }
 
 // checkSpilledRows checks that the spill files at paths hold every row of
@@ -77,7 +78,7 @@ func TestFanoutSectionsAfterNoticesAndFailuresStayWithinTheInlineLimit(t *testin
 	for i := range 10 {
 		names = append(names, fmt.Sprintf("warehouse-%d", i))
 	}
-	s := sectionsRoom(t, "tools_fanout_sections_room", names)
+	s := sectionsRoom(t, "tools_fanout_sections_room", names, t.TempDir())
 
 	got := s.ok(t, "pg_query", fanoutArgs(names, "SELECT * FROM t"))
 	if len(got) > config.InlineMaxBytes {
@@ -90,18 +91,22 @@ func TestFanoutSectionsAfterNoticesAndFailuresStayWithinTheInlineLimit(t *testin
 	checkSpilledRows(t, s, regexp.MustCompile(regexp.QuoteMeta(s.spillDir)+`/spill-[^\s]+\.csv`).FindAllString(got, -1))
 }
 
-// Under connection names of 200 characters, even sections that only name
-// their files take more than what the notices and the failure line leave,
-// about 3.5 kB of 2.5. The sections then go to one more file, a line each,
-// whose summary the result returns in their place: every row is in a spill
-// file that file names.
+// Under connection names of 63 bytes, the longest config.json takes, and a
+// spill directory of 600 bytes, even sections that only name their files take
+// more than what the notices and the failure line leave, about 7 kB of 3. The
+// sections then go to one more file, a line each, whose summary the result
+// returns in their place: every row is in a spill file that file names.
 func TestFanoutSectionsUnderLongNamesGoToOneFile(t *testing.T) {
 	t.Parallel()
 	var names []string
 	for i := range 10 {
-		names = append(names, fmt.Sprintf("%s-%d", strings.Repeat("warehouse", 22), i))
+		names = append(names, fmt.Sprintf("%02d-%s", i, strings.Repeat("w", 60)))
 	}
-	s := sectionsRoom(t, "tools_fanout_sections_long_names", names)
+	dir := t.TempDir()
+	for len(dir) < 600 {
+		dir = filepath.Join(dir, strings.Repeat("d", 100))
+	}
+	s := sectionsRoom(t, "tools_fanout_sections_long_names", names, dir)
 
 	got := s.ok(t, "pg_query", fanoutArgs(names, "SELECT * FROM t"))
 	if len(got) > config.InlineMaxBytes {

@@ -48,3 +48,29 @@ func TestSearchCappedByMaxRowsSaysSo(t *testing.T) {
 		t.Errorf("audit lines = %+v, want 1000 and 950 rows, both truncated", lines)
 	}
 }
+
+// A search that limit or max_rows cut said so only once its matches spilled:
+// inline, with the default limit of 50, it returned 50 lines and no sign of
+// the others. A last line now names the limit that cut them.
+func TestSearchCutInlineSaysSo(t *testing.T) {
+	t.Parallel()
+	cfg := newConfig(config.RoleCheckWarn, appConns(t))
+	cfg.Defaults.MaxRows = 2
+	s := connect(t, cfg)
+	for _, tc := range []struct {
+		args map[string]any
+		want string
+	}{
+		{map[string]any{"connection": "clean", "pattern": "order", "limit": 1}, "app.customer_order_totals: view\n(truncated: limit=1)"},
+		{map[string]any{"connection": "clean", "pattern": "order"}, "app.customer_order_totals: view\napp.orders: table\n(truncated: max_rows=2)"},
+		{map[string]any{"connection": "clean", "pattern": "tenant_notes"}, "app.tenant_notes: table"},
+	} {
+		if got := s.ok(t, "pg_search", tc.args); got != tc.want {
+			t.Errorf("pg_search %v:\n%s\nwant\n%s", tc.args, got, tc.want)
+		}
+	}
+	lines := s.auditLines(t)
+	if len(lines) != 3 || !lines[0].Truncated || !lines[1].Truncated || lines[2].Truncated {
+		t.Errorf("audit lines = %+v, want the first two truncated", lines)
+	}
+}

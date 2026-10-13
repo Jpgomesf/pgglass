@@ -413,3 +413,38 @@ func TestPlanLargerThanMaxBytesIsAnError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// An EXISTS reads its subquery up to its first row, and the planner charges
+// it that row: run once or once per outer row, the scan under one is costed
+// for that row and flagged neither as a full scan nor, with analyze, for
+// returning one row. One planned to find a single row, like one that finds
+// none, reads all of it, and so does a count over a materialized CTE that
+// selects no column: both are flagged. The startup cost of a Limit holds only
+// that first row of an EXISTS, so the scan its offset skips is still flagged.
+func TestAnExistsReadsItsSubqueryUpToItsFirstRow(t *testing.T) {
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
+	const initplan = "SELECT EXISTS (SELECT 1 FROM app.events WHERE kind = 'click')"
+	summaryOf(t, q, initplan, false,
+		`total cost `+cost+`, ~1 row`,
+		`top nodes by own cost:`,
+		`  Seq Scan on app\.events: cost `+cost+`, ~1 row`,
+		`  Result: cost `+cost+`, ~1 row`,
+		`flags: none`)
+	const subplan = `SELECT c.id, EXISTS (SELECT 1 FROM app.events e WHERE e.payload->>'customer' = c.id::text) FROM app.customers c`
+	for _, sql := range []string{initplan, subplan} {
+		for _, analyze := range []bool{false, true} {
+			if got, err := run(t, q, sql, analyze); err != nil || !strings.HasSuffix(got, "\nflags: none") {
+				t.Errorf("%s (analyze %v): %v\n%s", sql, analyze, err, got)
+			}
+		}
+	}
+	for _, sql := range []string{
+		"SELECT NOT EXISTS (SELECT 1 FROM app.events WHERE kind = 'none')",
+		"WITH x AS MATERIALIZED (SELECT FROM app.events) SELECT count(*) FROM x",
+		"SELECT id FROM app.events WHERE EXISTS (SELECT 1 FROM app.events e WHERE e.kind = 'click') OFFSET 15000 LIMIT 10",
+	} {
+		for _, analyze := range []bool{false, true} {
+			wantFlags(t, flagsOf(t, q, sql, analyze), `Seq Scan on app\.events: full scan of ~20000 rows`)
+		}
+	}
+}

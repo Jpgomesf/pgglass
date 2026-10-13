@@ -86,10 +86,11 @@ type session struct {
 	State    string // empty when not visible to the role
 	// Seconds is the time since the current or last query started or, for a
 	// long-running session, since its transaction did, when that was earlier.
-	Seconds   int64
-	Wait      string // wait_event_type:wait_event; empty when not waiting
-	App       string
-	BlockedBy []int // the pids that block it, for blocked sessions
+	Seconds         int64
+	FromTransaction bool
+	Wait            string // wait_event_type:wait_event; empty when not waiting
+	App             string
+	BlockedBy       []int // the pids that block it, for blocked sessions
 }
 
 // line renders s, e.g. "pid 76, database app, active for 1m5s, waiting on
@@ -100,10 +101,10 @@ func (s session) line(v viewer) string {
 	if s.Database != "" {
 		parts = append(parts, "database "+s.Database)
 	}
-	switch s.State {
-	case "":
+	switch {
+	case s.State == "":
 		parts = append(parts, "state not visible to role "+v.Role)
-	case "idle in transaction":
+	case s.FromTransaction || s.State == "idle in transaction":
 		parts = append(parts, s.State+", transaction open for "+duration(s.Seconds))
 	default:
 		parts = append(parts, s.State+" for "+duration(s.Seconds))

@@ -110,12 +110,15 @@ func classify(err error) (outcome, sqlState string) {
 func errorText(err error) string {
 	var (
 		connErr   *connError
+		checkErr  *roleCheckError
 		violation *guard.Violation
 		queryErr  *engine.QueryError
 	)
 	switch {
 	case errors.As(err, &connErr):
 		return connErr.conn + ": " + errorText(connErr.err)
+	case errors.As(err, &checkErr):
+		return roleCheckFailed + errorText(checkErr.err)
 	case errors.As(err, &violation):
 		return "query rejected: " + violation.Reason
 	case errors.As(err, &queryErr):

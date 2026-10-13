@@ -17,7 +17,7 @@ On connecting, the server tells the agent how to use the tools well: start with 
 | `pg_diff_schema` | `left`, `right`, `schema`? | What differs in a schema between two connections |
 | `pg_health` | `connection` | One line per finding on connections, sessions, cache, dead rows, indexes, wraparound and replication |
 
-Postgres keeps names of at most 63 bytes and cuts a longer one to its first 63, which may name another object. So a `schema`, `table` or `column` over 63 bytes is refused before any query, as is a `default_schema` that long in the calls that use it: `table is 64 bytes: Postgres names take at most 63, and it cuts a longer one`. Connection names take at most 63 bytes too (see [Configuration](configuration.md#connection-structure)).
+Postgres keeps names of at most 63 bytes and cuts a longer one to its first 63, which may name another object. So a `schema`, `table` or `column` over 63 bytes is refused before any query: `table is 64 bytes: Postgres names take at most 63, and it cuts a longer one`. Connection names and `default_schema` take at most 63 bytes too, or the server does not start (see [Configuration](configuration.md#validation-rules)).
 
 ## Discover connections
 
@@ -51,7 +51,7 @@ app.orders: table
 app.customer_order_totals.order_count: bigint
 ```
 
-Only what the connection's role can read shows up. Matches over 10 KB are written to a spill file, one per row, like a large `pg_query` result, and the summary names the limit that cut them, if one did: `truncated=true (limit=500)`, or `max_rows` when it caps `limit`.
+When there are more matches, a last line names the limit that cut them: `(truncated: limit=50)`, or `max_rows` when it caps `limit`. Only what the connection's role can read shows up. Matches over 10 KB are written to a spill file, one per row, like a large `pg_query` result, and the summary names that limit instead: `truncated=true (limit=500)`.
 
 ## Query
 
@@ -146,10 +146,10 @@ flags:
   Seq Scan on app.events: full scan of ~20000 rows
 ```
 
-The 5 top nodes are ranked by what each takes on its own: its total less its children's. That is cost without `analyze`, and time with it, summed over loops and parallel workers. Rows are per loop, as in EXPLAIN. A `LIMIT` stops early the nodes that pass it rows as it reads them, down to the first that reads all of its input before returning a row, such as a sort, hash, plain or hashed aggregate, or a window aggregate over the whole partition, such as `count(*) OVER ()`, whose startup cost PostgreSQL 17 and later plan to cover its input. Earlier versions do not, so there only `analyze` shows the full scan under such a window. Without `analyze`, each of them counts the part of its estimated cost and rows that the `LIMIT` is planned to read, as EXPLAIN costs the `Limit` itself: under `LIMIT 10`, a seq scan of 20,000 rows shows `cost 0.26, ~10 rows`, not `cost 528, ~20000 rows`. The rows an `OFFSET` skips count in full, even under an outer `LIMIT`, and a `LIMIT` whose count is only known when the query runs, such as `LIMIT (SELECT 5)`, is planned to read a tenth of its input. With `analyze` too, what a `LIMIT` is planned to stop early counts as stopped: a `LIMIT` that returned fewer rows than planned may have run out of rows or been stopped by what reads it, such as an `EXISTS` or an outer `LIMIT`, and EXPLAIN does not say which. So a scan under a `LIMIT` that ran out of rows is not flagged for returning too few, though it read all of its input; a seq scan is still flagged as a full scan. The flags are:
+The 5 top nodes are ranked by what each takes on its own: its total less its children's. That is cost without `analyze`, and time with it, summed over loops and parallel workers. Rows are per loop, as in EXPLAIN. A `LIMIT` stops early the nodes that pass it rows as it reads them, down to the first that reads all of its input before returning a row, such as a sort, hash, plain or hashed aggregate, or a window aggregate over the whole partition, such as `count(*) OVER ()`, whose startup cost PostgreSQL 17 and later plan to cover its input. Earlier versions do not, so there only `analyze` shows the full scan under such a window. Without `analyze`, each of them counts the part of its estimated cost and rows that the `LIMIT` is planned to read, as EXPLAIN costs the `Limit` itself: under `LIMIT 10`, a seq scan of 20,000 rows shows `cost 0.26, ~10 rows`, not `cost 528, ~20000 rows`. The rows an `OFFSET` skips count in full, even under an outer `LIMIT`, and a `LIMIT` whose count is only known when the query runs, such as `LIMIT (SELECT 5)`, is planned to read a tenth of its input. An `EXISTS` over a subquery with no aggregate, window or set-returning function, set operation or `OFFSET` reads it only up to the first row, each time it runs, and its nodes count that part, as under a `LIMIT 1`: a seq scan of 20,000 rows of which 5,000 match shows `cost 0.12, ~1 row`. With `analyze` too, what a `LIMIT` or an `EXISTS` is planned to stop early counts as stopped: a `LIMIT` that returned fewer rows than planned may have run out of rows or been stopped by what reads it, such as an `EXISTS` or an outer `LIMIT`, and EXPLAIN does not say which. So a scan under a `LIMIT` that ran out of rows is not flagged for returning too few, though it read all of its input; a seq scan is still flagged as a full scan. The flags are:
 
-- a seq scan that reads over 10,000 rows of a relation with over 10,000 (`pg_class.reltuples`): with `analyze`, the rows it returned and those its filter removed; without, all of the relation, or the part a `LIMIT` is planned to read
-- with `analyze`: a node that returned more than 10 times its estimated rows or, unless a `LIMIT` is planned to stop it early, less than a tenth of them
+- a seq scan that reads over 10,000 rows of a relation with over 10,000 (`pg_class.reltuples`): with `analyze`, the rows it returned and those its filter removed; without, all of the relation, or the part a `LIMIT` or an `EXISTS` is planned to read
+- with `analyze`: a node that returned more than 10 times its estimated rows or, unless a `LIMIT` or an `EXISTS` is planned to stop it early, less than a tenth of them
 - with `analyze`: a sort, hash or hash aggregate that spilled to disk
 - a nested loop whose outer side returns over 10,000 rows, so that its inner side runs that many times
 
@@ -227,7 +227,7 @@ replication	not a replica
 | Section | Shows |
 |---------|-------|
 | `connections` | Client backends, which `max_connections` limits, by state; autovacuum and parallel workers have slots of their own |
-| `long_running` | Client sessions, other than idle ones, whose transaction or query started over a minute ago, counted from whichever started first: pid, database, state, duration, wait event, application name. An open transaction keeps its locks, so a session in one is listed while it idles or runs a short query; one `idle in transaction (aborted)` holds none, and counts from its last query |
+| `long_running` | Client sessions, other than idle ones, whose transaction or query started over a minute ago, counted from whichever started first: pid, database, state, duration, wait event, application name. An open transaction keeps its locks, so a session in one is listed while it idles or runs a later query, and its line then says `transaction open for` and the transaction's age. One `idle in transaction (aborted)` holds none, and counts from its last query |
 | `blocked` | Sessions that `pg_blocking_pids` reports waiting for a lock, and the pids blocking them |
 | `cache_hit` | The share of this database's block reads found in shared buffers |
 | `dead_tuples` | The 5 tables of this database with the most dead rows, with their share of the table's rows and their last autovacuum |
@@ -252,6 +252,7 @@ A failed call returns a result with `isError` set and the reason as text:
   ```
 
 - `connection "prod" refused (role_check strict): its role can do more than read.`, followed by the findings
+- `role check failed, and role_check strict refuses connections it cannot check: `, followed by why, such as a Postgres error
 - invalid arguments, such as an unknown connection or argument name, or a name over 63 bytes
 
 An error, with the role check's findings that may start it, keeps to the 10 KB of a response. A Postgres error can quote a value whole, and an unknown connection's lists every configured name: one longer than that is cut in the middle, keeping its start and its end, where the SQLSTATE, position, detail and hint are, as in `ERROR: invalid input syntax for type integer: "yyyy…[10088 bytes cut]…yyyy" (SQLSTATE 22P02)`.
