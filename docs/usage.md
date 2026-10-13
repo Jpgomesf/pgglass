@@ -15,6 +15,8 @@ Once the server is connected to your agent (for example Claude Code), you ask in
 | `pg_diff_schema` | `left`, `right`, `schema`? | What differs in a schema between two connections |
 | `pg_health` | `connection` | One line per finding on connections, sessions, cache, dead rows, indexes, wraparound and replication |
 
+Postgres keeps names of at most 63 bytes and cuts a longer one to its first 63, which may name another object. So a `schema`, `table` or `column` over 63 bytes is refused before any query, as is a `default_schema` that long in the calls that use it: `table is 64 bytes: Postgres names take at most 63, and it cuts a longer one`. Connection names take at most 63 bytes too (see [Configuration](configuration.md#connection-structure)).
+
 ## Discover connections
 
 ```
@@ -248,7 +250,7 @@ A failed call returns a result with `isError` set and the reason as text:
   ```
 
 - `connection "prod" refused (role_check strict): its role can do more than read.`, followed by the findings
-- invalid arguments, such as an unknown connection or argument name
+- invalid arguments, such as an unknown connection or argument name, or a name over 63 bytes
 
 An error, with the role check's findings that may start it, keeps to the 10 KB of a response. A Postgres error can quote a value whole, and an unknown connection's lists every configured name: one longer than that is cut in the middle, keeping its start and its end, where the SQLSTATE, position, detail and hint are, as in `ERROR: invalid input syntax for type integer: "yyyy…[10088 bytes cut]…yyyy" (SQLSTATE 22P02)`.
 

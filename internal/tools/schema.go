@@ -42,6 +42,9 @@ func (h *Handlers) schema(ctx context.Context, raw json.RawMessage, c *call) (st
 			return "", errors.New("table needs schema: pass the schema that holds it")
 		}
 	}
+	if err := errors.Join(checkName("schema", args.Schema), checkName("table", args.Table)); err != nil {
+		return "", err
+	}
 	var err error
 	if c.notice, err = h.checks.gate(ctx, args.Connection); err != nil {
 		return "", err

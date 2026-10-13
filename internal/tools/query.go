@@ -117,11 +117,15 @@ func (h *Handlers) format(name string) (render.Format, error) {
 }
 
 // searchPath returns schema, or the connection's default_schema when schema
-// is empty. It refuses, with a *guard.Violation, a schema whose functions the
-// guard denies: on the search_path, they could be called unqualified.
+// is empty. It refuses a schema longer than Postgres keeps a name and, with a
+// *guard.Violation, one whose functions the guard denies: on the search_path,
+// they could be called unqualified.
 func (h *Handlers) searchPath(conn, schema string) (string, error) {
 	if schema == "" {
 		schema = h.cfg.Connections[conn].DefaultSchema
+	}
+	if err := checkName("schema", schema); err != nil {
+		return "", err
 	}
 	return schema, guard.CheckSearchPath(schema)
 }

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -149,6 +150,41 @@ func TestParseRejectsUnknownKeys(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), `unknown field "`+tc.key+`"`) {
 			t.Errorf("Parse(%s): error = %v, want unknown field %q", tc.doc, err, tc.key)
 		}
+	}
+}
+
+// withConnections returns a config.json document whose connections have
+// the given names.
+func withConnections(t *testing.T, names ...string) []byte {
+	t.Helper()
+	conns := map[string]Connection{}
+	for _, name := range names {
+		conns[name] = Connection{Source: "direct", DSN: "postgres://x"}
+	}
+	doc, err := json.Marshal(Config{Connections: conns})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return doc
+}
+
+// A connection name takes at most 63 bytes, as a Postgres name does: the
+// tools repeat it in their output, which must stay within the inline limit,
+// and a fanned-out pg_query's footer and pg_diff_schema's first line name
+// several. Longer names went through, and took those past the limit.
+func TestParseRejectsConnectionNamesOver63Bytes(t *testing.T) {
+	ascii, accents := strings.Repeat("c", 63), strings.Repeat("é", 31)+"x"
+	if _, err := Parse(withConnections(t, ascii, accents)); err != nil {
+		t.Errorf("names of 63 bytes: %v", err)
+	}
+
+	ascii, accents = ascii+"x", strings.Repeat("é", 32) // 64 bytes each
+	_, err := Parse(withConnections(t, "db", accents, ascii))
+	want := "invalid config.json: " +
+		`connection name "` + ascii + `" is 64 bytes: connection names take at most 63, as Postgres names do` + "\n" +
+		`connection name "` + accents + `" is 64 bytes: connection names take at most 63, as Postgres names do`
+	if err == nil || err.Error() != want {
+		t.Errorf("names of 64 bytes: error = %v, want\n%s", err, want)
 	}
 }
 

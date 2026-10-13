@@ -166,6 +166,16 @@ func (h *Handlers) useConnection(name string, c *call) error {
 	return nil
 }
 
+// checkName refuses name, given for the argument arg, when it is longer than
+// Postgres keeps a name: Postgres would cut it to its first 63 bytes, which
+// may name another object, and the tool would repeat it whole.
+func checkName(arg, name string) error {
+	if len(name) > config.MaxNameBytes {
+		return fmt.Errorf("%s is %d bytes: Postgres names take at most %d, and it cuts a longer one", arg, len(name), config.MaxNameBytes)
+	}
+	return nil
+}
+
 // linesOutput writes lines, text a tool builds that is too large to return
 // as it is, to a spill file as a result of one text column named column, one
 // row per line, and returns its summary within limit bytes. It always writes

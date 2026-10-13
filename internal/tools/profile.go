@@ -58,7 +58,8 @@ func (h *Handlers) profile(ctx context.Context, raw json.RawMessage, c *call) (s
 
 // profileTarget returns the schema and name of the table a pg_profile call
 // names: table as schema.name, or name in schema, or in the connection's
-// default_schema.
+// default_schema. It refuses them, and column, when longer than Postgres
+// keeps a name.
 func (h *Handlers) profileTarget(args profileArgs) (schema, table string, err error) {
 	if args.Table == "" {
 		return "", "", errors.New("table must not be empty")
@@ -72,6 +73,9 @@ func (h *Handlers) profileTarget(args profileArgs) (schema, table string, err er
 	}
 	if schema == "" || table == "" {
 		return "", "", errors.New("table needs a schema: pass schema.table, or the schema that holds it")
+	}
+	if err := errors.Join(checkName("schema", schema), checkName("table", table), checkName("column", args.Column)); err != nil {
+		return "", "", err
 	}
 	return schema, table, nil
 }
