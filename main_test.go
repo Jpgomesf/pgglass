@@ -54,6 +54,10 @@ func connections(conns map[string]any) map[string]any {
 	return map[string]any{"connections": conns}
 }
 
+func direct(dsn string) map[string]any {
+	return map[string]any{"source": "direct", "dsn": dsn}
+}
+
 func isolateHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -128,7 +132,7 @@ func TestHelpPrintsTheUsage(t *testing.T) {
 			t.Errorf("%s = %d, %q, %q; want 0 and the usage", flag, code, out, errOut)
 		}
 	}
-	for _, want := range []string{"--config FILE", "~/.config/pgglass/config.json", "--version"} {
+	for _, want := range []string{"--config FILE", "~/.config/pgglass/config.json", "doctor", "--version"} {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage does not mention %s", want)
 		}
@@ -143,6 +147,8 @@ func TestMisuseExitsWithCode2(t *testing.T) {
 		{[]string{"--nope"}, "flag provided but not defined: -nope"},
 		{[]string{"--config"}, "flag needs an argument: -config"},
 		{[]string{"serve"}, `unexpected argument "serve"`},
+		{[]string{"doctor", "extra"}, `unexpected argument "extra"`},
+		{[]string{"doctor", "--nope"}, "flag provided but not defined: -nope"},
 	} {
 		code, out, errOut := runCommand(t, tc.args...)
 		if code != 2 || out != "" || errOut != "pgglass: "+tc.want+"\n\n"+usage {
@@ -185,10 +191,15 @@ func TestConfigDefaultsToTheUserConfigDirectory(t *testing.T) {
 	if code, _, errOut := runCommand(t); code != 0 || !strings.Contains(errOut, "readonly is deprecated") {
 		t.Errorf("serving until stdin ends = %d, %q; want 0 and the warning the default config file causes", code, errOut)
 	}
+	if code, out, errOut := runCommand(t, "doctor"); code != 0 || !strings.HasPrefix(out, "config "+path+" ") {
+		t.Errorf("doctor = %d, %q, %q; want 0 and the default config file", code, out, errOut)
+	}
 
 	t.Setenv("HOME", "")
-	if code, _, errOut := runCommand(t); code != 1 || !strings.Contains(errOut, "no config file: pass --config FILE") {
-		t.Errorf("without HOME = %d, %q; want 1 and a request for --config", code, errOut)
+	for _, args := range [][]string{{"doctor"}, nil} {
+		if code, _, errOut := runCommand(t, args...); code != 1 || !strings.Contains(errOut, "no config file: pass --config FILE") {
+			t.Errorf("%v without HOME = %d, %q; want 1 and a request for --config", args, code, errOut)
+		}
 	}
 }
 

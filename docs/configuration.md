@@ -1,6 +1,6 @@
 # Configuration
 
-pgglass reads `~/.config/pgglass/config.json`, or the file `--config` names (see [Command line](#command-line)).
+pgglass reads `~/.config/pgglass/config.json`, or the file `--config` names (see [Command line](#command-line)). `pgglass doctor` checks it (see [Doctor](#doctor)).
 
 ## Connection Structure
 
@@ -230,8 +230,9 @@ We recommend `{environment}-{database}`:
 ## Command line
 
 ```
-pgglass [--config FILE]  serve the tools over stdio
-pgglass --version        print the version
+pgglass [--config FILE]         serve the tools over stdio
+pgglass [--config FILE] doctor  check the config and every connection, then exit
+pgglass --version               print the version
 ```
 
 | Flag | Default | Description |
@@ -239,4 +240,19 @@ pgglass --version        print the version
 | `--config FILE` | `~/.config/pgglass/config.json` | The config file. Without `HOME`, it must be given |
 | `--version` | — | Print the version: the release's, else the module version Go records in the build, else `dev` |
 
-The exit code is 0 when the server stops cleanly, 1 when it fails, and 2 for a usage error. While serving, stderr carries JSON lines only: the audit log, warnings and why the server stopped.
+Flags go before or after `doctor`. The exit code is 0 when the server stops cleanly or doctor finds nothing wrong, 1 when it fails, and 2 for a usage error. While serving, stderr carries JSON lines only: the audit log, warnings and why the server stopped.
+
+## Doctor
+
+`pgglass doctor` reads the config as the server does, then checks every connection at once: it resolves the credentials, connects within 5 seconds and runs the [role check](#role-check). It prints one line per connection, in name order, and exits 1 if any fails:
+
+```
+config /home/me/.config/pgglass/config.json (role_check warn)
+ok local-dev: role dev: no findings
+FAIL prod-app: connect: no answer within 5s
+warn staging-app: role app_reader: 1 finding(s)
+  warning table_write: INSERT on app.audit_log
+1 failed, 2 passed
+```
+
+A connection fails when its credentials do not resolve or parse, its server does not answer or refuses it, or its role has a critical finding, whatever `role_check` says. Warnings alone pass. Doctor never prints a password or a whole DSN: an error names the user, database and host at most, and a DSN that does not parse is not shown. A config that does not load fails before any connection is tried, with the error the server would stop on.

@@ -56,7 +56,16 @@ Create `~/.config/pgglass/config.json`, or pass another file with `--config`:
 }
 ```
 
-Credentials come from `direct`, `env`, `dotenv` or `aws_secrets_manager`. See [Configuration](docs/configuration.md) for every setting.
+Credentials come from `direct`, `env`, `dotenv` or `aws_secrets_manager`. See [Configuration](docs/configuration.md) for every setting. Then check the config and each connection's role:
+
+```
+$ pgglass doctor
+config /home/me/.config/pgglass/config.json (role_check strict)
+ok my-db: role readonly_user: no findings
+0 failed, 1 passed
+```
+
+It exits 1 when a connection's credentials do not resolve, its server does not answer, or its role has a way out of the read-only transaction (see [Doctor](docs/configuration.md#doctor)).
 
 ## Add to Claude Code
 

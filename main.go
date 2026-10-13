@@ -1,5 +1,6 @@
 // Command pgglass is an MCP server that gives AI agents read-only access to
-// the PostgreSQL connections of its config file, over stdio.
+// the PostgreSQL connections of its config file, over stdio. Its doctor
+// command checks that config and each connection's role.
 package main
 
 import (
@@ -18,8 +19,9 @@ import (
 var version string
 
 const usage = `Usage:
-  pgglass [--config FILE]  serve the tools over stdio
-  pgglass --version        print the version
+  pgglass [--config FILE]         serve the tools over stdio
+  pgglass [--config FILE] doctor  check the config and every connection, then exit
+  pgglass --version               print the version
 
 Flags:
   --config FILE  config file (default ~/.config/pgglass/config.json)
@@ -29,6 +31,7 @@ Flags:
 type options struct {
 	config  string
 	version bool
+	doctor  bool
 }
 
 func main() {
@@ -49,6 +52,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case opts.version:
 		fmt.Fprintln(stdout, "pgglass", buildVersion())
 		return 0
+	case opts.doctor:
+		return doctor(ctx, opts.config, stdout, stderr)
 	default:
 		return serve(ctx, opts, stdin, stdout, stderr)
 	}
@@ -62,6 +67,12 @@ func parseArgs(args []string) (options, error) {
 	fs.BoolVar(&opts.version, "version", false, "")
 	if err := fs.Parse(args); err != nil {
 		return opts, err
+	}
+	if fs.Arg(0) == "doctor" {
+		opts.doctor = true
+		if err := fs.Parse(fs.Args()[1:]); err != nil {
+			return opts, err
+		}
 	}
 	if fs.NArg() > 0 {
 		return opts, fmt.Errorf("unexpected argument %q", fs.Arg(0))
