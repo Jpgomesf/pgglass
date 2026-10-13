@@ -215,18 +215,53 @@ func TestALimitStopsTheScanEarly(t *testing.T) {
 
 // A Limit does not hide a scan that reads the whole relation: one that finds
 // no row to return, one under a sort, which reads every row before the Limit
-// stops it, and one that the offset makes read 15010 rows.
+// stops it, and one that the offset makes read 15010 rows, or 15005 when an
+// outer Limit reads 5 rows of the offset's Limit, which skips its 15000 rows
+// all the same.
 func TestALimitStillFlagsAFullScan(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	for _, sql := range []string{
 		"SELECT id FROM app.events WHERE kind = 'none' LIMIT 10",
 		"SELECT id FROM app.events ORDER BY payload LIMIT 10",
 		"SELECT id FROM app.events OFFSET 15000 LIMIT 10",
+		"SELECT * FROM (SELECT id FROM app.events OFFSET 15000 LIMIT 100) s LIMIT 5",
 	} {
 		for _, analyze := range []bool{false, true} {
 			wantFlags(t, flagsOf(t, q, sql, analyze), `Seq Scan on app\.events: full scan of ~20000 rows`)
 		}
 	}
+}
+
+// Without analyze, the scan under an outer Limit and an offset's Limit costs
+// the 15000 rows the offset skips and the 5 the outer Limit reads; neither
+// Limit costs more than a fraction of its own, as EXPLAIN costs them: nothing
+// from PostgreSQL 16, and 0.05 for the outer one on 15.
+func TestAnOffsetUnderALimitIsCostedInFull(t *testing.T) {
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
+	summaryOf(t, q, "SELECT * FROM (SELECT id FROM app.events OFFSET 15000 LIMIT 100) s LIMIT 5", false,
+		`total cost `+cost+`, ~5 rows`,
+		`top nodes by own cost:`,
+		`  Seq Scan on app\.events: cost `+cost+`, ~15005 rows`,
+		`  Limit: cost 0(\.\d+)?, ~5 rows`,
+		`  Limit: cost 0(\.\d+)?, ~5 rows`,
+		`flags:`,
+		`  Seq Scan on app\.events: full scan of ~20000 rows`)
+}
+
+// The planner expects the Limit to stop the index scan after 10 of the 100
+// rows it estimates, but no row matches: the Limit returns fewer rows than it
+// planned, so it ran out of rows and stopped nothing early. With analyze, the
+// scan's estimate is flagged; without, the Limit is costed as planned.
+func TestALimitThatRanOutOfRowsStopsNothingEarly(t *testing.T) {
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
+	const sql = "SELECT id FROM app.events WHERE payload->>'seq' = 'nope' ORDER BY id LIMIT 10"
+	summaryOf(t, q, sql, false,
+		`total cost `+cost+`, ~10 rows`,
+		`top nodes by own cost:`,
+		`  Index Scan using events_pkey on app\.events: cost `+cost+`, ~10 rows`,
+		`  Limit: cost 0, ~10 rows`,
+		`flags: none`)
+	wantFlags(t, flagsOf(t, q, sql, true), `Index Scan using events_pkey on app\.events: 0 rows, planned 100`)
 }
 
 // count(*) OVER () reads the whole partition before its first row, so the

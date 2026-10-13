@@ -51,8 +51,8 @@ type node struct {
 	disk                  // the node's own, or the leader's under Gather
 	Workers       []disk  `json:"Workers"` // each parallel worker's
 	Plans         []node  `json:"Plans"`
-	// share is the part of its run the plan expects n to do: 1, or less when
-	// a Limit above stops it early. parse sets it.
+	// share is the part of its run n does: 1, or less when a Limit above
+	// stops it early, by as much as the plan expects. parse sets it.
 	share float64
 }
 
@@ -87,10 +87,10 @@ func parse(doc string) (*plan, error) {
 	return &plans[0], nil
 }
 
-// setShare sets the part of its run the plan expects n to do, and that of
-// each node under it. A Limit reads its input only as far as the rows it
-// skips and returns, and a node passes its own share on to the children it
-// reads as its parent asks for rows.
+// setShare sets the part of its run n does, and that of each node under it.
+// A Limit reads its input only as far as the rows it skips and returns,
+// unless with ANALYZE it fell short of them, and a node passes its own share
+// on to the children it reads as its parent asks for rows.
 func (n *node) setShare(share float64) {
 	n.share = share
 	for i := range n.Plans {
@@ -98,12 +98,19 @@ func (n *node) setShare(share float64) {
 		switch {
 		case !n.streams(c):
 			c.setShare(1)
-		case n.Type == "Limit":
-			c.setShare(share * n.limitShare(c))
+		case n.Type == "Limit" && !n.fellShort():
+			c.setShare(n.limitShare(c, share))
 		default:
 			c.setShare(share)
 		}
 	}
+}
+
+// fellShort reports whether Limit n, with ANALYZE, returned fewer rows than
+// it planned. Then it ran out of rows, or a Limit above stopped it first:
+// either way it stopped nothing early itself.
+func (n *node) fellShort() bool {
+	return n.Loops > 0 && n.ActualRows < n.PlanRows
 }
 
 // streams reports whether n reads its child c only as far as its own output
@@ -138,15 +145,16 @@ func (n *node) ownStartupCost() float64 {
 	return cost
 }
 
-// limitShare is the part of its input c that Limit n reads, as the planner
-// costs n: the rows it skips, whose cost is what n's startup cost adds to
-// c's and to its initplans', then the rows it returns.
-func (n *node) limitShare(c *node) float64 {
-	share := n.PlanRows / max(c.PlanRows, 1)
+// limitShare is the part of its input c that Limit n reads when it does share
+// of its own run, as the planner costs n: all the rows it skips, whose cost is
+// what n's startup cost adds to c's and to its initplans', then share of the
+// rows it returns.
+func (n *node) limitShare(c *node, share float64) float64 {
+	read := share * n.PlanRows / max(c.PlanRows, 1)
 	if run := c.TotalCost - c.StartupCost; run > 0 {
-		share += max(n.ownStartupCost()-c.StartupCost, 0) / run
+		read += max(n.ownStartupCost()-c.StartupCost, 0) / run
 	}
-	return min(share, 1)
+	return min(read, 1)
 }
 
 // seqScans returns the relations p scans sequentially, each once.
