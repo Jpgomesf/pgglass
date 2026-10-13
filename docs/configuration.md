@@ -51,7 +51,7 @@ Read DSN from a `.env` file. Supports `KEY=VALUE`, quoted values, and comments.
 
 ### AWS Secrets Manager
 
-Fetch credentials from AWS Secrets Manager. Each secret is cached in memory for 24 hours. When the server refuses the credentials of a new database connection (SQLSTATE `28P01` or `28000`), the secret is fetched again and the connection tried once more, so a rotated password needs no restart. Alternating-users rotation is different: it switches the secret to another user and leaves the cached user's password valid, so new database connections go on as the cached user until the cached secret expires, then fail until a restart, since the role check audited the first user (see [DSN Formats](#dsn-formats)). Single-user rotation keeps the user.
+Fetch credentials from AWS Secrets Manager. Each secret is cached in memory for 24 hours, per `aws_profile` and `secret_name`. When the server refuses the credentials of a new database connection (SQLSTATE `28P01` or `28000`), the secret is fetched again and the connection tried once more, so a rotated password needs no restart. Alternating-users rotation is different: it switches the secret to another user and leaves the cached user's password valid, so new database connections go on as the cached user until the cached secret expires, then fail until a restart, since the role check audited the first user (see [DSN Formats](#dsn-formats)). Single-user rotation keeps the user.
 
 ```json
 {

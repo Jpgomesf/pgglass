@@ -15,27 +15,27 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 )
 
-// primeSecret puts a secret in the shared cache with the given age, and
-// removes it when the test ends. Each test uses a unique name so the shared
-// cache never crosses tests.
+// primeSecret puts a secret, under no AWS profile, in the shared cache with
+// the given age, and removes it when the test ends. Each test uses a unique
+// name so the shared cache never crosses tests.
 func primeSecret(t *testing.T, name string, value map[string]string, age time.Duration) {
 	t.Helper()
 	awsSecrets.mu.Lock()
-	awsSecrets.cache[name] = &secretEntry{value: value, fetchedAt: time.Now().Add(-age)}
+	awsSecrets.cache[secretKey{name: name}] = &secretEntry{value: value, fetchedAt: time.Now().Add(-age)}
 	awsSecrets.mu.Unlock()
-	t.Cleanup(func() { awsSecrets.Invalidate(name) })
+	t.Cleanup(func() { awsSecrets.Invalidate("", name) })
 }
 
-// fakeSecrets stands in for AWS Secrets Manager: it holds secrets by name,
-// and counts the fetches.
+// fakeSecrets stands in for AWS Secrets Manager: it holds a secret per AWS
+// profile and name, and counts the fetches.
 type fakeSecrets struct {
-	secrets map[string]map[string]string
+	secrets map[secretKey]map[string]string
 	fetches int
 }
 
-func (f *fakeSecrets) fetch(_ context.Context, _, secretName string) (map[string]string, error) {
+func (f *fakeSecrets) fetch(_ context.Context, awsProfile, secretName string) (map[string]string, error) {
 	f.fetches++
-	secret, ok := f.secrets[secretName]
+	secret, ok := f.secrets[secretKey{awsProfile, secretName}]
 	if !ok {
 		return nil, fmt.Errorf("get secret %q: not found", secretName)
 	}
@@ -44,15 +44,15 @@ func (f *fakeSecrets) fetch(_ context.Context, _, secretName string) (map[string
 
 // fakeAWS makes the shared cache fetch from secrets instead of AWS, until the
 // test ends and drops what it cached. Tests that call it must not be parallel.
-func fakeAWS(t *testing.T, secrets map[string]map[string]string) *fakeSecrets {
+func fakeAWS(t *testing.T, secrets map[secretKey]map[string]string) *fakeSecrets {
 	t.Helper()
 	f := &fakeSecrets{secrets: secrets}
 	saved := awsSecrets.fetch
 	awsSecrets.fetch = f.fetch
 	t.Cleanup(func() {
 		awsSecrets.fetch = saved
-		for name := range secrets {
-			awsSecrets.Invalidate(name)
+		for key := range secrets {
+			awsSecrets.Invalidate(key.profile, key.name)
 		}
 	})
 	return f
@@ -78,15 +78,15 @@ func resolvedPassword(t *testing.T, conn config.Connection) string {
 }
 
 func TestAWSSecretsCacheIsCached(t *testing.T) {
-	if awsSecrets.IsCached("resolver_test_absent") {
+	if awsSecrets.IsCached("", "resolver_test_absent") {
 		t.Error("IsCached of an absent secret = true")
 	}
 	primeSecret(t, "resolver_test_fresh", map[string]string{"host": "h"}, time.Minute)
-	if !awsSecrets.IsCached("resolver_test_fresh") {
+	if !awsSecrets.IsCached("", "resolver_test_fresh") {
 		t.Error("IsCached of a fresh secret = false")
 	}
 	primeSecret(t, "resolver_test_stale", map[string]string{"host": "h"}, secretCacheTTL+time.Hour)
-	if awsSecrets.IsCached("resolver_test_stale") {
+	if awsSecrets.IsCached("", "resolver_test_stale") {
 		t.Error("IsCached of an expired secret = true")
 	}
 }
@@ -94,14 +94,14 @@ func TestAWSSecretsCacheIsCached(t *testing.T) {
 // After a rotation, the cached secret still answers, with the old password,
 // until the engine invalidates it when the server refuses that password.
 func TestAWSSecretsSourceFetchesAgainOnceInvalidated(t *testing.T) {
-	const name = "resolver_test_rotated"
-	store := fakeAWS(t, map[string]map[string]string{name: dbSecret("first")})
-	conn := config.Connection{Source: "aws_secrets_manager", SecretName: name}
+	key := secretKey{name: "resolver_test_rotated"}
+	store := fakeAWS(t, map[secretKey]map[string]string{key: dbSecret("first")})
+	conn := config.Connection{Source: "aws_secrets_manager", SecretName: key.name}
 
 	if got := resolvedPassword(t, conn); got != "first" {
 		t.Fatalf("password = %q, want first", got)
 	}
-	store.secrets[name] = dbSecret("second")
+	store.secrets[key] = dbSecret("second")
 	if got := resolvedPassword(t, conn); got != "first" {
 		t.Errorf("before Invalidate: password = %q, want the cached first", got)
 	}
@@ -113,6 +113,42 @@ func TestAWSSecretsSourceFetchesAgainOnceInvalidated(t *testing.T) {
 	}
 	if store.fetches != 2 {
 		t.Errorf("%d fetches, want 2", store.fetches)
+	}
+}
+
+// One secret name can hold different secrets under different AWS profiles:
+// each is cached, reported and invalidated on its own.
+func TestAWSSecretsCacheKeysByProfileAndName(t *testing.T) {
+	const name = "resolver_test_profiles"
+	profiles := []string{"", "staging", "prod"}
+	secrets := map[secretKey]map[string]string{}
+	for _, profile := range profiles {
+		secrets[secretKey{profile, name}] = dbSecret("pw-" + profile)
+	}
+	store := fakeAWS(t, secrets)
+	conn := func(profile string) config.Connection {
+		return config.Connection{Source: "aws_secrets_manager", AWSProfile: profile, SecretName: name}
+	}
+
+	for round := range 2 { // the second round comes from the cache
+		for _, profile := range profiles {
+			if got := resolvedPassword(t, conn(profile)); got != "pw-"+profile {
+				t.Errorf("round %d, profile %q: password = %q, want pw-%s", round, profile, got, profile)
+			}
+		}
+	}
+	if store.fetches != len(profiles) {
+		t.Errorf("%d fetches, want %d", store.fetches, len(profiles))
+	}
+	if got := (AWSSecretsSource{}).Status(conn("other")); got != "not loaded" {
+		t.Errorf("Status under another profile = %q, want not loaded", got)
+	}
+
+	Invalidate(conn("staging"))
+	for profile, want := range map[string]bool{"": true, "staging": false, "prod": true} {
+		if got := awsSecrets.IsCached(profile, name); got != want {
+			t.Errorf("after invalidating staging: IsCached(%q) = %v, want %v", profile, got, want)
+		}
 	}
 }
 
