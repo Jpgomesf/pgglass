@@ -19,7 +19,9 @@ const (
 // inlineSize is what its inline rendering would have taken. After what it
 // says of the file, it lists the first summaryColumns columns with their
 // types, then previews the first previewRows rows, as many of each as fit in
-// limit. It names the file even when that alone takes more than limit.
+// limit. When what it says of the file does not fit in limit, it only names
+// the file, then counts the rows as an inline result does, "Full result:
+// <path>" and "(100 rows)", even when that takes more than limit.
 func summary(res *result.Result, path string, inlineSize, limit int) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Result too large to return inline (%d bytes, limit %d): %s × %s, truncated=%t",
@@ -31,6 +33,9 @@ func summary(res *result.Result, path string, inlineSize, limit int) (string, er
 	b.WriteString(`It is CSV (RFC 4180) with a header row; NULL is an unquoted empty field and "" the empty string.` + "\n")
 	b.WriteString("Use Read or Grep on the file instead of re-running the query.")
 	out := b.String()
+	if len(out) > limit {
+		return "Full result: " + path + "\n" + footer(res), nil
+	}
 
 	const gap = "\n\n"
 	columns, shown, err := columnList(res.Columns, limit-len(out)-len(gap))

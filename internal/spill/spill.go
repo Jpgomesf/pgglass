@@ -60,7 +60,9 @@ func (s *Store) Output(tool, conn string, res *result.Result, f render.Format) (
 }
 
 // OutputWithin is Output with limit in place of InlineMaxBytes, for an
-// output that shares the inline space with others.
+// output that shares the inline space with others. In a limit too small for
+// what a summary says of its file, the summary only names the file and
+// counts the rows.
 func (s *Store) OutputWithin(tool, conn string, res *result.Result, f render.Format, limit int) (string, error) {
 	return s.output(tool, conn, res, f, limit, inlineMaxCell)
 }

@@ -184,14 +184,16 @@ func TestFanoutSectionsShareTheInlineLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Each gets a tenth of 1000 bytes, less the first line (62 bytes) and the
-	// names with their colons and blank lines (88): 85.
-	files := regexp.MustCompile(`(?m)^Full result: (.+)$`).FindAllStringSubmatch(got, -1)
-	if len(files) != 2 || !regexp.MustCompile(`\n\nids:\nResult too large to return inline \(\d+ bytes, limit 85\): 60 rows × 1 column`).MatchString(got) ||
+	// names with their colons and blank lines (88): 85, too few for what a
+	// summary says of its file, which made the ten sections take about 1,100
+	// bytes. A section that spills now only names its file and counts its rows.
+	files := regexp.MustCompile(`(?m)^(ids|names):\nFull result: (\S+)\n\(60 rows\)$`).FindAllStringSubmatch(got, -1)
+	if len(got) > 1000 || len(files) != 2 || strings.Count(got, "Full result: ") != 2 ||
 		!strings.HasSuffix(got, "\n\nmore7:\nname\nx\n(1 row)") {
-		t.Fatalf("ten sections sharing 1000 bytes:\n%s", got)
+		t.Fatalf("ten sections sharing 1000 bytes, %d bytes:\n%s", len(got), got)
 	}
 	for _, f := range files {
-		if _, err := os.Stat(f[1]); err != nil {
+		if _, err := os.Stat(f[2]); err != nil {
 			t.Error(err)
 		}
 	}

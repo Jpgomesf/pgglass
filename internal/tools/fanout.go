@@ -153,17 +153,32 @@ func failureLines(failed []fanoutResult, room int) string {
 }
 
 // fanoutRows renders ok, results that all succeeded, within room bytes:
-// merged when their columns match, otherwise one section per connection, the
-// sections sharing room with their names and the line that introduces them.
-// Either way, what does not fit is spilled to a file.
+// merged when their columns match, otherwise one section per connection.
+// Either way, what does not fit is spilled to a file. A section names its
+// file even past its share, so when the sections take more than room, as
+// very long connection names can make them, they go to one more file, a line
+// each, and fanoutRows returns its summary.
 func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format, room int) (string, error) {
+	names := make([]string, len(ok))
+	for i, r := range ok {
+		names[i] = r.conn
+	}
 	if sameFanoutColumns(ok) {
-		names := make([]string, len(ok))
-		for i, r := range ok {
-			names[i] = r.conn
-		}
 		return h.spill.OutputWithin("pg_query", strings.Join(names, "_"), mergeFanout(ok), format, room)
 	}
+	text, err := h.fanoutSections(ok, format, room)
+	if err != nil || len(text) <= room {
+		return text, err
+	}
+	return h.linesOutput("pg_query", strings.Join(names, "_"), "line", strings.Split(text, "\n"), room)
+}
+
+// fanoutSections renders ok, results whose columns differ, as a section per
+// connection under its name, after a line that says why. The sections share
+// room with their names and that line: a section past its share is spilled
+// to a file of its own, which it names even when its share is too small for
+// that.
+func (h *Handlers) fanoutSections(ok []fanoutResult, format render.Format, room int) (string, error) {
 	sections := []string{"Columns differ across connections, so each has its own result."}
 	room -= len(sections[0])
 	for _, r := range ok {

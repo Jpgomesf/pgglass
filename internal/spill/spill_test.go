@@ -390,17 +390,21 @@ func TestOutputSummaryListsTheColumnsThatFit(t *testing.T) {
 	}
 }
 
-// When not one column fits, the summary only names the file.
-func TestOutputSummaryNamesTheFileWhenNoColumnFits(t *testing.T) {
+// In a limit too small for what a summary says of the file, about 400 bytes
+// with the path, the summary only names the file and counts the rows, as an
+// inline result ends. The file holds every column and row.
+func TestOutputSummaryInASmallLimitOnlyNamesTheFile(t *testing.T) {
 	out, err := newStore(t, 10_000).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 300)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasSuffix(out, "\nUse Read or Grep on the file instead of re-running the query.") {
-		t.Errorf("want only what names the file, got:\n%s", out)
+	path := spillPath(t, out)
+	if want := "Full result: " + path + "\n(50 rows)"; out != want || len(out) > 300 {
+		t.Errorf("limit 300: %d bytes:\n%s\nwant\n%s", len(out), out, want)
 	}
-	if _, err := os.Stat(spillPath(t, out)); err != nil {
-		t.Error(err)
+	records, err := csv.NewReader(strings.NewReader(readFile(t, path))).ReadAll()
+	if err != nil || len(records) != 51 || len(records[0]) != 20 || records[0][19] != longName(19) {
+		t.Errorf("spill file: %d records, %v; want a header of 20 columns and 50 rows", len(records), err)
 	}
 }
 
@@ -843,21 +847,22 @@ func TestOutputCleansUpAtMostOnceAnHour(t *testing.T) {
 }
 
 // OutputWithin returns inline, summarizes and caps against its own limit,
-// not InlineMaxBytes.
+// not InlineMaxBytes. The result takes about 1 kB inline, room enough for
+// what a summary says of its file.
 func TestOutputWithinUsesItsOwnLimit(t *testing.T) {
-	inline := inlineOf(t, people(), render.TSV, "(3 rows)")
+	inline := inlineOf(t, numbered(50), render.TSV, "(50 rows)")
 	store := newStore(t, 10_000)
-	if out, err := store.OutputWithin("pg_query", "prod", people(), render.TSV, len(inline)); err != nil || out != inline {
+	if out, err := store.OutputWithin("pg_query", "prod", numbered(50), render.TSV, len(inline)); err != nil || out != inline {
 		t.Errorf("at the limit: got %q, %v; want the inline rendering %q", out, err, inline)
 	}
 
-	out, err := store.OutputWithin("pg_query", "prod", people(), render.TSV, len(inline)-1)
+	out, err := store.OutputWithin("pg_query", "prod", numbered(50), render.TSV, len(inline)-1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := fmt.Sprintf("Result too large to return inline (%d bytes, limit %d): 3 rows × 2 columns", len(inline), len(inline)-1)
-	if !strings.HasPrefix(out, want) {
-		t.Errorf("one byte over the limit: got\n%s\nwant it to start with\n%s", out, want)
+	want := fmt.Sprintf("Result too large to return inline (%d bytes, limit %d): 50 rows × 2 columns", len(inline), len(inline)-1)
+	if !strings.HasPrefix(out, want) || len(out) > len(inline)-1 {
+		t.Errorf("one byte over the limit: got %d bytes:\n%s\nwant it to start with\n%s", len(out), out, want)
 	}
 	if _, err := os.Stat(spillPath(t, out)); err != nil {
 		t.Errorf("one byte over the limit: want a spill file: %v", err)
