@@ -17,8 +17,9 @@ import (
 const defaultSearchLimit = 50
 
 // listLimit is how many schemas or relations pg_schema reads from the
-// catalog for a listing: more lines than the inline limit shows in practice,
-// and a catalog result well within max_bytes however large the database.
+// catalog for a listing: more lines than the inline limit shows in practice
+// and, with their comments cut to 200 characters, a catalog result well
+// within max_bytes however large the database.
 const listLimit = 500
 
 type schemaArgs struct {

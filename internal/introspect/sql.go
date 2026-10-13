@@ -30,6 +30,12 @@ const relKind = `CASE c.relkind
 		WHEN 'f' THEN 'foreign table'
 	END`
 
+// clipped is the comment txt cut to 200 characters, with a note of how many
+// it drops, "...[+1234 chars]", so that long comments do not take a listing
+// of 500 relations, or the description of a wide relation, past max_bytes.
+// The SQL is ASCII, which every server encoding holds.
+const clipped = `CASE WHEN length(txt) > 200 THEN left(txt, 200) || '...[+' || length(txt) - 200 || ' chars]' ELSE txt END`
+
 // relationJSON is a Relation for pg_class c in pg_namespace n. A partitioned
 // table has no storage of its own, so its size sums its partitions.
 const relationJSON = `json_build_object(
@@ -42,7 +48,7 @@ const relationJSON = `json_build_object(
 		WHEN c.relkind = 'p' THEN (SELECT sum(pg_total_relation_size(t.relid))::bigint FROM pg_partition_tree(c.oid) t)
 	END),
 	'RLS', c.relrowsecurity,
-	'Comment', obj_description(c.oid, 'pg_class'))`
+	'Comment', (SELECT ` + clipped + ` FROM obj_description(c.oid, 'pg_class') txt))`
 
 // schemasSQL lists the first $1 schemas and counts them all.
 const schemasSQL = `
@@ -50,7 +56,7 @@ SELECT json_build_object(
 	'Schemas', coalesce(json_agg(json_build_object(
 			'Name', n.nspname,
 			'Relations', (SELECT count(*) FROM pg_class c WHERE c.relnamespace = n.oid AND ` + listed + `),
-			'Comment', obj_description(n.oid, 'pg_namespace'))
+			'Comment', (SELECT ` + clipped + ` FROM obj_description(n.oid, 'pg_namespace') txt))
 		ORDER BY n.nspname), '[]'),
 	'Total', (SELECT count(*) FROM pg_namespace n WHERE ` + userSchema + `))
 FROM (SELECT n.oid, n.nspname FROM pg_namespace n WHERE ` + userSchema + ` ORDER BY n.nspname LIMIT $1) n`
@@ -84,7 +90,7 @@ const columnsSQL = `SELECT json_agg(json_build_object(
 		END,
 		'EnumValues', (SELECT json_agg(e.enumlabel ORDER BY e.enumsortorder)
 			FROM pg_enum e WHERE e.enumtypid IN (t.oid, t.typelem)),
-		'Comment', col_description(c.oid, a.attnum))
+		'Comment', (SELECT ` + clipped + ` FROM col_description(c.oid, a.attnum) txt))
 	ORDER BY a.attnum)
 	FROM pg_attribute a
 	JOIN pg_type t ON t.oid = a.atttypid
