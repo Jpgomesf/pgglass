@@ -162,6 +162,48 @@ func TestNestedLoopOverManyRowsIsFlagged(t *testing.T) {
 	}
 }
 
+// A Limit stops the seq scan after 10 rows: the scan costs what the Limit
+// reads of it, and nothing is flagged; nor is a join under the Limit.
+func TestALimitStopsTheScanEarly(t *testing.T) {
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
+	const sql = "SELECT id FROM app.events LIMIT 10"
+	summaryOf(t, q, sql, false,
+		`total cost `+cost+`, ~10 rows`,
+		`top nodes by own cost:`,
+		`  Seq Scan on app\.events: cost `+cost+`, ~10 rows`,
+		`  Limit: cost 0, ~10 rows`,
+		`flags: none`)
+	summaryOf(t, q, sql, true,
+		`total cost `+cost+`, `+ms+`, 10 rows, \d+ buffers hit, \d+ read`,
+		`top nodes by own time:`,
+		`  (Seq Scan on app\.events|Limit): `+ms+`, 10 rows`,
+		`  (Seq Scan on app\.events|Limit): `+ms+`, 10 rows`,
+		`flags: none`)
+
+	const join = "SELECT e.id, c.email FROM app.events e JOIN app.customers c ON c.id = (e.payload->>'customer')::uuid LIMIT 10"
+	for _, analyze := range []bool{false, true} {
+		if got, err := run(t, q, join, analyze); err != nil || !strings.HasSuffix(got, "\nflags: none") {
+			t.Errorf("%s (analyze %v): %v\n%s", join, analyze, err, got)
+		}
+	}
+}
+
+// A Limit does not hide a scan that reads the whole relation: one that finds
+// no row to return, one under a sort, which reads every row before the Limit
+// stops it, and one that the offset makes read 15010 rows.
+func TestALimitStillFlagsAFullScan(t *testing.T) {
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
+	for _, sql := range []string{
+		"SELECT id FROM app.events WHERE kind = 'none' LIMIT 10",
+		"SELECT id FROM app.events ORDER BY payload LIMIT 10",
+		"SELECT id FROM app.events OFFSET 15000 LIMIT 10",
+	} {
+		for _, analyze := range []bool{false, true} {
+			wantFlags(t, flagsOf(t, q, sql, analyze), `Seq Scan on app\.events: full scan of ~20000 rows`)
+		}
+	}
+}
+
 // Neither a lookup by primary key nor a seq scan of a small table is
 // flagged.
 func TestSmallAndIndexedScansAreNotFlagged(t *testing.T) {

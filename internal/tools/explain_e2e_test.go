@@ -124,6 +124,34 @@ flags: none`},
 	}
 }
 
+// Under a LIMIT, the seq scan stops after 10 rows: it costs what the Limit
+// reads of it, and nothing is flagged, with or without analyze.
+func TestExplainUnderALimit(t *testing.T) {
+	t.Parallel()
+	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
+	const sql = "SELECT id FROM events LIMIT 10"
+	for _, tc := range []struct {
+		args map[string]any
+		want string
+	}{
+		{args("clean", sql), `total cost [0-9.]+, ~10 rows
+top nodes by own cost:
+  Seq Scan on app\.events: cost [0-9.]+, ~10 rows
+  Limit: cost 0, ~10 rows
+flags: none`},
+		{args("clean", sql, "analyze", true), `total cost [0-9.]+, [0-9.]+ ms, 10 rows, \d+ buffers hit, \d+ read
+top nodes by own time:
+  (Seq Scan on app\.events|Limit): [0-9.]+ ms, 10 rows
+  (Seq Scan on app\.events|Limit): [0-9.]+ ms, 10 rows
+flags: none`},
+	} {
+		got := s.ok(t, "pg_explain", tc.args)
+		if !regexp.MustCompile(`^` + tc.want + `$`).MatchString(got) {
+			t.Errorf("%v:\n%s\nwant it to match\n%s", tc.args, got, tc.want)
+		}
+	}
+}
+
 // A summary over the inline limit is saved to a file, one line per row: here
 // 250 subqueries, each scanning app.events, which EXPLAIN tells apart by
 // alias.

@@ -31,23 +31,29 @@ type plan struct {
 // values come with ANALYZE; time and rows are averages over Loops.
 type node struct {
 	Type          string  `json:"Node Type"`
+	Strategy      string  `json:"Strategy"` // of an aggregate or set operation: "Plain", "Sorted", "Hashed", "Mixed"
 	ParallelAware bool    `json:"Parallel Aware"`
 	Parent        string  `json:"Parent Relationship"` // "Outer", "Inner", "SubPlan", ...
 	Index         string  `json:"Index Name"`
 	Schema        string  `json:"Schema"` // with VERBOSE only
 	Relation      string  `json:"Relation Name"`
 	Alias         string  `json:"Alias"`
+	StartupCost   float64 `json:"Startup Cost"`
 	TotalCost     float64 `json:"Total Cost"`
 	PlanRows      float64 `json:"Plan Rows"`
 	ActualTime    float64 `json:"Actual Total Time"` // ms
 	ActualRows    float64 `json:"Actual Rows"`
 	Loops         float64 `json:"Actual Loops"`
+	Filtered      float64 `json:"Rows Removed by Filter"`
 	HashBatches   float64 `json:"Hash Batches"`
 	SharedHit     float64 `json:"Shared Hit Blocks"` // this node and its children
 	SharedRead    float64 `json:"Shared Read Blocks"`
 	disk                  // the node's own, or the leader's under Gather
 	Workers       []disk  `json:"Workers"` // each parallel worker's
 	Plans         []node  `json:"Plans"`
+	// share is the part of its run the plan expects n to do: 1, or less when
+	// a Limit above stops it early. parse sets it.
+	share float64
 }
 
 // disk is what a sort or a hash aggregate reports about its use of disk.
@@ -77,7 +83,60 @@ func parse(doc string) (*plan, error) {
 	if len(plans) != 1 {
 		return nil, fmt.Errorf("read the plan: got %d plans, want 1", len(plans))
 	}
+	plans[0].Root.setShare(1)
 	return &plans[0], nil
+}
+
+// setShare sets the part of its run the plan expects n to do, and that of
+// each node under it. A Limit reads its input only as far as the rows it
+// skips and returns, and a node passes its own share on to the children it
+// reads as its parent asks for rows.
+func (n *node) setShare(share float64) {
+	n.share = share
+	for i := range n.Plans {
+		c := &n.Plans[i]
+		switch {
+		case !n.streams(c):
+			c.setShare(1)
+		case n.Type == "Limit":
+			c.setShare(share * n.limitShare(c))
+		default:
+			c.setShare(share)
+		}
+	}
+}
+
+// streams reports whether n reads its child c only as far as its own output
+// needs. It does not when n reads all of c before returning a row, as a
+// sort, a hash, a plain or hashed aggregate or set operation and a bitmap
+// heap scan do, nor when c is the inner side of a nested loop or hash join,
+// which runs in full, or a subplan.
+func (n *node) streams(c *node) bool {
+	switch {
+	case n.Type == "Sort", n.Type == "Hash", n.Type == "Bitmap Heap Scan", n.Strategy != "" && n.Strategy != "Sorted":
+		return false
+	case c.Parent == "Inner":
+		return n.Type == "Merge Join"
+	default:
+		return c.Parent != "InitPlan" && c.Parent != "SubPlan"
+	}
+}
+
+// limitShare is the part of its input c that Limit n reads, as the planner
+// costs n: the rows it skips, whose cost is what n's startup cost adds to
+// c's and to its initplans', then the rows it returns.
+func (n *node) limitShare(c *node) float64 {
+	share := n.PlanRows / max(c.PlanRows, 1)
+	if run := c.TotalCost - c.StartupCost; run > 0 {
+		skipped := n.StartupCost - c.StartupCost
+		for i := range n.Plans {
+			if n.Plans[i].Parent == "InitPlan" {
+				skipped -= n.Plans[i].TotalCost
+			}
+		}
+		share += max(skipped, 0) / run
+	}
+	return min(share, 1)
 }
 
 // seqScans returns the relations p scans sequentially, each once.
@@ -160,20 +219,21 @@ func (n *node) own(analyzed bool) float64 {
 }
 
 // total is the time n took over all its loops with ANALYZE, otherwise its
-// total cost; either includes its children's.
+// cost: its startup cost and its share of the rest, as the planner costs a
+// Limit above it. Either includes its children's.
 func (n *node) total(analyzed bool) float64 {
 	if analyzed {
 		return n.ActualTime * n.Loops
 	}
-	return n.TotalCost
+	return n.TotalCost - (1-n.share)*(n.TotalCost-n.StartupCost)
 }
 
-// measure is what the ranking shows of n: its own cost and estimated rows,
-// or with ANALYZE its own time and the rows of each loop.
+// measure is what the ranking shows of n: its own cost and its share of the
+// estimated rows, or with ANALYZE its own time and the rows of each loop.
 func (n *node) measure(analyzed bool) string {
 	switch {
 	case !analyzed:
-		return "cost " + num(n.own(false), 2) + ", ~" + rows(n.PlanRows)
+		return "cost " + num(n.own(false), 2) + ", ~" + rows(n.PlanRows*n.share)
 	case n.Loops == 0:
 		return "never executed"
 	case n.Loops == 1:
@@ -184,15 +244,16 @@ func (n *node) measure(analyzed bool) string {
 }
 
 // flags returns what is worth a look in n: an estimate off by more than
-// missFactor, a seq scan of a relation of over largeRows rows, a sort or
-// hash that spilled to disk, and a nested loop whose outer side returns
-// over largeRows rows.
+// missFactor, a seq scan that reads over largeRows rows of a relation of
+// over largeRows, a sort or hash that spilled to disk, and a nested loop
+// whose outer side returns over largeRows rows. A node that a Limit stops
+// early returns fewer rows than planned, which is no misestimate.
 func (n *node) flags(analyzed bool, reltuples map[relation]float64) []string {
 	var flags []string
-	if analyzed && n.Loops > 0 && missed(n.ActualRows, n.PlanRows) {
+	if analyzed && n.Loops > 0 && missed(n.ActualRows, n.PlanRows, n.share < 1) {
 		flags = append(flags, rows(n.ActualRows)+", planned "+num(n.PlanRows, 0))
 	}
-	if size := reltuples[n.relation()]; n.Type == "Seq Scan" && size > largeRows {
+	if size := reltuples[n.relation()]; n.Type == "Seq Scan" && size > largeRows && n.read(analyzed, size) > largeRows {
 		flags = append(flags, "full scan of ~"+rows(size))
 	}
 	if spill := n.spilled(); spill != "" {
@@ -207,11 +268,21 @@ func (n *node) flags(analyzed bool, reltuples map[relation]float64) []string {
 }
 
 // missed reports whether actual rows are more than missFactor times the
-// planned ones, or less than a missFactor-th of them. Fewer than one row
-// counts as one.
-func missed(actual, planned float64) bool {
+// planned ones or, unless a Limit stops the node early, less than a
+// missFactor-th of them. Fewer than one row counts as one.
+func missed(actual, planned float64, limited bool) bool {
 	a, p := max(actual, 1), max(planned, 1)
-	return a > p*missFactor || p > a*missFactor
+	return a > p*missFactor || (!limited && p > a*missFactor)
+}
+
+// read is how many rows seq scan n reads of its relation of size rows: with
+// ANALYZE, those it returned and those its filter removed, both per loop,
+// over all its loops; otherwise its share of the relation.
+func (n *node) read(analyzed bool, size float64) float64 {
+	if analyzed {
+		return (n.ActualRows + n.Filtered) * n.Loops
+	}
+	return size * n.share
 }
 
 // spilled describes how n, or one of its parallel workers, spilled to disk:
@@ -233,14 +304,14 @@ func (n *node) spilled() string {
 }
 
 // outerRows is how many rows the outer side of n returns: with ANALYZE the
-// actual ones over all its loops, otherwise the estimate.
+// actual ones over all its loops, otherwise its share of the estimate.
 func (n *node) outerRows(analyzed bool) float64 {
 	for i := range n.Plans {
 		if outer := &n.Plans[i]; outer.Parent == "Outer" {
 			if analyzed {
 				return outer.ActualRows * outer.Loops
 			}
-			return outer.PlanRows
+			return outer.PlanRows * outer.share
 		}
 	}
 	return 0

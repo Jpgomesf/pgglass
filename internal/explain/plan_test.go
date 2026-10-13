@@ -1,6 +1,8 @@
 package explain
 
 import (
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"slices"
@@ -21,6 +23,12 @@ import (
 //   - analyze_parallel.json, parallel_setup_cost, parallel_tuple_cost and
 //     min_parallel_table_scan_size 0, enable_hashjoin and enable_mergejoin off:
 //     SELECT e.kind, count(*) FROM app.events e JOIN app.customers c ON c.id = (e.payload->>'customer')::uuid GROUP BY e.kind
+//   - limit.json and analyze_limit.json:
+//     SELECT id FROM app.events LIMIT 10
+//   - analyze_limit_sort.json:
+//     SELECT id FROM app.events ORDER BY payload LIMIT 10
+//   - limit_nested.json, enable_hashjoin and enable_mergejoin off:
+//     SELECT e.id, c.email FROM app.events e JOIN app.customers c ON c.id = (e.payload->>'customer')::uuid LIMIT 10
 
 // fixtureSizes are the reltuples of the app fixture's relations.
 var fixtureSizes = map[relation]float64{{"app", "events"}: 20000, {"app", "customers"}: 50}
@@ -85,6 +93,36 @@ top nodes by own time:
 flags:
   Nested Loop: outer side of 20001 rows, each running the inner side
   Parallel Seq Scan on app.events e: full scan of ~20000 rows`},
+		// The Limit stops the scan after 10 of its 20000 rows: the scan costs
+		// what the Limit reads of it, 0.26 of 528, and is not flagged.
+		{"limit", `total cost 0.26, ~10 rows
+top nodes by own cost:
+  Seq Scan on app.events: cost 0.26, ~10 rows
+  Limit: cost 0, ~10 rows
+flags: none`},
+		{"analyze_limit", `total cost 0.26, 0.022 ms, 10 rows, 2 buffers hit, 0 read
+top nodes by own time:
+  Seq Scan on app.events: 0.013 ms, 10 rows
+  Limit: 0.002 ms, 10 rows
+flags: none`},
+		// The sort reads every row before the Limit stops it: the scan under
+		// it is flagged, and the sort's 10 rows are no misestimate.
+		{"analyze_limit_sort", `total cost 960.22, 4.806 ms, 10 rows, 333 buffers hit, 0 read
+top nodes by own time:
+  Sort: 3.255 ms, 10 rows
+  Seq Scan on app.events: 1.539 ms, 20000 rows
+  Limit: 0.002 ms, 10 rows
+flags:
+  Seq Scan on app.events: full scan of ~20000 rows`},
+		// The Limit stops the nested loop after 10 of its 5000 rows, so after
+		// 40 of the 20000 outer ones; the inner side still costs per loop.
+		{"limit_nested", `total cost 7.83, ~10 rows
+top nodes by own cost:
+  Nested Loop: cost 6.61, ~10 rows
+  Seq Scan on app.events e: cost 1.06, ~40 rows
+  Index Scan using customers_pkey on app.customers c: cost 0.17, ~1 row
+  Limit: cost 0, ~10 rows
+flags: none`},
 	} {
 		if got := fixture(t, tc.fixture).summary(fixtureSizes); got != tc.want {
 			t.Errorf("%s:\n%s\nwant\n%s", tc.fixture, got, tc.want)
@@ -147,6 +185,20 @@ func TestFlags(t *testing.T) {
 			[]string{"full scan of ~10001 rows"}},
 		{"seq scan of 10k rows", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "edge"}`, false, nil},
 		{"seq scan never analyzed", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "fresh"}`, false, nil},
+		// With ANALYZE, what a seq scan read: the rows it returned and those
+		// its filter removed, both per loop.
+		{"seq scan that read 10 rows", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "big",
+			"Plan Rows": 10, "Actual Rows": 10, "Actual Loops": 1}`, true, nil},
+		{"seq scan that filtered out 10k rows", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "big",
+			"Plan Rows": 1, "Actual Rows": 1, "Rows Removed by Filter": 10000, "Actual Loops": 1}`, true,
+			[]string{"full scan of ~10001 rows"}},
+		{"seq scan that read 10k rows in 2 loops", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "big",
+			"Plan Rows": 1, "Actual Rows": 1, "Rows Removed by Filter": 4999, "Actual Loops": 2}`, true, nil},
+		{"parallel seq scan that read over 10k rows in 3 loops", `{"Node Type": "Seq Scan", "Parallel Aware": true, "Schema": "s", "Relation Name": "big",
+			"Plan Rows": 1, "Actual Rows": 0, "Rows Removed by Filter": 3334, "Actual Loops": 3}`, true,
+			[]string{"full scan of ~10001 rows"}},
+		{"seq scan never executed", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "big",
+			"Plan Rows": 1, "Actual Rows": 0, "Actual Loops": 0}`, true, nil},
 		{"index scan of a big relation", `{"Node Type": "Index Scan", "Schema": "s", "Relation Name": "big"}`, false, nil},
 		{"11 times the estimate", `{"Node Type": "Result", "Plan Rows": 1, "Actual Rows": 11, "Actual Loops": 1}`, true,
 			[]string{"11 rows, planned 1"}},
@@ -173,6 +225,106 @@ func TestFlags(t *testing.T) {
 			{"Node Type": "Index Scan", "Parent Relationship": "Inner", "Plan Rows": 10001}]}`, false, nil},
 	} {
 		if got := parseNode(t, tc.node).flags(tc.analyzed, sizes); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: flags = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// planNode is the JSON of a plan node: fields, then its costs, rows and
+// children.
+func planNode(fields string, startup, total, rows float64, children ...string) string {
+	return fmt.Sprintf(`{%s, "Startup Cost": %v, "Total Cost": %v, "Plan Rows": %v, "Plans": [%s]}`,
+		fields, startup, total, rows, strings.Join(children, ", "))
+}
+
+// A Limit reads its input as far as the rows it skips and returns, and so
+// does each node that passes it rows as it asks for them. The plans are
+// PostgreSQL 17's on the app fixture, cut to the fields that matter.
+func TestShare(t *testing.T) {
+	limit := func(startup, total, rows float64, children ...string) string {
+		return planNode(`"Node Type": "Limit"`, startup, total, rows, children...)
+	}
+	outer := func(fields string, startup, total, rows float64, children ...string) string {
+		return planNode(fields+`, "Parent Relationship": "Outer"`, startup, total, rows, children...)
+	}
+	scan := outer(`"Node Type": "Seq Scan"`, 0, 528, 20000)
+	for _, tc := range []struct {
+		name, plan string
+		want       []float64
+	}{
+		{"LIMIT 10", limit(0, 0.26, 10, scan), []float64{1, 0.0005}},
+		{"OFFSET 15000 LIMIT 10", limit(396, 396.26, 10, scan), []float64{1, 0.7505}},
+		{"a LIMIT over fewer rows", limit(0, 578, 1, outer(`"Node Type": "Seq Scan"`, 0, 578, 1)), []float64{1, 1}},
+		{"nested limits", limit(0, 0.26, 10, outer(`"Node Type": "Limit"`, 0, 2.64, 100, scan)), []float64{1, 0.1, 0.0005}},
+		// The Limit's startup cost holds its initplans', which run in full.
+		{"an initplan", limit(578.01, 578.95, 10,
+			planNode(`"Node Type": "Aggregate", "Strategy": "Plain", "Parent Relationship": "InitPlan"`, 578, 578.01, 1, scan),
+			outer(`"Node Type": "Seq Scan"`, 0, 628, 6667)), []float64{1, 1, 1, 10.0 / 6667}},
+		{"a CTE", limit(528, 528.2, 10,
+			planNode(`"Node Type": "Seq Scan", "Parent Relationship": "InitPlan"`, 0, 528, 20000),
+			outer(`"Node Type": "CTE Scan"`, 0, 400, 20000)), []float64{1, 1, 0.0005}},
+		{"a sort", limit(960.19, 960.22, 10, outer(`"Node Type": "Sort"`, 960.19, 1010.19, 20000, scan)), []float64{1, 0.0005, 1}},
+		{"a sorted aggregate", limit(0.29, 0.87, 10,
+			outer(`"Node Type": "Aggregate", "Strategy": "Sorted"`, 0.29, 1159.29, 20000,
+				outer(`"Node Type": "Index Only Scan"`, 0.29, 859.29, 20000))), []float64{1, 0.0005, 0.0005}},
+		{"a hashed set operation", limit(0, 0.77, 10,
+			outer(`"Node Type": "SetOp", "Strategy": "Hashed"`, 0, 1543.5, 20000,
+				outer(`"Node Type": "Append"`, 0, 1481, 25000))), []float64{1, 0.0005, 1}},
+		{"a bitmap heap scan", limit(99.03, 99.81, 10,
+			outer(`"Node Type": "Bitmap Heap Scan"`, 99.03, 489.52, 4999,
+				outer(`"Node Type": "Bitmap Index Scan"`, 0, 97.78, 4999))), []float64{1, 10.0 / 4999, 1}},
+		{"a hash join", limit(3.12, 4.3, 10,
+			outer(`"Node Type": "Hash Join"`, 3.12, 592.58, 5000, scan,
+				planNode(`"Node Type": "Hash", "Parent Relationship": "Inner"`, 2.5, 2.5, 50,
+					outer(`"Node Type": "Seq Scan"`, 0, 2.5, 50)))), []float64{1, 0.002, 0.002, 1, 1}},
+		{"a nested loop", limit(0.15, 7.83, 10,
+			outer(`"Node Type": "Nested Loop"`, 0.15, 3842.28, 5000, scan,
+				planNode(`"Node Type": "Index Scan", "Parent Relationship": "Inner"`, 0.15, 0.17, 1))), []float64{1, 0.002, 0.002, 1}},
+		{"a merge join", limit(0.57, 1.58, 10,
+			outer(`"Node Type": "Merge Join"`, 0.57, 2018.58, 20000,
+				outer(`"Node Type": "Index Only Scan"`, 0.29, 859.29, 20000),
+				planNode(`"Node Type": "Index Only Scan", "Parent Relationship": "Inner"`, 0.29, 859.29, 20000))),
+			[]float64{1, 0.0005, 0.0005, 0.0005}},
+		{"a subplan", limit(0, 30.26, 10,
+			outer(`"Node Type": "Seq Scan"`, 0, 60528, 20000,
+				planNode(`"Node Type": "Seq Scan", "Parent Relationship": "SubPlan"`, 0, 3, 1))), []float64{1, 0.0005, 1}},
+	} {
+		var got []float64
+		for _, n := range parseNode(t, tc.plan).all() {
+			got = append(got, n.share)
+		}
+		if !slices.EqualFunc(got, tc.want, func(a, b float64) bool { return math.Abs(a-b) < 1e-12 }) {
+			t.Errorf("%s: shares = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+// What a Limit stops early returns fewer rows than planned, which is no
+// misestimate, and a seq scan it stops reads only part of its relation.
+func TestFlagsUnderALimit(t *testing.T) {
+	sizes := map[relation]float64{{"s", "big"}: 20000}
+	const scan = `"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "big", "Plan Rows": 20000`
+	for _, tc := range []struct {
+		name     string
+		node     string
+		share    float64
+		analyzed bool
+		want     []string
+	}{
+		{"seq scan of 10 planned rows", `{` + scan + `}`, 0.0005, false, nil},
+		{"seq scan of 15010 planned rows", `{` + scan + `}`, 0.7505, false, []string{"full scan of ~20000 rows"}},
+		{"seq scan that returned 10 rows", `{` + scan + `, "Actual Rows": 10, "Actual Loops": 1}`, 0.0005, true, nil},
+		{"seq scan that read every row and returned none", `{` + scan + `, "Actual Rows": 0, "Rows Removed by Filter": 20000, "Actual Loops": 1}`,
+			0.0005, true, []string{"full scan of ~20000 rows"}},
+		{"more rows than planned", `{"Node Type": "Index Scan", "Plan Rows": 1, "Actual Rows": 11, "Actual Loops": 1}`, 0.5, true,
+			[]string{"11 rows, planned 1"}},
+		{"nested loop of 40 planned outer rows", `{"Node Type": "Nested Loop", "Plans": [
+			{"Node Type": "Seq Scan", "Parent Relationship": "Outer", "Plan Rows": 20000},
+			{"Node Type": "Index Scan", "Parent Relationship": "Inner", "Plan Rows": 1}]}`, 0.002, false, nil},
+	} {
+		n := parseNode(t, tc.node)
+		n.setShare(tc.share)
+		if got := n.flags(tc.analyzed, sizes); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: flags = %q, want %q", tc.name, got, tc.want)
 		}
 	}
