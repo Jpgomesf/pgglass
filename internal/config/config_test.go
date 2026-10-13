@@ -250,15 +250,18 @@ func TestValidateRejectsUnsetValues(t *testing.T) {
 	}
 }
 
-func TestLoadReadsConfigFromWorkingDirectory(t *testing.T) {
-	dir := t.TempDir()
-	doc := `{"defaults": {"max_rows": 10}, "connections": {"db": {"source": "env", "dsn_env_var": "X"}}}`
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(doc), 0o600); err != nil {
+func writeConfig(t *testing.T, doc string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pgglass.json")
+	if err := os.WriteFile(path, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Chdir(dir)
+	return path
+}
 
-	cfg, err := Load()
+func TestLoadReadsTheFileAtPath(t *testing.T) {
+	path := writeConfig(t, `{"defaults": {"max_rows": 10}, "connections": {"db": {"source": "env", "dsn_env_var": "X"}}}`)
+	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
@@ -271,21 +274,22 @@ func TestLoadReadsConfigFromWorkingDirectory(t *testing.T) {
 }
 
 func TestLoadValidates(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"defaults": {"format": "xml"}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(dir)
-
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "defaults.format") {
+	path := writeConfig(t, `{"defaults": {"format": "xml"}}`)
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "defaults.format") {
 		t.Errorf("Load error = %v, want a format validation error", err)
 	}
 }
 
-func TestLoadFailsWithoutConfigFile(t *testing.T) {
+// Load reads the file it is given and nothing else: a config.json in the
+// working directory, which it used to fall back to, is ignored.
+func TestLoadReadsNoOtherFile(t *testing.T) {
 	t.Chdir(t.TempDir())
-	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "read config.json") {
-		t.Errorf("Load error = %v, want a read error", err)
+	if err := os.WriteFile("config.json", []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "config.json")
+	if _, err := Load(missing); err == nil || !strings.Contains(err.Error(), "read config: open "+missing) {
+		t.Errorf("Load error = %v, want a read error naming %s", err, missing)
 	}
 }
 

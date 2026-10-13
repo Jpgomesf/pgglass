@@ -92,7 +92,10 @@ No changes to `resolver.go`, `main.go`, or any other source files should be need
 ## Project Structure
 
 ```
-├── main.go                              # entrypoint and wiring
+├── main.go                              # entrypoint: flags and commands
+├── serve.go                             # wiring, and serving over stdio
+├── http.go                              # serving over Streamable HTTP: token, origins, shutdown
+├── doctor.go                            # pgglass doctor
 ├── config.json                          # example configuration
 ├── internal/
 │   ├── config/                          # types, constants, config loader

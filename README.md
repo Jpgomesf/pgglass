@@ -21,7 +21,7 @@ pgglass is an [MCP](https://modelcontextprotocol.io) server that gives AI agents
 | `pg_diff_schema` | Compare one schema on two connections: relations, view queries, columns, constraints, indexes and RLS policies |
 | `pg_health` | Check a server: connections, long-running and blocked sessions, cache hit ratio, dead rows, unused indexes, transaction ID wraparound and replica lag |
 
-Calls run in parallel, across connections and on the same one. Each tool has a display title, and on connecting the server gives the agent short instructions on using the tools well. It speaks MCP revisions 2024-11-05 to 2026-07-28 and settles on the newest the client speaks too. See the [usage guide](docs/usage.md).
+Calls run in parallel, across connections and on the same one. Each tool has a display title, and on connecting the server gives the agent short instructions on using the tools well. It serves over stdio, or over Streamable HTTP with `--http`, speaks MCP revisions 2024-11-05 to 2026-07-28 and settles on the newest the client speaks too. See the [usage guide](docs/usage.md).
 
 ## Install
 
@@ -39,7 +39,7 @@ Download the binary for your platform from [Releases](https://github.com/Jpgomes
 
 ## Configure
 
-Put the binary in a directory of its own, such as `~/.config/pgglass`, and create `config.json` next to it:
+Create `~/.config/pgglass/config.json`, or pass another file with `--config`:
 
 ```json
 {
@@ -56,26 +56,37 @@ Put the binary in a directory of its own, such as `~/.config/pgglass`, and creat
 }
 ```
 
-Credentials come from `direct`, `env`, `dotenv` or `aws_secrets_manager`. See [Configuration](docs/configuration.md) for every setting.
+Credentials come from `direct`, `env`, `dotenv` or `aws_secrets_manager`. See [Configuration](docs/configuration.md) for every setting. Then check the config and each connection's role:
+
+```
+$ pgglass doctor
+config /home/me/.config/pgglass/config.json (role_check strict)
+ok my-db: role readonly_user: no findings
+0 failed, 1 passed
+```
+
+It exits 1 when a connection's credentials do not resolve, its server does not answer, or its role has a way out of the read-only transaction (see [Doctor](docs/configuration.md#doctor)).
 
 ## Add to Claude Code
 
-```json
-{
-  "mcpServers": {
-    "pgglass": {
-      "type": "stdio",
-      "command": "/path/to/pgglass"
-    }
-  }
-}
+Over stdio, Claude Code starts the server itself:
+
+```bash
+claude mcp add --transport stdio --scope user pgglass -- /path/to/pgglass
 ```
 
-Add to `~/.claude.json` (every project) or to `.mcp.json` at the root of a project.
+Put `--config /path/to/config.json` after the binary for a config file elsewhere. Over Streamable HTTP, start the server, then add its URL:
+
+```bash
+pgglass --http :8411
+claude mcp add --transport http --scope user pgglass http://127.0.0.1:8411/mcp
+```
+
+`--scope user` adds the server to every project; leave it out for the current project alone, or use `--scope project` to share it in the project's `.mcp.json`. Other MCP clients take the same command or URL. To serve beyond this machine, with a bearer token, see [Streamable HTTP](docs/configuration.md#streamable-http).
 
 ## Upgrading from mcp-postgres
 
-pgglass was called mcp-postgres; its tools and `config.json` format are unchanged. Move `~/.config/mcp-postgres` to `~/.config/pgglass`, replace the `mcp-postgres` binary in it with `pgglass`, and update any path in `config.json` that names the old directory, such as a `dotenv_path`. Then rename the server to `pgglass` in your MCP client and point its `command` at the new binary: in Claude Code, tool permissions such as `mcp__mcp-postgres__pg_query` become `mcp__pgglass__pg_query`. Spill files now go to `pgglass` under the user cache directory, so the old `mcp-postgres` one can be deleted.
+pgglass was called mcp-postgres; its tools and `config.json` format are unchanged. Move `~/.config/mcp-postgres` to `~/.config/pgglass`, replace the `mcp-postgres` binary in it with `pgglass`, and update any path in `config.json` that names the old directory, such as a `dotenv_path`. pgglass reads `~/.config/pgglass/config.json`, or the file `--config` names, never a `config.json` next to the binary or in the working directory. Then rename the server to `pgglass` in your MCP client and point its `command` at the new binary: in Claude Code, tool permissions such as `mcp__mcp-postgres__pg_query` become `mcp__pgglass__pg_query`. Spill files now go to `pgglass` under the user cache directory, so the old `mcp-postgres` one can be deleted.
 
 ## Safety model
 
@@ -87,6 +98,7 @@ The calling agent is treated as untrusted: instructions can reach it through the
 4. **Every statement runs read-only and is rolled back.** Each one runs alone, over the extended protocol, in a `READ ONLY` transaction that is always rolled back, with `statement_timeout` and `lock_timeout` set for that transaction only. Neither stops a C function that writes in place, such as `pg_log_standby_snapshot`'s WAL record, pg_surgery's `heap_force_kill` or `brin_summarize_new_values`, nor one that takes a transaction id for good, such as `txid_current`, or changes session state past the rollback, such as `setseed`'s seed for `random()`: the parser denies those by name. Sessions start with `default_transaction_read_only=on`, which no DSN can turn off, and `client_encoding=UTF8`; behind PgBouncer, listing the former in `ignore_startup_parameters` drops it (see [PgBouncer](docs/configuration.md#pgbouncer)), and the `READ ONLY` transaction alone remains. `standard_conforming_strings` is forced on, so Postgres reads the SQL exactly as the parser did.
 5. **Results are bounded.** Rows past `max_rows` or `max_bytes` are not kept, and the rest of the query is cancelled on the server; `max_bytes` counts each value's length plus 24 bytes, so empty and NULL values count too. A single server message larger than `max_bytes` plus 1 MiB is refused unread and resets the connection: once the columns are described, the result is truncated there; before, the query fails. A result whose output would exceed 10 KB is written to a private CSV file (mode 0600) in `pgglass` under your user cache directory or, without one, in `pgglass-<uid>` in the temp directory, which must be yours alone (mode 0700), and summarized. No response exceeds 10 KB, errors and the role check's findings included: the findings take at most half, and an error too long for the rest is cut in the middle. `pg_schema` reads at most 500 schemas or relations per listing from the catalog, and at most 200 characters of each comment; its output past 10 KB is cut at a line, with a note that counts them all. `pg_diff_schema` reads each side's schema as one catalog value, which `max_bytes` bounds too: the default 1 MiB holds about 1,600 tables of 7 columns, and a larger schema fails, naming its side, until `max_bytes` is raised.
 6. **Calls are audited.** Each tool call writes one JSON line to stderr, one per connection when `pg_query` fans out: tool, connection (`left,right` for `pg_diff_schema`), SQL hash and length, duration, rows, outcome and SQLSTATE. SQL text, parameters and values are never logged.
+7. **HTTP stays on this machine unless told otherwise.** `--http` listens on loopback by default, where any local process can call it. Any other address needs a bearer token, `PGGLASS_HTTP_TOKEN`, that every request must then carry; set it on loopback too on a machine others use. A request from a web page on another origin, or to a loopback address under another host name (DNS rebinding), is refused, so a site open in a browser cannot call the tools.
 
 What these layers do not cover:
 
@@ -94,13 +106,14 @@ What these layers do not cover:
 - Reading is the point: whatever the role can `SELECT`, the agent can read and repeat. That includes what Postgres shows the role about the server: superusers and members of `pg_read_all_settings` read every setting, `primary_conninfo` and `archive_command` included (`SHOW`, `current_setting`, `pg_settings`); superusers and members of `pg_read_all_stats` read other sessions' SQL (`pg_stat_activity`, `pg_stat_statements`); superusers read large objects (`pg_largeobject`).
 - A superuser connection has no role boundary. The role check flags it as critical, so `strict` refuses it; under `warn`, the parser and the read-only transaction are all that stand between the agent and the server's files and programs, and against functions that write in place, such as pg_surgery's, the parser's denylist alone. The denied catalogs are not the only place secrets show either: column statistics in `pg_stats` can hold password verifiers. Use `strict`, or a role that is not a superuser.
 - A query may use the database's CPU and I/O, and hold `ACCESS SHARE` locks that delay DDL, until `statement_timeout` ends it.
+- `--http` serves plain HTTP. To reach it from elsewhere, put a proxy that terminates TLS in front of it, and set `PGGLASS_HTTP_TOKEN` even when pgglass listens on loopback behind the proxy, whose requests it cannot tell from local ones.
 
 ## Documentation
 
 | Doc | Description |
 |-----|-------------|
 | [Usage Guide](docs/usage.md) | Tools, arguments, formats, large results, errors |
-| [Configuration](docs/configuration.md) | Credential sources, connection options, defaults, PgBouncer |
+| [Configuration](docs/configuration.md) | Credential sources, connection options, defaults, PgBouncer, command line, doctor, Streamable HTTP |
 | [Extending](docs/extending.md) | How to add custom credential sources (Vault, GCP, etc.) |
 | [Contributing](CONTRIBUTING.md) | Branch strategy, commit conventions, development workflow |
 
