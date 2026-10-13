@@ -132,7 +132,7 @@ func TestHelpPrintsTheUsage(t *testing.T) {
 			t.Errorf("%s = %d, %q, %q; want 0 and the usage", flag, code, out, errOut)
 		}
 	}
-	for _, want := range []string{"--config FILE", "~/.config/pgglass/config.json", "doctor", "--version"} {
+	for _, want := range []string{"--config FILE", "~/.config/pgglass/config.json", "--http ADDR", "PGGLASS_HTTP_TOKEN", "doctor", "--version"} {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage does not mention %s", want)
 		}
@@ -146,9 +146,11 @@ func TestMisuseExitsWithCode2(t *testing.T) {
 	}{
 		{[]string{"--nope"}, "flag provided but not defined: -nope"},
 		{[]string{"--config"}, "flag needs an argument: -config"},
+		{[]string{"--http"}, "flag needs an argument: -http"},
 		{[]string{"serve"}, `unexpected argument "serve"`},
 		{[]string{"doctor", "extra"}, `unexpected argument "extra"`},
 		{[]string{"doctor", "--nope"}, "flag provided but not defined: -nope"},
+		{[]string{"doctor", "--http", ":8411"}, "doctor serves nothing: drop --http"},
 	} {
 		code, out, errOut := runCommand(t, tc.args...)
 		if code != 2 || out != "" || errOut != "pgglass: "+tc.want+"\n\n"+usage {
@@ -159,6 +161,7 @@ func TestMisuseExitsWithCode2(t *testing.T) {
 
 func TestServeLogsWhyItCannotStart(t *testing.T) {
 	isolateHome(t)
+	t.Setenv(authEnv, "")
 	missing := filepath.Join(t.TempDir(), "missing.json")
 	unknown := writeConfig(t, connections(map[string]any{"db": map[string]any{"source": "vault"}}))
 	for _, tc := range []struct {
@@ -167,6 +170,7 @@ func TestServeLogsWhyItCannotStart(t *testing.T) {
 	}{
 		{[]string{"--config", missing}, "read config: open " + missing},
 		{[]string{"--config", unknown}, `connection "db": unknown source "vault"`},
+		{[]string{"--config", unknown, "--http", "0.0.0.0:8411"}, "set PGGLASS_HTTP_TOKEN"},
 	} {
 		code, out, errOut := runCommand(t, tc.args...)
 		var line struct {

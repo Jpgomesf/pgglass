@@ -32,6 +32,11 @@ func serve(ctx context.Context, opts options, stdin io.Reader, stdout, stderr io
 }
 
 func serveTools(ctx context.Context, opts options, stdin io.Reader, stdout, stderr io.Writer, logger *slog.Logger) error {
+	token := os.Getenv(authEnv)
+	addr, err := httpAddress(opts.http, token)
+	if err != nil {
+		return err
+	}
 	cfg, err := loadConfig(opts.config)
 	if err != nil {
 		return err
@@ -46,6 +51,9 @@ func serveTools(ctx context.Context, opts options, stdin io.Reader, stdout, stde
 	eng := engine.New(&cfg)
 	defer eng.Close()
 	server := tools.NewServer(tools.New(cfg, eng, store, stderr), buildVersion())
+	if addr != "" {
+		return serveHTTP(ctx, server, addr, token, logger)
+	}
 	err = server.Run(ctx, &mcp.IOTransport{Reader: io.NopCloser(stdin), Writer: nopWriteCloser{stdout}})
 	if ctx.Err() != nil {
 		return nil

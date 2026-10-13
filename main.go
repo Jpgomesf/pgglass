@@ -1,6 +1,6 @@
 // Command pgglass is an MCP server that gives AI agents read-only access to
-// the PostgreSQL connections of its config file, over stdio. Its doctor
-// command checks that config and each connection's role.
+// the PostgreSQL connections of its config file, over stdio or Streamable
+// HTTP. Its doctor command checks that config and each connection's role.
 package main
 
 import (
@@ -19,17 +19,20 @@ import (
 var version string
 
 const usage = `Usage:
-  pgglass [--config FILE]         serve the tools over stdio
-  pgglass [--config FILE] doctor  check the config and every connection, then exit
-  pgglass --version               print the version
+  pgglass [--config FILE] [--http ADDR]  serve the tools over stdio, or over Streamable HTTP
+  pgglass [--config FILE] doctor         check the config and every connection, then exit
+  pgglass --version                      print the version
 
 Flags:
   --config FILE  config file (default ~/.config/pgglass/config.json)
+  --http ADDR    serve http://ADDR/mcp, such as :8411 for 127.0.0.1:8411; a host other
+                 than loopback needs PGGLASS_HTTP_TOKEN, a token every request must carry
   --version      print the version
 `
 
 type options struct {
 	config  string
+	http    string
 	version bool
 	doctor  bool
 }
@@ -64,6 +67,7 @@ func parseArgs(args []string) (options, error) {
 	fs := flag.NewFlagSet("pgglass", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	fs.StringVar(&opts.config, "config", opts.config, "")
+	fs.StringVar(&opts.http, "http", "", "")
 	fs.BoolVar(&opts.version, "version", false, "")
 	if err := fs.Parse(args); err != nil {
 		return opts, err
@@ -74,8 +78,11 @@ func parseArgs(args []string) (options, error) {
 			return opts, err
 		}
 	}
-	if fs.NArg() > 0 {
+	switch {
+	case fs.NArg() > 0:
 		return opts, fmt.Errorf("unexpected argument %q", fs.Arg(0))
+	case opts.doctor && opts.http != "":
+		return opts, errors.New("doctor serves nothing: drop --http")
 	}
 	return opts, nil
 }

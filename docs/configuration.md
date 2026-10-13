@@ -230,14 +230,15 @@ We recommend `{environment}-{database}`:
 ## Command line
 
 ```
-pgglass [--config FILE]         serve the tools over stdio
-pgglass [--config FILE] doctor  check the config and every connection, then exit
-pgglass --version               print the version
+pgglass [--config FILE] [--http ADDR]  serve the tools over stdio, or over Streamable HTTP
+pgglass [--config FILE] doctor         check the config and every connection, then exit
+pgglass --version                      print the version
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--config FILE` | `~/.config/pgglass/config.json` | The config file. Without `HOME`, it must be given |
+| `--http ADDR` | — | Serve [Streamable HTTP](#streamable-http) at `http://ADDR/mcp` instead of stdio. A missing host is `127.0.0.1` and a missing port `8411`, so `--http :8411` serves `http://127.0.0.1:8411/mcp` |
 | `--version` | — | Print the version: the release's, else the module version Go records in the build, else `dev` |
 
 Flags go before or after `doctor`. The exit code is 0 when the server stops cleanly or doctor finds nothing wrong, 1 when it fails, and 2 for a usage error. While serving, stderr carries JSON lines only: the audit log, warnings and why the server stopped.
@@ -256,3 +257,25 @@ warn staging-app: role app_reader: 1 finding(s)
 ```
 
 A connection fails when its credentials do not resolve or parse, its server does not answer or refuses it, or its role has a critical finding, whatever `role_check` says. Warnings alone pass. Doctor never prints a password or a whole DSN: an error names the user, database and host at most, and a DSN that does not parse is not shown. A config that does not load fails before any connection is tried, with the error the server would stop on.
+
+## Streamable HTTP
+
+`--http ADDR` serves the same tools over [Streamable HTTP](https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http) at `http://ADDR/mcp`, for a client that cannot start the server itself, or for several clients to share one. On startup, a line on stderr gives the URL:
+
+```json
+{"time":"2026-10-13T19:30:24.07-03:00","level":"INFO","msg":"listening","url":"http://127.0.0.1:8411/mcp","token_required":false}
+```
+
+- It listens on loopback unless `ADDR` names another host. Any other host, such as `0.0.0.0:8411`, needs `PGGLASS_HTTP_TOKEN`: pgglass refuses to start without it. Once it is set, on loopback too, every request must carry `Authorization: Bearer <token>`, or gets 401. The token is compared in constant time and never logged.
+- A request whose `Origin` header names anything but a loopback origin gets 403, as does a request to a loopback address whose `Host` names another host, which is how DNS rebinding reaches a local server. Clients other than browsers send no `Origin`.
+- It keeps no sessions: each request stands alone, so it speaks the newest MCP revision, 2026-07-28, and a restart breaks no client's session.
+- On SIGINT or SIGTERM it stops accepting connections, ends the streams clients hold open for notifications, and waits up to 10 seconds for requests in flight. A second signal stops it at once.
+- Spill files are written on the machine the server runs on, where the agent may not be able to read them.
+- It serves plain HTTP. To reach it from elsewhere, put a proxy that terminates TLS in front of it, and set the token even when pgglass listens on loopback behind the proxy: it cannot tell the proxy's requests from local ones. The proxy must send a loopback `Host`, such as `127.0.0.1:8411`, as nginx does by default.
+
+Behind such a proxy, with a token from `openssl rand -hex 32`:
+
+```bash
+PGGLASS_HTTP_TOKEN=<token> pgglass --http :8411
+claude mcp add --transport http --scope user pgglass https://db-tools.example.com/mcp --header "Authorization: Bearer <token>"
+```
