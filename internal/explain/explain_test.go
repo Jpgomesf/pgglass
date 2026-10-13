@@ -413,3 +413,35 @@ func TestPlanLargerThanMaxBytesIsAnError(t *testing.T) {
 		t.Errorf("err = %v", err)
 	}
 }
+
+// From PostgreSQL 18, EXPLAIN reports where a window aggregate kept its
+// rows: 500k of them do not fit in the default work_mem of 4MB, and the
+// window is flagged. Earlier versions do not report it.
+func TestAnalyzeFlagsAWindowThatSpilled(t *testing.T) {
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
+	const sql = "SELECT g, count(*) OVER () FROM generate_series(1, 500000) g"
+	if serverVersion(t) < 180000 {
+		if got, err := run(t, q, sql, true); err != nil || !strings.HasSuffix(got, "\nflags: none") {
+			t.Errorf("%s: %v\n%s", sql, err, got)
+		}
+		return
+	}
+	wantFlags(t, flagsOf(t, q, sql, true), `WindowAgg: spilled to disk \(\d+ kB\)`)
+}
+
+// From PostgreSQL 18, EXPLAIN gives the rows of each loop to two decimals:
+// 4 in 5 events have an active customer, so the LIMIT 1 returns 0.8 rows per
+// event, which earlier versions round to 1.
+func TestAnalyzeShowsTheRowsOfEachLoop(t *testing.T) {
+	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
+	const sql = `SELECT e.id FROM app.events e CROSS JOIN LATERAL
+		(SELECT 1 FROM app.customers c WHERE c.id = (e.payload->>'customer')::uuid AND c.active LIMIT 1) x`
+	perLoop := `1 row × 20000 loops`
+	if serverVersion(t) >= 180000 {
+		perLoop = `0\.8 rows × 20000 loops`
+	}
+	got, err := run(t, q, sql, true)
+	if err != nil || !regexp.MustCompile(`\n  Limit: `+ms+`, `+perLoop+`\n`).MatchString(got) {
+		t.Errorf("%s: %v\n%s\nwant a Limit of %s", sql, err, got, perLoop)
+	}
+}

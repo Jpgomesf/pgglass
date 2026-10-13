@@ -425,7 +425,7 @@ func TestNum(t *testing.T) {
 			t.Errorf("num(%v, %d) = %q, want %q", tc.v, tc.decimals, got, tc.want)
 		}
 	}
-	if got := rows(1) + ", " + rows(0) + ", " + rows(2); got != "1 row, 0 rows, 2 rows" {
+	if got := rows(1, 0) + ", " + rows(0, 0) + ", " + rows(2, 0) + ", " + rows(0.8, 2) + ", " + rows(1, 2); got != "1 row, 0 rows, 2 rows, 0.8 rows, 1 row" {
 		t.Errorf("rows = %q", got)
 	}
 }
