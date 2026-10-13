@@ -2,7 +2,7 @@
 
 ## Connection Structure
 
-Each entry in the `connections` map is a named, self-contained database connection. The connection name (the JSON key) is what you pass to `pg_query` and `pg_schema`.
+Each entry in the `connections` map is a named, self-contained database connection. The connection name (the JSON key) is what you pass to the tools as `connection`, or in `connections`, `left` and `right`.
 
 ```
 config.json
@@ -117,7 +117,7 @@ track_extra_parameters = default_transaction_read_only
 | `source` | string | *required* | `direct`, `env`, `dotenv`, or `aws_secrets_manager` |
 | `readonly` | bool | — | Deprecated and ignored: the server is always read-only. Logs a warning at startup |
 | `requires_vpn` | bool | `false` | TCP reachability check before each new database connection |
-| `default_schema` | string | `""` | `search_path` for `pg_query` when the call names no `schema`, and the schema `pg_schema` looks a `table` up in. `net`, `aws_s3` and `aws_lambda`, whose functions the guard denies, are refused as the `search_path`: with one of them here, `pg_query` calls that name no `schema` fail |
+| `default_schema` | string | `""` | `search_path` for `pg_query` and `pg_explain` when the call names no `schema`, and the schema `pg_schema` and `pg_profile` look a `table` up in. `net`, `aws_s3` and `aws_lambda`, whose functions the guard denies, are refused as the `search_path`: with one of them here, `pg_query` and `pg_explain` calls that name no `schema` fail |
 
 ## Defaults
 
@@ -144,7 +144,7 @@ Every field is optional: a missing or zero value takes the default. Numbers must
 | `max_rows` | `1000` | Rows a query returns before its result is truncated. A `pg_query` call can lower it with `max_rows`, never raise it. Also caps `pg_search` |
 | `max_bytes` | `1048576` (1 MiB) | Bytes a query's result holds before it is truncated: each value counts its length plus 24, so empty and NULL values count too. A server message larger than `max_bytes` plus 1 MiB is not read: the connection is reset and, once the columns are described, the result is truncated there; before, the query fails |
 | `spill_ttl_hours` | `24` | How long spill files of large results are kept. They live in `mcp-postgres` under the user cache directory (or `mcp-postgres-<uid>` in the temp directory without one), and cleanup removes every spill file there older than this, including those of other server instances that share the directory |
-| `format` | `tsv` | Default result format of `pg_query`: `tsv`, `json` or `markdown` |
+| `format` | `tsv` | Result format of `pg_query` by default, and of `pg_profile` and `pg_health`: `tsv`, `json` or `markdown` |
 | `role_check` | `warn` | What to do when a connection's role can do more than read (see below) |
 | `readonly` | — | Deprecated and ignored: the server is always read-only. Logs a warning at startup |
 
@@ -154,7 +154,7 @@ On a connection's first use, the server audits the role it connects as, once, an
 
 | `role_check` | Effect |
 |--------------|--------|
-| `strict` | A role with a critical finding is refused: `pg_query`, `pg_schema` and `pg_search` on the connection fail and say why. Warnings alone are shown once |
+| `strict` | A role with a critical finding is refused: every tool but `pg_list_connections` fails on the connection and says why. Warnings alone are shown once |
 | `warn` | Findings are shown once, at the top of the first response on the connection |
 | `off` | No audit |
 

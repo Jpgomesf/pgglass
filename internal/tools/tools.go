@@ -1,5 +1,5 @@
-// Package tools implements the MCP tools: pg_list_connections, pg_query,
-// pg_schema and pg_search.
+// Package tools implements the MCP tools: pg_list_connections, pg_schema,
+// pg_search, pg_query, pg_explain, pg_profile, pg_diff_schema and pg_health.
 //
 // Every failure is a tool result with IsError set, never a protocol error,
 // and every call writes one JSON audit line, or one per connection when

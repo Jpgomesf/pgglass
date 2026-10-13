@@ -9,7 +9,11 @@ Once the server is connected to your agent (for example Claude Code), you ask in
 | `pg_list_connections` | none | Each connection, in name order, with its role-check status |
 | `pg_schema` | `connection`, `schema`?, `table`? | Schemas, the relations of one schema, or one relation in detail |
 | `pg_search` | `connection`, `pattern`, `limit`? | Relations, columns and functions whose name contains `pattern` |
-| `pg_query` | `connection`, `sql`, `params`?, `schema`?, `format`?, `max_rows`? | The rows of one read-only statement |
+| `pg_query` | `connection` or `connections`, `sql`, `params`?, `schema`?, `format`?, `max_rows`? | The rows of one read-only statement, from one connection or up to 10 |
+| `pg_explain` | `connection`, `sql`, `analyze`?, `schema`? | A few lines on the plan of one `SELECT`: cost, the costliest nodes, flags |
+| `pg_profile` | `connection`, `table`, `schema`?, `column`? | One line per column: nulls, distinct values, most common values, range |
+| `pg_diff_schema` | `left`, `right`, `schema`? | What differs in a schema between two connections |
+| `pg_health` | `connection` | One line per finding on connections, sessions, cache, dead rows, indexes, wraparound and replication |
 
 ## Discover connections
 
@@ -100,49 +104,9 @@ First 5 rows:
 
 The summary lists at most 20 columns, previews only as many of the first 5 rows as fit in 10 KB, and cuts preview cells at 64 characters.
 
-Spill files live in `mcp-postgres` under your user cache directory (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux), readable only by you (mode 0600). Without one (`HOME` unset), they live in `mcp-postgres-<uid>` in the temp directory, which the server creates: it must be a directory, not a symlink, that you own with mode 0700, or the server does not start. Spill files older than `spill_ttl_hours` are removed at startup, then at most once an hour as `pg_query` returns results, whichever server instance wrote them.
+Spill files live in `mcp-postgres` under your user cache directory (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux), readable only by you (mode 0600). Without one (`HOME` unset), they live in `mcp-postgres-<uid>` in the temp directory, which the server creates: it must be a directory, not a symlink, that you own with mode 0700, or the server does not start. Spill files older than `spill_ttl_hours` are removed at startup, then at most once an hour as tools return results, whichever server instance wrote them.
 
-## Errors
-
-A failed call returns a result with `isError` set and the reason as text:
-
-- `query rejected: DeleteStmt is not allowed: only SELECT, EXPLAIN SELECT and SHOW are` when the statement is not read-only
-- `query rejected: schema net is not allowed as the search_path: its functions are denied` when `schema`, or `default_schema` without it, names a schema whose functions the guard denies
-- Postgres errors as psql prints them, with SQLSTATE and position, then detail and hint:
-
-  ```
-  ERROR: column "nam" does not exist (SQLSTATE 42703) at character 8
-  HINT: Perhaps you meant to reference the column "customers.name".
-  ```
-
-- `connection "prod" refused (role_check strict): its role can do more than read.`, followed by the findings
-- invalid arguments, such as an unknown connection or argument name
-
-## Audit log
-
-Each tool call writes one JSON line to stderr, or one per connection for a [fan-out](#fan-out):
-
-```json
-{"time":"2026-10-12T14:59:12.2-03:00","level":"INFO","msg":"tool call","tool":"pg_query","connection":"prod-app","sql_sha256":"46880a16e933","sql_len":30,"duration_ms":41,"rows":1,"truncated":false,"outcome":"ok","sqlstate":""}
-```
-
-`sql_sha256` is the first 12 hex digits of the statement's SHA-256, so repeated statements can be matched without logging them. `outcome` is `ok`, `guard_reject`, `db_error` (with `sqlstate` when Postgres raised it), `preflight_block` or `error` (for example, invalid arguments). SQL text, parameters and values are never logged.
-
-## Parallel calls
-
-Every connection has its own pool, so calls do not wait on each other, on one connection or across several:
-
-> "Compare the row count of the orders table between staging and production"
-
-Two `pg_query` calls run at the same time, one per connection.
-
-## Tips
-
-- **Start with `pg_schema` or `pg_search`.** Agents write better SQL when they know the exact names and types.
-- **Set `default_schema`** so unqualified names resolve without a `schema` argument.
-- **Aggregate in SQL.** A `count(*)` or `GROUP BY` answers in one row where reading rows spills a file.
-
-## Fan-out
+### Fan-out
 
 In place of `connection`, `pg_query` takes `connections`, up to 10 names, and runs the statement on each in parallel:
 
@@ -160,24 +124,30 @@ prod-app	98311
 - When the connections return different columns, by name or type, each gets its own section under its name, and the sections share the 10 KB.
 - A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The call fails only when every connection does.
 
-## Compare a schema across connections
+## Explain a query
 
-`pg_diff_schema` compares one schema on two connections, typically production and staging. It takes `left` and `right`, two connection names, and `schema` (default `public`), and reads each side with one catalog query:
+`pg_explain` takes `connection`, `sql`, `analyze`? and `schema`?, and summarizes the plan of one `SELECT` instead of returning EXPLAIN's output. `sql` passes the same checks as in `pg_query`, and only a `SELECT` can be explained. `schema` works as in `pg_query`. Without `analyze` the query is only planned. With `analyze: true` it runs in the same read-only transaction, which is rolled back, and under the same `statement_timeout`, to report actual times, rows and buffers:
 
 ```
-schema app, prod → staging: 4 differences (- only in prod, + only in staging)
-+ table coupons
-~ column orders.total: numeric(12,2) NOT NULL → numeric(14,2) NOT NULL
-+ index orders.orders_placed_at_idx
-- table tenant_notes
+total cost 678.64, 5.496 ms, 5000 rows, 333 buffers hit, 0 read
+top nodes by own time:
+  Sort: 3.195 ms, 5000 rows
+  Seq Scan on app.events: 2.087 ms, 5000 rows
+flags:
+  Sort: 5000 rows, planned 25
+  Sort: spilled to disk (external merge, 504 kB)
+  Seq Scan on app.events: 5000 rows, planned 25
+  Seq Scan on app.events: full scan of ~20000 rows
 ```
 
-`~` marks what both define differently, left then right. It compares relations (their kind and whether row-level security is on), columns (type, `NOT NULL`, default, identity or generation), constraints, indexes and RLS policies; an index that implements a constraint shows as the constraint. Relations come in name order, each followed by its columns, constraints, indexes and policies, and a relation only one side has takes one line. When nothing differs, the result says `identical` and how many relations it compared.
+The 5 top nodes are ranked by what each takes on its own: its total less its children's. That is cost without `analyze`, and time with it, summed over loops and parallel workers. Rows are per loop, as in EXPLAIN. The flags are:
 
-- Only what each connection's role can read is compared, as in `pg_schema`, and partitions are left out. A schema that one side lacks, or whose role lacks `USAGE` on it, is an error naming that side.
-- Definitions are compared as each server prints them, so servers of different major versions can differ in spelling alone.
-- Output past 10 KB is written to a CSV file, one difference per row, and summarized under the first line.
-- Both connections go through the role check, and the audit line names both: `"connection":"prod,staging"`.
+- a seq scan of a relation with over 10,000 rows (`pg_class.reltuples`)
+- with `analyze`: a node that returned more than 10 times its estimated rows, or less than a tenth of them
+- with `analyze`: a sort, hash or hash aggregate that spilled to disk
+- a nested loop whose outer side returns over 10,000 rows, so that its inner side runs that many times
+
+Error positions point into `sql` as written. A summary over 10 KB is written to a spill file, one line per row, like a large `pg_query` result.
 
 ## Profile a table
 
@@ -207,30 +177,24 @@ note	text	100	7
 
 Both read as the connection's role: `pg_stats` shows only the columns the role can `SELECT`, and `pg_profile` says so when that leaves none; the sample is subject to privileges and row-level security. Relations the guard denies, such as `pg_authid`, are refused, since their statistics hold their values. Output over 10 KB is written to a file, as `pg_query`'s is.
 
-## Explain a query
+## Compare a schema across connections
 
-`pg_explain` takes `connection`, `sql`, `analyze`? and `schema`?, and summarizes the plan of one `SELECT` instead of returning EXPLAIN's output. `sql` passes the same checks as in `pg_query`, and only a `SELECT` can be explained. `schema` works as in `pg_query`. Without `analyze` the query is only planned. With `analyze: true` it runs in the same read-only transaction, which is rolled back, and under the same `statement_timeout`, to report actual times, rows and buffers:
+`pg_diff_schema` compares one schema on two connections, typically production and staging. It takes `left` and `right`, two connection names, and `schema` (default `public`), and reads each side with one catalog query:
 
 ```
-total cost 678.64, 5.496 ms, 5000 rows, 333 buffers hit, 0 read
-top nodes by own time:
-  Sort: 3.195 ms, 5000 rows
-  Seq Scan on app.events: 2.087 ms, 5000 rows
-flags:
-  Sort: 5000 rows, planned 25
-  Sort: spilled to disk (external merge, 504 kB)
-  Seq Scan on app.events: 5000 rows, planned 25
-  Seq Scan on app.events: full scan of ~20000 rows
+schema app, prod → staging: 4 differences (- only in prod, + only in staging)
++ table coupons
+~ column orders.total: numeric(12,2) NOT NULL → numeric(14,2) NOT NULL
++ index orders.orders_placed_at_idx
+- table tenant_notes
 ```
 
-The 5 top nodes are ranked by what each takes on its own: its total less its children's. That is cost without `analyze`, and time with it, summed over loops and parallel workers. Rows are per loop, as in EXPLAIN. The flags are:
+`~` marks what both define differently, left then right. It compares relations (their kind and whether row-level security is on), columns (type, `NOT NULL`, default, identity or generation), constraints, indexes and RLS policies; an index that implements a constraint shows as the constraint. Relations come in name order, each followed by its columns, constraints, indexes and policies, and a relation only one side has takes one line. When nothing differs, the result says `identical` and how many relations it compared.
 
-- a seq scan of a relation with over 10,000 rows (`pg_class.reltuples`)
-- with `analyze`: a node that returned more than 10 times its estimated rows, or less than a tenth of them
-- with `analyze`: a sort, hash or hash aggregate that spilled to disk
-- a nested loop whose outer side returns over 10,000 rows, so that its inner side runs that many times
-
-Error positions point into `sql` as written. A summary over 10 KB is written to a spill file, one line per row, like a large `pg_query` result.
+- Only what each connection's role can read is compared, as in `pg_schema`, and partitions are left out. A schema that one side lacks, or whose role lacks `USAGE` on it, is an error naming that side.
+- Definitions are compared as each server prints them, so servers of different major versions can differ in spelling alone.
+- Output past 10 KB is written to a CSV file, one difference per row, and summarized under the first line.
+- Both connections go through the role check, and the audit line names both: `"connection":"prod,staging"`.
 
 ## Check server health
 
@@ -262,3 +226,45 @@ replication	not a replica
 | `replication` | On a replica, how long ago it replayed its last transaction, and how many received WAL bytes it has yet to replay |
 
 `long_running`, `blocked` and `unused_indexes` stop at 10 rows and say how many more there are. Sessions are those of the whole server, and their query text is never shown: it can hold secrets. A role without the privileges of `pg_read_all_stats` sees the state, timing and wait event of its own sessions only, as above. A section whose view or function the role may not use says `not visible to role <name>`, and the other sections still run.
+
+## Errors
+
+A failed call returns a result with `isError` set and the reason as text:
+
+- `query rejected: DeleteStmt is not allowed: only SELECT, EXPLAIN SELECT and SHOW are` when the statement is not read-only
+- `query rejected: only a SELECT can be explained, not EXPLAIN or SHOW` when `pg_explain` gets another statement the guard allows
+- `query rejected: schema net is not allowed as the search_path: its functions are denied` when `schema`, or `default_schema` without it, names a schema whose functions the guard denies
+- Postgres errors as psql prints them, with SQLSTATE and position, then detail and hint:
+
+  ```
+  ERROR: column "nam" does not exist (SQLSTATE 42703) at character 8
+  HINT: Perhaps you meant to reference the column "customers.name".
+  ```
+
+- `connection "prod" refused (role_check strict): its role can do more than read.`, followed by the findings
+- invalid arguments, such as an unknown connection or argument name
+
+## Audit log
+
+Each tool call writes one JSON line to stderr, or one per connection for a [fan-out](#fan-out):
+
+```json
+{"time":"2026-10-12T14:59:12.2-03:00","level":"INFO","msg":"tool call","tool":"pg_query","connection":"prod-app","sql_sha256":"46880a16e933","sql_len":30,"duration_ms":41,"rows":1,"truncated":false,"outcome":"ok","sqlstate":""}
+```
+
+`connection` names both connections of a `pg_diff_schema` call, `prod,staging`. `sql_sha256` is the first 12 hex digits of the statement's SHA-256, so repeated statements can be matched without logging them; it is empty, and `sql_len` 0, for tools that take no SQL. `outcome` is `ok`, `guard_reject`, `db_error` (with `sqlstate` when Postgres raised it), `preflight_block` or `error` (for example, invalid arguments). SQL text, parameters and values are never logged.
+
+## Parallel calls
+
+Every connection has its own pool, so calls do not wait on each other, on one connection or across several:
+
+> "Compare the row count of the orders table between staging and production"
+
+The agent can make two `pg_query` calls, which run at the same time, or one with `connections` (see [Fan-out](#fan-out)).
+
+## Tips
+
+- **Start with `pg_schema` or `pg_search`.** Agents write better SQL when they know the exact names and types.
+- **Set `default_schema`** so unqualified names resolve without a `schema` argument.
+- **Aggregate in SQL.** A `count(*)` or `GROUP BY` answers in one row where reading rows spills a file.
+- **Look before you scan.** `pg_explain` plans a query without running it, and `pg_profile` reads what a table's columns hold from `pg_stats`.

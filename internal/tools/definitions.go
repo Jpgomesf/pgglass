@@ -48,6 +48,14 @@ var queryTool = &mcp.Tool{
 	}),
 }
 
+// fanoutConnectionsArg lets pg_query fan out: see fanout.
+var fanoutConnectionsArg = map[string]any{
+	"type":        "array",
+	"items":       map[string]any{"type": "string"},
+	"maxItems":    maxFanout,
+	"description": "Instead of connection: run on each, in parallel; rows gain a first column, connection.",
+}
+
 var schemaTool = &mcp.Tool{
 	Name: "pg_schema",
 	Description: "Describe a database step by step: without schema, list the schemas; with schema, its tables and views; " +
@@ -73,28 +81,6 @@ var searchTool = &mcp.Tool{
 			"description": "Most matches to return; default 50.",
 		},
 	}),
-}
-
-func object(required []string, props map[string]any) map[string]any {
-	schema := map[string]any{"type": "object", "properties": props}
-	if len(required) > 0 {
-		schema["required"] = required
-	}
-	return schema
-}
-
-func prop(typ, description string) map[string]any {
-	return map[string]any{"type": typ, "description": description}
-}
-
-func ptr[T any](v T) *T { return &v }
-
-// fanoutConnectionsArg lets pg_query fan out: see fanout.
-var fanoutConnectionsArg = map[string]any{
-	"type":        "array",
-	"items":       map[string]any{"type": "string"},
-	"maxItems":    maxFanout,
-	"description": "Instead of connection: run on each, in parallel; rows gain a first column, connection.",
 }
 
 var diffSchemaTool = &mcp.Tool{
@@ -141,3 +127,17 @@ var healthTool = &mcp.Tool{
 	Annotations: annotations,
 	InputSchema: object([]string{"connection"}, map[string]any{"connection": connectionArg}),
 }
+
+func object(required []string, props map[string]any) map[string]any {
+	schema := map[string]any{"type": "object", "properties": props}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
+func prop(typ, description string) map[string]any {
+	return map[string]any{"type": typ, "description": description}
+}
+
+func ptr[T any](v T) *T { return &v }
