@@ -30,7 +30,7 @@ type Schema struct {
 	Comment   string
 }
 
-// SchemaList is the result of Schemas.
+// SchemaList is the result of FirstSchemas.
 type SchemaList []Schema
 
 // Relation is a table-like object.
@@ -46,7 +46,7 @@ type Relation struct {
 	Comment string
 }
 
-// RelationList is the result of Tables.
+// RelationList is the result of FirstTables.
 type RelationList []Relation
 
 // Column is a column of a relation.
@@ -122,26 +122,13 @@ var errNoRows = errors.New("no rows")
 // errTooLarge reports a catalog result that max_rows or max_bytes cut short.
 var errTooLarge = errors.New("catalog result exceeds the configured limits")
 
-// Schemas lists the non-system schemas the current role can see, by name.
-// The catalog result holds every one: FirstSchemas bounds it.
-func Schemas(ctx context.Context, q engine.Querier) (SchemaList, error) {
-	list, _, err := schemas(ctx, q, nil)
-	return list, err
-}
-
-// FirstSchemas lists the first limit schemas that Schemas lists, and returns
-// how many Schemas lists, so the catalog result stays small however many
-// schemas there are.
+// FirstSchemas lists the first limit of the non-system schemas the current
+// role can see, by name, and returns how many there are in all, so the
+// catalog result stays small however many schemas there are.
 func FirstSchemas(ctx context.Context, q engine.Querier, limit int) (SchemaList, int, error) {
 	if limit < 1 {
 		return nil, 0, fmt.Errorf("limit must be at least 1, got %d", limit)
 	}
-	return schemas(ctx, q, &limit)
-}
-
-// schemas lists the first limit schemas, or every one when limit is nil, and
-// counts them all.
-func schemas(ctx context.Context, q engine.Querier, limit *int) (SchemaList, int, error) {
 	var page struct {
 		Schemas SchemaList
 		Total   int
@@ -152,28 +139,15 @@ func schemas(ctx context.Context, q engine.Querier, limit *int) (SchemaList, int
 	return page.Schemas, page.Total, nil
 }
 
-// Tables lists the relations in schema that the current role can read, by
-// name, leaving out partitions. It returns an error if the schema does not
-// exist or the role lacks USAGE on it. The catalog result holds every
-// relation: FirstTables bounds it.
-func Tables(ctx context.Context, q engine.Querier, schema string) (RelationList, error) {
-	list, _, err := tables(ctx, q, schema, nil)
-	return list, err
-}
-
-// FirstTables lists the first limit relations that Tables lists, and returns
-// how many Tables lists, so the catalog result stays small however many
-// relations the schema holds.
+// FirstTables lists the first limit of the relations in schema that the
+// current role can read, by name, leaving out partitions, and returns how
+// many there are in all, so the catalog result stays small however many
+// relations the schema holds. It returns an error if the schema does not
+// exist or the role lacks USAGE on it.
 func FirstTables(ctx context.Context, q engine.Querier, schema string, limit int) (RelationList, int, error) {
 	if limit < 1 {
 		return nil, 0, fmt.Errorf("limit must be at least 1, got %d", limit)
 	}
-	return tables(ctx, q, schema, &limit)
-}
-
-// tables lists the first limit relations of schema, or every one when limit
-// is nil, and counts them all.
-func tables(ctx context.Context, q engine.Querier, schema string, limit *int) (RelationList, int, error) {
 	var page struct {
 		Relations RelationList
 		Total     int

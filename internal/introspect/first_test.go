@@ -43,13 +43,9 @@ func TestFirstSchemasAndTables(t *testing.T) {
 	})
 	equal(t, "relations in all", total, 7)
 
-	all, err := introspect.Tables(t.Context(), q, "app")
-	if err != nil {
-		t.Fatal(err)
-	}
 	relations, total, err = introspect.FirstTables(t.Context(), q, "app", 100)
-	if err != nil || len(relations) != len(all) || total != len(all) {
-		t.Errorf("FirstTables(app, 100) = %d relations of %d, %v; want all %d", len(relations), total, err, len(all))
+	if err != nil || len(relations) != 7 || total != 7 {
+		t.Errorf("FirstTables(app, 100) = %d relations of %d, %v; want all 7", len(relations), total, err)
 	}
 
 	_, _, err = introspect.FirstTables(t.Context(), q, "nope", 2)

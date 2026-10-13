@@ -56,9 +56,6 @@ func New(sql string, analyze bool) (Statement, error) {
 	return s, nil
 }
 
-// SQL returns the EXPLAIN statement.
-func (s Statement) SQL() string { return s.sql }
-
 // Run runs s through q with searchPath as its search_path (the connection's
 // own when empty), looks up the size of every relation the plan scans
 // sequentially, and returns the summary. Errors raised by Postgres are

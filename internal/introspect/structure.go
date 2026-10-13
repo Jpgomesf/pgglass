@@ -8,8 +8,8 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 )
 
-// SchemaStructure is what Diff compares of one schema: the relations Tables
-// lists, by name.
+// SchemaStructure is what Diff compares of one schema: the relations
+// FirstTables lists, all of them, by name.
 type SchemaStructure map[string]RelationStructure
 
 // RelationStructure is what Diff compares of one relation. Each map holds
@@ -34,8 +34,8 @@ type RelationStructure struct {
 
 // Structure reads the structure of schema with one catalog query. It returns
 // an error if the schema does not exist or the current role lacks USAGE on
-// it, or if its structure, one JSON value, exceeds max_bytes. As in Tables,
-// what the role cannot read is left out, and so are partitions.
+// it, or if its structure, one JSON value, exceeds max_bytes. As in
+// FirstTables, what the role cannot read is left out, and so are partitions.
 func Structure(ctx context.Context, q engine.Querier, schema string) (SchemaStructure, error) {
 	var s SchemaStructure
 	err := queryJSON(ctx, q, &s, structureSQL, schema)
@@ -101,10 +101,10 @@ const policyDefinitionsSQL = `SELECT json_object_agg(p.polname, concat_ws(' ',
 	FROM pg_policy p
 	WHERE p.polrelid = c.oid`
 
-// structureSQL returns the relations of schema $1 that Tables lists, each
-// with its query, if a view or materialized view, and the definitions of its
-// columns, constraints, indexes and policies; no row when the schema does not
-// exist or the role lacks USAGE on it.
+// structureSQL returns the relations of schema $1 that FirstTables lists,
+// each with its query, if a view or materialized view, and the definitions of
+// its columns, constraints, indexes and policies; no row when the schema does
+// not exist or the role lacks USAGE on it.
 const structureSQL = `
 SELECT (SELECT coalesce(json_object_agg(c.relname, json_build_object(
 		'Kind', ` + relKind + `,

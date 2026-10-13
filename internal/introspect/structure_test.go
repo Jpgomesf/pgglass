@@ -166,7 +166,7 @@ func TestStructureOfApp(t *testing.T) {
 func TestStructureOfLab(t *testing.T) {
 	loadLab(t)
 	got := structure(t, testdb.Querier(t, testdb.RoleClean, labDB), "lab")
-	// As in Tables: no partitions, and not lab.hidden, which ro_clean cannot read.
+	// As in FirstTables: no partitions, and not lab.hidden, which ro_clean cannot read.
 	equal(t, "relations", slices.Sorted(maps.Keys(got)),
 		[]string{"Mixed Case", "child", "measurements", "parent", "remote_items", "secrets", "wide"})
 	equal(t, "child", got["child"], introspect.RelationStructure{

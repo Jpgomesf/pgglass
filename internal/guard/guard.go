@@ -330,6 +330,11 @@ var deniedFunctions = map[string]bool{
 	// later calls on the pooled connection would get the sequence it chose.
 	// Every role may execute it.
 	"setseed": true,
+	// Shared buffers, which the rollback does not restore: pg_prewarm reads a
+	// relation into them, evicting the pages other sessions use. Every role
+	// may execute it, on any relation it can read; the extension's
+	// autoprewarm_* functions are denied by their prefix.
+	"pg_prewarm": true,
 	// Sequences, which change outside the transaction.
 	"setval":  true,
 	"nextval": true,
