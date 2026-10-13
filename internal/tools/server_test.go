@@ -61,6 +61,11 @@ func connectSpillingTo(t *testing.T, cfg config.Config, dir string) *session {
 
 func connectAt(t *testing.T, cfg config.Config, dir, protocolVersion string) *session {
 	t.Helper()
+	return connectClient(t, cfg, dir, protocolVersion, nil)
+}
+
+func connectClient(t *testing.T, cfg config.Config, dir, protocolVersion string, opts *mcp.ClientOptions) *session {
+	t.Helper()
 	eng := engine.New(&cfg)
 	t.Cleanup(eng.Close)
 	s := &session{audit: &lockedBuffer{}, spillDir: dir}
@@ -73,7 +78,7 @@ func connectAt(t *testing.T, cfg config.Config, dir, protocolVersion string) *se
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = ss.Close() })
-	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, opts)
 	cs, err := client.Connect(t.Context(), clientSide, &mcp.ClientSessionOptions{ProtocolVersion: protocolVersion})
 	if err != nil {
 		t.Fatal(err)

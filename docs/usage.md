@@ -23,13 +23,13 @@ Postgres keeps names of at most 63 bytes and cuts a longer one to its first 63, 
 
 ```
 Connections (2):
-  prod-app [aws_secrets_manager, vpn, schema:app, loaded]
+  prod-app [aws_secrets_manager, vpn, schema:app, confirm, loaded]
     role app_reader: no findings
   staging-app [env, schema:app]
     role not checked yet: checked on first use
 ```
 
-A connection's role is audited on its first use (see [role check](configuration.md#role-check)); from then on `pg_list_connections` shows the report. Past 10 KB, the list is written to a spill file, one line per row, like a large `pg_query` result.
+A connection's role is audited on its first use (see [role check](configuration.md#role-check)); from then on `pg_list_connections` shows the report. Past 10 KB, the list is written to a spill file, one line per row, like a large `pg_query` result. `confirm` marks a connection that asks the user before a statement runs on it (see [Confirmation](#confirmation)).
 
 The findings also start the first response on the connection, which keeps to 10 KB with them: they take at most half of it, as many lines as fit and then a line that points to `pg_list_connections`, and the rest of the response fits what they leave.
 
@@ -155,6 +155,26 @@ The 5 top nodes are ranked by what each takes on its own: its total less its chi
 
 Error positions point into `sql` as written. A summary over 10 KB is written to a spill file, one line per row, like a large `pg_query` result.
 
+## Confirmation
+
+A connection with [`confirm`](configuration.md#per-connection-options) set asks the user before a statement runs on it: before each `pg_query`, and each `pg_explain` with `analyze`, which runs the statement. The client shows a form with no fields that names the tool, the connections and the statement, with its `params`:
+
+```
+Allow pg_query to run this statement on prod-app?
+
+SELECT count(*) FROM app.orders WHERE status = $1
+
+params: ["paid"]
+```
+
+- Accepted, the call goes on as it would without `confirm`, role check included. Declined or cancelled, it fails with `declined by the user`, and nothing runs.
+- The question comes once the arguments and the guard have passed, and before the role check and the `search_path` check: a statement the guard rejects is not asked about.
+- A fan-out asks once, naming the connections in `connections` that set `confirm`. Declined, the statement runs on none of them.
+- The client must support form elicitation. Without it, the call is refused before anything runs: `pg_query on prod-app requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation`.
+- From protocol revision 2026-07-28 the question comes back as the result of the call, and the client calls again with the answer; before it, the server asks the client during the call. An answer holds only for the question it answers: a call that brings it back with another statement, other `params` or other connections asks again.
+- The call writes its audit line once answered, `declined` when the user declines or cancels. A client that fails to ask ends the call with its own error: nothing runs, and no audit line is written.
+- The other tools do not ask: they run only SQL the server writes.
+
 ## Profile a table
 
 `pg_profile` (`connection`, `table`, `schema`?, `column`?) shows what the columns of a table, partitioned table or materialized view hold, one line per column: the first 50, with a note counting the rest, or only `column`. `table` is `schema.table`, or a name in `schema` or else the connection's `default_schema`, matched exactly.
@@ -253,6 +273,7 @@ A failed call returns a result with `isError` set and the reason as text:
 
 - `connection "prod" refused (role_check strict): its role can do more than read.`, followed by the findings
 - invalid arguments, such as an unknown connection or argument name, or a name over 63 bytes
+- `declined by the user` when the user declines or cancels a [confirmation](#confirmation), and `pg_query on prod requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation` when the client cannot ask
 
 An error, with the role check's findings that may start it, keeps to the 10 KB of a response. A Postgres error can quote a value whole, and an unknown connection's lists every configured name: one longer than that is cut in the middle, keeping its start and its end, where the SQLSTATE, position, detail and hint are, as in `ERROR: invalid input syntax for type integer: "yyyy…[10088 bytes cut]…yyyy" (SQLSTATE 22P02)`.
 
@@ -264,7 +285,7 @@ Each tool call writes one JSON line to stderr, or one per connection for a [fan-
 {"time":"2026-10-12T14:59:12.2-03:00","level":"INFO","msg":"tool call","tool":"pg_query","connection":"prod-app","sql_sha256":"46880a16e933","sql_len":30,"duration_ms":41,"rows":1,"truncated":false,"outcome":"ok","sqlstate":""}
 ```
 
-`connection` names both connections of a `pg_diff_schema` call, `prod,staging`. `sql_sha256` is the first 12 hex digits of the statement's SHA-256, so repeated statements can be matched without logging them; it is empty, and `sql_len` 0, for tools that take no SQL. `outcome` is `ok`, `guard_reject`, `db_error` (with `sqlstate` when Postgres raised it), `preflight_block` or `error` (for example, invalid arguments). SQL text, parameters and values are never logged.
+`connection` names both connections of a `pg_diff_schema` call, `prod,staging`. `sql_sha256` is the first 12 hex digits of the statement's SHA-256, so repeated statements can be matched without logging them; it is empty, and `sql_len` 0, for tools that take no SQL. `outcome` is `ok`, `guard_reject`, `db_error` (with `sqlstate` when Postgres raised it), `preflight_block`, `error` (for example, invalid arguments) or `declined` (the user declined or cancelled a [confirmation](#confirmation)). SQL text, parameters and values are never logged.
 
 ## Parallel calls
 
