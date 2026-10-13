@@ -306,3 +306,23 @@ func TestSampleConfigParses(t *testing.T) {
 		t.Error("sample config.json has no connections")
 	}
 }
+
+func TestParseReadsConfirmPerConnection(t *testing.T) {
+	cfg, err := Parse([]byte(`{"connections": {
+		"prod": {"source": "direct", "dsn": "postgres://x", "confirm": true},
+		"staging": {"source": "direct", "dsn": "postgres://x", "confirm": false},
+		"dev": {"source": "direct", "dsn": "postgres://x"}
+	}}`))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	for name, want := range map[string]bool{"prod": true, "staging": false, "dev": false} {
+		if got := cfg.Connections[name].Confirm; got != want {
+			t.Errorf("%s: confirm = %t, want %t", name, got, want)
+		}
+	}
+	if _, err := Parse([]byte(`{"connections": {"db": {"source": "direct", "confirm": "yes"}}}`)); err == nil ||
+		!strings.Contains(err.Error(), "parse config.json") {
+		t.Errorf(`confirm "yes": error = %v, want a parse error`, err)
+	}
+}

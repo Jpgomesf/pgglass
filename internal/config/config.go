@@ -104,6 +104,10 @@ type Connection struct {
 	// Per-connection settings
 	RequiresVPN   bool   `json:"requires_vpn,omitempty"`
 	DefaultSchema string `json:"default_schema,omitempty"`
+
+	// Confirm makes pg_query, and pg_explain with analyze, ask the user
+	// before they run on the connection.
+	Confirm bool `json:"confirm,omitempty"`
 }
 
 // WithDefaults returns d with every unset (zero) setting replaced by its default.

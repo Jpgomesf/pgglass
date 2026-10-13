@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -85,8 +86,12 @@ type toolFunc func(ctx context.Context, args json.RawMessage, c *call) (string, 
 // its output in room, and handle cuts an error that does not fit there.
 func (h *Handlers) handle(tool string, run toolFunc) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		c := &call{tool: tool, start: time.Now()}
+		c := &call{tool: tool, start: time.Now(), answers: req.Params.InputResponses, canAsk: canAsk(req.ClientCapabilities())}
 		text, err := run(ctx, req.Params.Arguments, c)
+		var ask *confirmRequest
+		if errors.As(err, &ask) {
+			return ask.result(), nil
+		}
 		if !c.audited {
 			h.audit(c, err)
 		}

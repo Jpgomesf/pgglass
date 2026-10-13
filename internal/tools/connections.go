@@ -43,6 +43,9 @@ func flags(conn config.Connection) []string {
 	if conn.DefaultSchema != "" {
 		f = append(f, "schema:"+conn.DefaultSchema)
 	}
+	if conn.Confirm {
+		f = append(f, "confirm")
+	}
 	if status := resolver.StatusFor(conn); status != "" {
 		f = append(f, status)
 	}

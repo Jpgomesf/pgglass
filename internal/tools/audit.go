@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
 	"github.com/jpgomesf/pgglass/internal/engine"
 	"github.com/jpgomesf/pgglass/internal/guard"
 )
@@ -20,6 +22,7 @@ const (
 	outcomeDBError        = "db_error"
 	outcomePreflightBlock = "preflight_block"
 	outcomeError          = "error" // anything else, such as invalid arguments
+	outcomeDeclined       = "declined"
 )
 
 // call is one tool call: what its audit line reports, and the notice its
@@ -33,6 +36,8 @@ type call struct {
 	truncated  bool
 	notice     string // shown before the result, success or error
 	audited    bool   // the call wrote its own audit lines, one per connection
+	answers    mcp.InputResponseMap
+	canAsk     bool
 }
 
 // audit writes the audit line of c, which ended with err. It never logs SQL
@@ -101,6 +106,8 @@ func classify(err error) (outcome, sqlState string) {
 		return outcomeDBError, queryErr.SQLState
 	case errors.As(err, &dbErr):
 		return outcomeDBError, ""
+	case errors.Is(err, errDeclined):
+		return outcomeDeclined, ""
 	default:
 		return outcomeError, ""
 	}

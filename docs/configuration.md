@@ -120,6 +120,7 @@ track_extra_parameters = default_transaction_read_only
 | `readonly` | bool | — | Deprecated and ignored: the server is always read-only. Logs a warning at startup |
 | `requires_vpn` | bool | `false` | TCP reachability check before each new database connection |
 | `default_schema` | string | `""` | `search_path` for `pg_query` and `pg_explain` when the call names no `schema`, and the schema `pg_schema` and `pg_profile` look a `table` up in. `net`, `aws_s3` and `aws_lambda`, whose functions the guard denies, are refused as the `search_path`: with one of them here, `pg_query` and `pg_explain` calls that name no `schema` fail. The server refuses to start with one over 63 bytes, the longest name Postgres keeps |
+| `confirm` | bool | `false` | Ask the user before each `pg_query`, and each `pg_explain` with `analyze`, runs on the connection: the call runs only if they accept. A client without form elicitation is refused (see [Confirmation](usage.md#confirmation)) |
 
 ## Defaults
 
@@ -182,6 +183,7 @@ If the audit itself fails, it is retried on the next call; meanwhile `strict` re
 | Connect | VPN check (if `requires_vpn: true`) | `host unreachable — is VPN active?` |
 | Connect | The DSN must keep the user, database and host it had on first use | `the DSN now names another user, database or host; restart the server to use it` |
 | First use | `role_check: strict` and a critical finding | `connection "x" refused (role_check strict): its role can do more than read.` |
+| Call | `confirm: true` and a client without form elicitation | `pg_query on x requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation` |
 
 ## Naming Conventions
 
@@ -222,7 +224,8 @@ We recommend `{environment}-{database}`:
       "aws_profile": "prod",
       "secret_name": "prod/RDS/AppDB",
       "requires_vpn": true,
-      "default_schema": "app"
+      "default_schema": "app",
+      "confirm": true
     }
   }
 }

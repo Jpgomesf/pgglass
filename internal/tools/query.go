@@ -42,6 +42,9 @@ func (h *Handlers) query(ctx context.Context, raw json.RawMessage, c *call) (str
 	if err != nil {
 		return "", err
 	}
+	if err := h.confirm(c, "pg_query", []string{args.Connection}, args.SQL, args.Params); err != nil {
+		return "", err
+	}
 	res, err := h.queryOn(ctx, args.Connection, args, c)
 	if err != nil {
 		return "", err

@@ -43,9 +43,14 @@ func (h *Handlers) fanout(ctx context.Context, args queryArgs, c *call) (string,
 	}
 	c.audited = true
 	format, err := h.checkQuery(args)
+	if err == nil {
+		err = h.confirm(c, "pg_query", args.Connections, args.SQL, args.Params)
+	}
 	if err != nil {
-		for _, conn := range args.Connections {
-			h.audit(c.on(conn), err)
+		if !asksUser(err) {
+			for _, conn := range args.Connections {
+				h.audit(c.on(conn), err)
+			}
 		}
 		return "", err
 	}
