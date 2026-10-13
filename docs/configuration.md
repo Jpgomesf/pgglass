@@ -267,6 +267,7 @@ A connection fails when its credentials do not resolve in time or parse, its ser
 ```
 
 - It listens on loopback unless `ADDR` names another host. Any other host, such as `0.0.0.0:8411`, needs `PGGLASS_HTTP_TOKEN`: pgglass refuses to start without it. Once it is set, on loopback too, every request must carry `Authorization: Bearer <token>`, or gets 401. The token is compared in constant time and never logged.
+- Without a token, any process on the machine, whichever user runs it, can call the tools: on a machine others use, set one.
 - A request whose `Origin` header names anything but a loopback origin gets 403, as does a request to a loopback address whose `Host` names another host, which is how DNS rebinding reaches a local server. Clients other than browsers send no `Origin`.
 - It keeps no sessions: each request stands alone, so it speaks the newest MCP revision, 2026-07-28, and a restart breaks no client's session.
 - On SIGINT or SIGTERM it stops accepting connections, ends the streams clients hold open for notifications, and waits up to 10 seconds for requests in flight. A second signal stops it at once.
