@@ -408,6 +408,10 @@ var Rejected = []Case{
 	// [policy] The same family: starts a background worker that outlives the
 	// call and rewrites that file.
 	{`SELECT public.autoprewarm_start_worker()`, "public.autoprewarm_start_worker"},
+	// [review] pg_prewarm itself, PUBLIC too: reads a relation into shared
+	// buffers, which the rollback does not empty, evicting the pages other
+	// sessions use.
+	{`SELECT pg_prewarm('app.events')`, "pg_prewarm"},
 	// [policy] heap_force_*: pg_surgery deletes a row in place, which READ ONLY and the rollback do not stop.
 	{`SELECT heap_force_kill('app.orders'::regclass, ARRAY['(0,1)']::tid[])`, "heap_force_kill"},
 	// [policy] heap_force_*: freezes a row in place.

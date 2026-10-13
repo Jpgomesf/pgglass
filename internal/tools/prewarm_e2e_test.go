@@ -7,27 +7,35 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
 
-// prewarmDB creates database name with pg_prewarm, whose autoprewarm_*
-// functions CREATE EXTENSION leaves executable by PUBLIC, and returns a
-// connection to it as ro_clean, a role with nothing else to report.
+// prewarmDB creates database name with pg_prewarm, whose functions CREATE
+// EXTENSION leaves executable by PUBLIC, and a table t that ro_clean may
+// read, and returns a connection to it as ro_clean, a role with nothing else
+// to report.
 func prewarmDB(t *testing.T, name string) config.Connection {
 	t.Helper()
-	testdb.CreateDatabase(t, name, "CREATE EXTENSION pg_prewarm")
+	testdb.CreateDatabase(t, name, "CREATE EXTENSION pg_prewarm; CREATE TABLE t (v int); GRANT SELECT ON t TO "+testdb.RoleClean)
 	return direct(testdb.DSN(t, testdb.RoleClean, name))
 }
 
-// autoprewarm_dump_now writes $PGDATA/autoprewarm.blocks, past READ ONLY and
-// the rollback. role_check warn admits ro_clean, which may execute it, so the
-// guard is what stops it: pg_query rejects the call before it reaches the
+// pg_prewarm's functions act past READ ONLY and the rollback:
+// autoprewarm_dump_now writes $PGDATA/autoprewarm.blocks, and pg_prewarm
+// reads a relation into shared buffers, evicting the pages other sessions
+// use. role_check warn admits ro_clean, which may execute both, so the guard
+// is what stops them: pg_query rejects each call before it reaches the
 // database.
-func TestQueryRejectsAutoprewarm(t *testing.T) {
+func TestQueryRejectsPrewarmFunctions(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, map[string]config.Connection{
-		"ro": prewarmDB(t, "tools_autoprewarm_query"),
+		"ro": prewarmDB(t, "tools_prewarm_query"),
 	}))
-	got := s.fails(t, "pg_query", args("ro", `SELECT autoprewarm_dump_now()`))
-	if want := "query rejected: function autoprewarm_dump_now is not allowed"; got != want {
-		t.Errorf("pg_query = %q, want %q", got, want)
+	for _, tc := range []struct{ sql, function string }{
+		{`SELECT autoprewarm_dump_now()`, "autoprewarm_dump_now"},
+		{`SELECT pg_prewarm('t')`, "pg_prewarm"},
+	} {
+		got := s.fails(t, "pg_query", args("ro", tc.sql))
+		if want := "query rejected: function " + tc.function + " is not allowed"; got != want {
+			t.Errorf("pg_query %s = %q, want %q", tc.sql, got, want)
+		}
 	}
 }
 
