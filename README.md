@@ -59,7 +59,7 @@ docker run --rm -i --user "$(id -u):$(id -g)" \
 
 - Give your MCP client that command, as in `claude mcp add pgglass -- docker run --rm -i ...`, and pin a version with a tag such as `:1.0.0`.
 - `--user` runs the server as you, so it can read a `config.json` only you can read.
-- Credentials resolve inside the container: pass `env` sources with `-e`, and keep `.env` files in the mounted directory.
+- Credentials resolve inside the container: pass the variables that `env` sources read with `-e`, and keep `.env` files in the mounted directory.
 - A result past 10 KB is written to a file inside the container, out of the agent's reach. To share these files, run `mkdir -p ~/.cache/pgglass` and add `-v "$HOME/.cache/pgglass:$HOME/.cache/pgglass" -e XDG_CACHE_HOME="$HOME/.cache"`: the directory has the same path on both sides, so the agent can open the path the server reports.
 
 To serve Streamable HTTP instead:
