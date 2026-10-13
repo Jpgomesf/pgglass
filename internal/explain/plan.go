@@ -51,8 +51,8 @@ type node struct {
 	disk                  // the node's own, or the leader's under Gather
 	Workers       []disk  `json:"Workers"` // each parallel worker's
 	Plans         []node  `json:"Plans"`
-	// share is the part of its run n does: 1, or less when a Limit above
-	// stops it early, by as much as the plan expects. parse sets it.
+	// share is the part of its run the plan expects n to do: 1, or less when
+	// a Limit above is planned to stop it early. parse sets it.
 	share float64
 }
 
@@ -87,10 +87,12 @@ func parse(doc string) (*plan, error) {
 	return &plans[0], nil
 }
 
-// setShare sets the part of its run n does, and that of each node under it.
-// A Limit reads its input only as far as the rows it skips and returns,
-// unless with ANALYZE it fell short of them, and a node passes its own share
-// on to the children it reads as its parent asks for rows.
+// setShare sets the part of its run the plan expects n to do, and that of
+// each node under it. A Limit reads its input only as far as the rows it
+// skips and returns, and a node passes its own share on to the children it
+// reads as its parent asks for rows. With ANALYZE too the share is the
+// plan's: a Limit that returned fewer rows than it planned may have run out
+// of rows, or been stopped by what reads it, and EXPLAIN does not say which.
 func (n *node) setShare(share float64) {
 	n.share = share
 	for i := range n.Plans {
@@ -98,19 +100,12 @@ func (n *node) setShare(share float64) {
 		switch {
 		case !n.streams(c):
 			c.setShare(1)
-		case n.Type == "Limit" && !n.fellShort():
+		case n.Type == "Limit":
 			c.setShare(n.limitShare(c, share))
 		default:
 			c.setShare(share)
 		}
 	}
-}
-
-// fellShort reports whether Limit n, with ANALYZE, returned fewer rows than
-// it planned. Then it ran out of rows, or a Limit above stopped it first:
-// either way it stopped nothing early itself.
-func (n *node) fellShort() bool {
-	return n.Loops > 0 && n.ActualRows < n.PlanRows
 }
 
 // streams reports whether n reads its child c only as far as its own output
@@ -264,8 +259,9 @@ func (n *node) measure(analyzed bool) string {
 // flags returns what is worth a look in n: an estimate off by more than
 // missFactor, a seq scan that reads over largeRows rows of a relation of
 // over largeRows, a sort or hash that spilled to disk, and a nested loop
-// whose outer side returns over largeRows rows. A node that a Limit stops
-// early returns fewer rows than planned, which is no misestimate.
+// whose outer side returns over largeRows rows. A node that a Limit is
+// planned to stop early returns fewer rows than planned, which is no
+// misestimate, so it is never flagged for too few rows.
 func (n *node) flags(analyzed bool, reltuples map[relation]float64) []string {
 	var flags []string
 	if analyzed && n.Loops > 0 && missed(n.ActualRows, n.PlanRows, n.share < 1) {
@@ -286,8 +282,8 @@ func (n *node) flags(analyzed bool, reltuples map[relation]float64) []string {
 }
 
 // missed reports whether actual rows are more than missFactor times the
-// planned ones or, unless a Limit stops the node early, less than a
-// missFactor-th of them. Fewer than one row counts as one.
+// planned ones or, unless a Limit is planned to stop the node early, less
+// than a missFactor-th of them. Fewer than one row counts as one.
 func missed(actual, planned float64, limited bool) bool {
 	a, p := max(actual, 1), max(planned, 1)
 	return a > p*missFactor || (!limited && p > a*missFactor)

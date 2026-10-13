@@ -152,25 +152,30 @@ flags: none`},
 	}
 }
 
-// With analyze, a Limit that returns fewer rows than planned has run out of
-// rows and stops nothing early; and the rows an offset skips are read in
-// full, even under an outer Limit. Either way the scan under it is flagged.
+// The rows an offset skips are read in full, even under an outer Limit: the
+// scan under it is flagged.
 func TestExplainFlagsWhatALimitDoesNotStop(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
-	for _, tc := range []struct {
-		args map[string]any
-		want string
-	}{
-		{args("clean", "SELECT id FROM events WHERE payload->>'seq' = 'nope' ORDER BY id LIMIT 10", "analyze", true),
-			`(?s:.*)\nflags:\n  Index Scan using events_pkey on app\.events: 0 rows, planned 100`},
-		{args("clean", "SELECT * FROM (SELECT id FROM events OFFSET 15000 LIMIT 100) s LIMIT 5"),
-			`(?s:.*)\n  Seq Scan on app\.events: cost [0-9.]+, ~15005 rows\n(?s:.*)\nflags:\n  Seq Scan on app\.events: full scan of ~20000 rows`},
-	} {
-		got := s.ok(t, "pg_explain", tc.args)
-		if !regexp.MustCompile(`^` + tc.want + `$`).MatchString(got) {
-			t.Errorf("%v:\n%s\nwant it to match\n%s", tc.args, got, tc.want)
-		}
+	got := s.ok(t, "pg_explain", args("clean", "SELECT * FROM (SELECT id FROM events OFFSET 15000 LIMIT 100) s LIMIT 5"))
+	want := `(?s:.*)\n  Seq Scan on app\.events: cost [0-9.]+, ~15005 rows\n(?s:.*)\nflags:\n  Seq Scan on app\.events: full scan of ~20000 rows`
+	if !regexp.MustCompile(`^` + want + `$`).MatchString(got) {
+		t.Errorf("%s\nwant it to match\n%s", got, want)
+	}
+}
+
+// With analyze, the scan under a Limit that runs once per customer returns
+// 9.43 rows per loop where 100 are planned, since 3 of the 53 customers have
+// no event: the Limit stopped it early in the others, and EXPLAIN does not
+// say in which, so it is not flagged for too few rows.
+func TestExplainDoesNotFlagAScanALimitIsPlannedToStop(t *testing.T) {
+	t.Parallel()
+	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
+	const sql = `SELECT c.id, e.id FROM (SELECT md5('customer-' || g)::uuid AS id FROM generate_series(1, 53) g) c
+		CROSS JOIN LATERAL (SELECT e.id FROM events e WHERE e.payload->>'customer' = c.id::text ORDER BY e.id LIMIT 10) e`
+	got := s.ok(t, "pg_explain", args("clean", sql, "analyze", true))
+	if !strings.Contains(got, "\n  Index Scan using events_pkey on app.events e: ") || !strings.HasSuffix(got, "\nflags: none") {
+		t.Errorf("pg_explain:\n%s", got)
 	}
 }
 

@@ -346,29 +346,28 @@ func TestFlagsUnderALimit(t *testing.T) {
 	}
 }
 
-// With ANALYZE, a Limit that returned fewer rows than it planned stopped
-// nothing early: either it ran out of rows, and the index scan under it is
-// flagged as usual, or a Limit above stopped it, and the scan with it.
+// With ANALYZE, the scan a Limit is planned to stop early is not flagged for
+// too few rows, whatever made the Limit return fewer rows than it planned: a
+// Limit above stopped it, some of its loops had fewer rows, or it ran out of
+// rows. EXPLAIN does not tell these apart.
 func TestFlagsUnderALimitWithAnalyze(t *testing.T) {
-	limit := func(actual, startup, total, rows float64, children ...string) string {
-		return planNode(fmt.Sprintf(`"Node Type": "Limit", "Parent Relationship": "Outer", "Actual Rows": %v, "Actual Loops": 1`, actual),
+	limit := func(actual, loops, startup, total, rows float64, children ...string) string {
+		return planNode(fmt.Sprintf(`"Node Type": "Limit", "Parent Relationship": "Outer", "Actual Rows": %v, "Actual Loops": %v`, actual, loops),
 			startup, total, rows, children...)
 	}
-	scan := func(actual float64) string {
-		return planNode(fmt.Sprintf(`"Node Type": "Index Scan", "Parent Relationship": "Outer", "Actual Rows": %v, "Actual Loops": 1`, actual),
+	scan := func(actual, loops float64) string {
+		return planNode(fmt.Sprintf(`"Node Type": "Index Scan", "Parent Relationship": "Outer", "Actual Rows": %v, "Actual Loops": %v`, actual, loops),
 			0.29, 959.29, 1000)
 	}
-	for _, tc := range []struct {
-		name, plan string
-		want       []string // the index scan's flags
-	}{
-		{"a Limit that ran out of rows", limit(3, 0.29, 9.88, 10, scan(3)), []string{"3 rows, planned 1000"}},
-		{"a Limit that stopped the scan", limit(10, 0.29, 9.88, 10, scan(10)), nil},
-		{"a Limit that the Limit above stopped", limit(5, 0.29, 5.09, 5, limit(5, 0.29, 96.19, 100, scan(5))), nil},
+	for name, plan := range map[string]string{
+		"a Limit that stopped the scan":        limit(10, 1, 0.29, 9.88, 10, scan(10, 1)),
+		"a Limit that the Limit above stopped": limit(5, 1, 0.29, 5.09, 5, limit(5, 1, 0.29, 96.19, 100, scan(5, 1))),
+		"a Limit with loops of fewer rows":     limit(9, 53, 0.29, 9.88, 10, scan(9, 53)),
+		"a Limit that ran out of rows":         limit(3, 1, 0.29, 9.88, 10, scan(3, 1)),
 	} {
-		nodes := parseNode(t, tc.plan).all()
-		if got := nodes[len(nodes)-1].flags(true, nil); !slices.Equal(got, tc.want) {
-			t.Errorf("%s: flags = %q, want %q", tc.name, got, tc.want)
+		nodes := parseNode(t, plan).all()
+		if got := nodes[len(nodes)-1].flags(true, nil); len(got) != 0 {
+			t.Errorf("%s: the index scan is flagged %q", name, got)
 		}
 	}
 }

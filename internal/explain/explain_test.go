@@ -248,20 +248,34 @@ func TestAnOffsetUnderALimitIsCostedInFull(t *testing.T) {
 		`  Seq Scan on app\.events: full scan of ~20000 rows`)
 }
 
-// The planner expects the Limit to stop the index scan after 10 of the 100
-// rows it estimates, but no row matches: the Limit returns fewer rows than it
-// planned, so it ran out of rows and stopped nothing early. With analyze, the
-// scan's estimate is flagged; without, the Limit is costed as planned.
-func TestALimitThatRanOutOfRowsStopsNothingEarly(t *testing.T) {
+// With analyze, a Limit returns fewer rows than it planned whether it ran out
+// of rows or something stopped it first: it runs once per outer row and some
+// rows have fewer matches (9.43 rows per loop where 3 of 53 customers have no
+// event), an EXISTS reads its first row only, a LIMIT 1 above reads one row
+// of a CTE of 100, or its count is no constant and planned as 10% of its
+// input. EXPLAIN does not say which, so the scan under it returns fewer rows
+// than planned without a flag, even when the Limit ran out of rows: in the
+// last query no event matches, and the index scan reads all 20000 rows for
+// none.
+func TestAScanALimitIsPlannedToStopIsNotFlaggedForTooFewRows(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
-	const sql = "SELECT id FROM app.events WHERE payload->>'seq' = 'nope' ORDER BY id LIMIT 10"
-	summaryOf(t, q, sql, false,
-		`total cost `+cost+`, ~10 rows`,
-		`top nodes by own cost:`,
-		`  Index Scan using events_pkey on app\.events: cost `+cost+`, ~10 rows`,
-		`  Limit: cost 0, ~10 rows`,
-		`flags: none`)
-	wantFlags(t, flagsOf(t, q, sql, true), `Index Scan using events_pkey on app\.events: 0 rows, planned 100`)
+	for _, sql := range []string{
+		`SELECT c.id, e.id FROM (SELECT md5('customer-' || g)::uuid AS id FROM generate_series(1, 53) g) c
+			CROSS JOIN LATERAL (SELECT e.id FROM app.events e WHERE e.payload->>'customer' = c.id::text ORDER BY e.id LIMIT 10) e`,
+		`SELECT c.id, EXISTS (SELECT 1 FROM (SELECT e.id FROM app.events e
+			WHERE e.payload->>'customer' = c.id::text ORDER BY e.id LIMIT 50) s) FROM app.customers c`,
+		"WITH x AS MATERIALIZED (SELECT id FROM app.events ORDER BY id LIMIT 100) SELECT * FROM x LIMIT 1",
+		"SELECT id FROM app.events ORDER BY id LIMIT (SELECT 5)",
+		"SELECT id FROM app.events WHERE payload->>'seq' = 'nope' ORDER BY id LIMIT 10",
+	} {
+		got, err := run(t, q, sql, true)
+		if err != nil || !strings.Contains(got, "Scan using events_pkey on app.events") {
+			t.Fatalf("%s: %v\n%s", sql, err, got)
+		}
+		if _, flags, _ := strings.Cut(got, "\nflags:"); strings.Contains(flags, "events_pkey") {
+			t.Errorf("%s: the scan is flagged\n%s", sql, got)
+		}
+	}
 }
 
 // count(*) OVER () reads the whole partition before its first row, so the
