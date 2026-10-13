@@ -34,7 +34,7 @@ func parseConnectionNames(names ...string) error {
 // Config now refuses connection names over 63 bytes. Under that cap the
 // footer's list of the connections a limit cut takes at most 948 bytes (ten
 // names, each with its limit: max_bytes and 19 digits at most), and the
-// summary's first part at most 1,275 bytes and its file path. The rows get at
+// summary's first part at most 1,271 bytes and its file path. The rows get at
 // least 2,499 bytes, what the failures' half and their line break leave of
 // the 5,000 the findings leave at least, so that part fits for a path of up
 // to 1.2 kB, and the fallback, the path and the footer, fits too.

@@ -13,9 +13,9 @@ import (
 // the 63-byte table: the line naming it took more than the inline limit, the
 // rows spilled, and the result took about 12.3 kB. A schema, table or column
 // over 63 bytes is now refused before any query. Under that cap the line
-// takes at most about 350 bytes (two names of 63, the note on a sample or on
-// pg_stats, a count of the columns not shown), and the rows fit what it
-// leaves of the 5,000 the role check's findings leave at least.
+// takes at most 346 bytes (two names of 63, the note on a sample and a count
+// of the columns not shown), and the rows fit what it leaves of the 5,000 the
+// role check's findings leave at least.
 func TestProfileLongTableArgumentStaysWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_profile_long_table_argument"
