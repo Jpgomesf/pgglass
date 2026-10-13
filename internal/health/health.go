@@ -1,7 +1,7 @@
 // Package health checks a server from its statistics views and catalogs, for
-// agents: connections, long-running queries, blocked sessions, cache hit
-// ratio, dead rows, unused indexes, transaction ID wraparound and replication
-// lag, each as a few compact lines.
+// agents: connections, long-running queries and transactions, blocked
+// sessions, cache hit ratio, dead rows, unused indexes, transaction ID
+// wraparound and replication lag, each as a few compact lines.
 //
 // Each section is one query run through an engine.Querier, so in a read-only
 // transaction, with search_path pinned to pg_catalog. A section whose query
@@ -21,7 +21,7 @@ import (
 )
 
 // longRunning is how long a query must have been running, or a transaction
-// left idle open, to be listed as long-running.
+// open, to be listed as long-running.
 const longRunning = time.Minute
 
 // insufficientPrivilege is the SQLSTATE of "permission denied".
@@ -51,8 +51,8 @@ type section struct {
 }
 
 // sections returns the sections of the report, in order. Queries running for
-// longer than minDuration, and the sessions idle in a transaction open for
-// longer, are long-running.
+// longer than minDuration, and the sessions in a transaction open for longer,
+// are long-running.
 func sections(minDuration time.Duration) []section {
 	return []section{
 		{"connections", connectionsSQL, nil, decoded(connectionLines)},

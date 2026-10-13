@@ -30,11 +30,12 @@ FROM (
 ) s`
 
 // longRunningSQL lists the client sessions, other than idle ones, whose
-// current or last query started more than $1 seconds ago or, for a session
-// idle in transaction, whose transaction did, longest first. An open
-// transaction keeps its locks however recent its last query. One that failed
-// leaves its session idle in transaction (aborted), with no locks and no
-// xact_start.
+// transaction or current or last query started more than $1 seconds ago,
+// longest first: each is as old as the earlier of the two. An open
+// transaction keeps its locks however recent its query, running or not, and
+// a procedure that commits opens new transactions under the same CALL. One
+// that failed leaves its session idle in transaction (aborted), with no locks
+// and no xact_start, which least skips: it is as old as its last query.
 const longRunningSQL = `
 SELECT json_build_object('Total', coalesce(max(total), 0), 'Items', coalesce(json_agg(json_build_object(
 		'PID', pid, 'Database', datname, 'State', state, 'Seconds', seconds, 'Wait', wait, 'App', application_name)
@@ -44,7 +45,7 @@ FROM (
 		concat_ws(':', wait_event_type, wait_event) AS wait, application_name, count(*) OVER () AS total
 	FROM (
 		SELECT pid, datname, state, wait_event_type, wait_event, application_name,
-			CASE state WHEN 'idle in transaction' THEN xact_start ELSE query_start END AS since
+			least(xact_start, query_start) AS since
 		FROM pg_stat_activity
 		WHERE backend_type = 'client backend' AND state <> 'idle'
 	) a
