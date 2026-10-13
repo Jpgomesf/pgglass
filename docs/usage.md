@@ -231,7 +231,7 @@ replication	not a replica
 | `xid_wraparound` | The oldest `age(datfrozenxid)` of any database, against `autovacuum_freeze_max_age` |
 | `replication` | On a replica, how long ago it replayed its last transaction, and how many received WAL bytes it has yet to replay |
 
-`long_running`, `blocked` and `unused_indexes` stop at 10 rows and say how many more there are. Sessions are those of the whole server, and their query text is never shown: it can hold secrets. A role without the privileges of `pg_read_all_stats` sees the type, state, timing and wait event of its own sessions only, as above: `connections` then also counts the other backends connected to a database, which may be workers rather than client backends, and says `up to`. A section whose view or function the role may not use says `not visible to role <name>`, and the other sections still run.
+`long_running`, `blocked` and `unused_indexes` stop at 10 rows and say how many more there are. Sessions are those of the whole server, and their query text is never shown: it can hold secrets. A role without the privileges of `pg_read_all_stats` sees the type, state, timing and wait event of its own sessions only, as above: `connections` then also counts the other backends connected to a database, which may be workers rather than client backends, and says `up to`. A section whose view or function the role may not use says `not visible to role <name>`, and the other sections still run. Unlike `pg_query`, `pg_health` does not cut values at 200 characters: an unused index with long schema, table and index names would lose its table and size.
 
 ## Errors
 
