@@ -20,7 +20,7 @@ func TestDiff(t *testing.T) {
 		Indexes:     defs{"orders_total_idx": "CREATE INDEX orders_total_idx ON app.orders USING btree (total)"},
 		Policies:    defs{"orders_read": "FOR SELECT TO public USING (true)"},
 	}
-	totals := introspect.RelationStructure{Kind: "view", Columns: defs{"n": "bigint"}}
+	totals := introspect.RelationStructure{Kind: "view", Definition: " SELECT count(*) AS n\n   FROM app.orders;", Columns: defs{"n": "bigint"}}
 
 	for _, tc := range []struct {
 		name        string
@@ -52,6 +52,39 @@ func TestDiff(t *testing.T) {
 			want: []string{
 				"~ relation notes: table with RLS → table",
 				"~ relation totals: view → table with RLS",
+			},
+		},
+		{
+			// Queries show on one line, after the relation's kind and
+			// before its columns.
+			name: "queries of views and materialized views",
+			left: introspect.SchemaStructure{
+				"v":    {Kind: "view", Definition: " SELECT id,\n    name\n   FROM s.t;", Columns: defs{"id": "integer", "name": "text"}},
+				"mv":   {Kind: "materialized view", Definition: " SELECT 1 AS n;", Columns: defs{"n": "integer"}},
+				"same": {Kind: "view", Definition: " SELECT 1 AS n;", Columns: defs{"n": "integer"}},
+			},
+			right: introspect.SchemaStructure{
+				"v": {Kind: "view", Definition: " SELECT id,\n    name\n   FROM s.t\n  WHERE id > 0;",
+					Columns: defs{"id": "integer", "name": "character varying"}},
+				"mv":   {Kind: "materialized view", Definition: " SELECT 2 AS n;", Columns: defs{"n": "integer"}},
+				"same": {Kind: "view", Definition: " SELECT 1 AS n;", Columns: defs{"n": "integer"}},
+			},
+			want: []string{
+				"~ materialized view mv: SELECT 1 AS n; → SELECT 2 AS n;",
+				"~ view v: SELECT id, name FROM s.t; → SELECT id, name FROM s.t WHERE id > 0;",
+				"~ column v.name: text → character varying",
+			},
+		},
+		{
+			// The kind says enough when only one side has a query; when both
+			// do, the line takes the left side's kind.
+			name:  "a view that changed kind",
+			left:  introspect.SchemaStructure{"a": {Kind: "view", Definition: " SELECT 1 AS n;"}, "b": {Kind: "view", Definition: " SELECT 1 AS n;"}},
+			right: introspect.SchemaStructure{"a": {Kind: "table"}, "b": {Kind: "materialized view", Definition: " SELECT 2 AS n;"}},
+			want: []string{
+				"~ relation a: view → table",
+				"~ relation b: view → materialized view",
+				"~ view b: SELECT 1 AS n; → SELECT 2 AS n;",
 			},
 		},
 		{

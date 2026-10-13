@@ -80,11 +80,12 @@ func (h *Handlers) gatePair(ctx context.Context, left, right string, c *call) er
 	return nil
 }
 
-// readStructure reads the structure of schema on the connection conn.
+// readStructure reads the structure of schema on the connection conn. Its
+// error names conn, so it says which side failed.
 func (h *Handlers) readStructure(ctx context.Context, conn, schema string) (introspect.SchemaStructure, error) {
 	s, err := introspect.Structure(ctx, h.engine.Querier(conn), schema)
 	if err != nil {
-		return nil, &dbError{fmt.Errorf("%s: %w", conn, err)}
+		return nil, &dbError{&connError{conn: conn, err: err}}
 	}
 	return s, nil
 }

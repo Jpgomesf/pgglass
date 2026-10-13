@@ -15,8 +15,9 @@ type SchemaStructure map[string]RelationStructure
 // RelationStructure is what Diff compares of one relation. Each map holds
 // the definitions of one kind of object in it, by name.
 type RelationStructure struct {
-	Kind string // as in Relation
-	RLS  bool   // row-level security is enabled
+	Kind       string // as in Relation
+	RLS        bool   // row-level security is enabled
+	Definition string // as in TableDetail: the query of a view or materialized view
 	// Columns hold the type, NOT NULL, then the default, identity or
 	// generation clause, as in CREATE TABLE: "bigint NOT NULL GENERATED
 	// ALWAYS AS IDENTITY". Only the columns the role can SELECT are there.
@@ -33,13 +34,16 @@ type RelationStructure struct {
 
 // Structure reads the structure of schema with one catalog query. It returns
 // an error if the schema does not exist or the current role lacks USAGE on
-// it. As in Tables, what the role cannot read is left out, and so are
-// partitions.
+// it, or if its structure, one JSON value, exceeds max_bytes. As in Tables,
+// what the role cannot read is left out, and so are partitions.
 func Structure(ctx context.Context, q engine.Querier, schema string) (SchemaStructure, error) {
 	var s SchemaStructure
 	err := queryJSON(ctx, q, &s, structureSQL, schema)
 	if errors.Is(err, errNoRows) {
 		return nil, fmt.Errorf("schema %q does not exist or the current role lacks USAGE on it", schema)
+	}
+	if errors.Is(err, errTooLarge) {
+		err = fmt.Errorf("%w; raise defaults.max_bytes in config.json to read larger schemas", err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read the structure of schema %q: %w", schema, err)
@@ -98,12 +102,14 @@ const policyDefinitionsSQL = `SELECT json_object_agg(p.polname, concat_ws(' ',
 	WHERE p.polrelid = c.oid`
 
 // structureSQL returns the relations of schema $1 that Tables lists, each
-// with the definitions of its columns, constraints, indexes and policies; no
-// row when the schema does not exist or the role lacks USAGE on it.
+// with its query, if a view or materialized view, and the definitions of its
+// columns, constraints, indexes and policies; no row when the schema does not
+// exist or the role lacks USAGE on it.
 const structureSQL = `
 SELECT (SELECT coalesce(json_object_agg(c.relname, json_build_object(
 		'Kind', ` + relKind + `,
 		'RLS', c.relrowsecurity,
+		'Definition', CASE WHEN c.relkind IN ('v', 'm') THEN pg_get_viewdef(c.oid, true) END,
 		'Columns', (` + columnDefinitionsSQL + `),
 		'Constraints', (` + constraintDefinitionsSQL + `),
 		'Indexes', (` + indexDefinitionsSQL + `),
