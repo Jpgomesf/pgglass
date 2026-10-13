@@ -155,9 +155,14 @@ func failureLines(failed []fanoutResult, room int) string {
 // fanoutRows renders ok, results that all succeeded, within room bytes:
 // merged when their columns match, otherwise one section per connection.
 // Either way, what does not fit is spilled to a file. A section names its
-// file even past its share, so when the sections take more than room, as
-// long connection names and a long spill directory path can make them, they
-// go to one more file, a line each, and fanoutRows returns its summary.
+// file even past its share, so the sections can take more than room, as long
+// connection names and a long spill directory path can make them. Then,
+// since a section that fit its share came back inline with its cells cut,
+// they are rendered again with no room, so that every section spills and
+// each connection's rows are whole in a file; the first files of those that
+// had spilled already are left to the spill TTL. If the sections still take
+// more than room, they go to one more file, a line each, and fanoutRows
+// returns its summary.
 func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format, room int) (string, error) {
 	names := make([]string, len(ok))
 	for i, r := range ok {
@@ -167,6 +172,9 @@ func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format, room int)
 		return h.spill.OutputWithin("pg_query", strings.Join(names, "_"), mergeFanout(ok), format, room)
 	}
 	text, err := h.fanoutSections(ok, format, room)
+	if err == nil && len(text) > room {
+		text, err = h.fanoutSections(ok, format, 0)
+	}
 	if err != nil || len(text) <= room {
 		return text, err
 	}

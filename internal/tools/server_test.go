@@ -50,10 +50,16 @@ type session struct {
 
 func connect(t *testing.T, cfg config.Config) *session {
 	t.Helper()
+	return connectSpillingTo(t, cfg, t.TempDir())
+}
+
+// connectSpillingTo is connect with its spill files in dir.
+func connectSpillingTo(t *testing.T, cfg config.Config, dir string) *session {
+	t.Helper()
 	eng := engine.New(&cfg)
 	t.Cleanup(eng.Close)
-	s := &session{audit: &lockedBuffer{}, spillDir: t.TempDir()}
-	store := &spill.Store{Dir: s.spillDir, TTL: time.Hour, InlineMaxBytes: config.InlineMaxBytes}
+	s := &session{audit: &lockedBuffer{}, spillDir: dir}
+	store := &spill.Store{Dir: dir, TTL: time.Hour, InlineMaxBytes: config.InlineMaxBytes}
 	server := tools.NewServer(tools.New(cfg, eng, store, s.audit), "test")
 
 	serverSide, clientSide := mcp.NewInMemoryTransports()

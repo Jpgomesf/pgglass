@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -90,5 +91,43 @@ func TestFanoutSectionsPastTheirRoomGoToOneFile(t *testing.T) {
 	}
 	if !slices.Equal(sections, want) {
 		t.Errorf("the sections in the file:\n%q\nwant\n%q", sections, want)
+	}
+}
+
+// A section that fits its share comes back inline, its cells cut to 200
+// characters. Under a spill directory of 600 bytes, the two sections that
+// spilled named their files past their shares of 303 bytes, and the sections
+// went to one more file as they were: the 5,000 characters of long were
+// whole in no file. Now every section then spills to a file of its own,
+// which the file of sections names.
+func TestFanoutSectionsPastTheirRoomKeepEveryValueWhole(t *testing.T) {
+	dir := t.TempDir()
+	for len(dir) < 600 {
+		dir = filepath.Join(dir, strings.Repeat("d", 100))
+	}
+	h := &Handlers{spill: &spill.Store{Dir: dir, InlineMaxBytes: config.InlineMaxBytes}}
+	long := strings.Repeat("k", 5000)
+	rows := slices.Repeat([]string{strings.Repeat("x", 100)}, 20)
+	ok := []fanoutResult{fanoutOK("long", textColumn("k"), long), fanoutOK("rows1", textColumn("c1"), rows...), fanoutOK("rows2", textColumn("c2"), rows...)}
+	const room = 1000
+	got, err := h.fanoutText(ok, render.TSV, room)
+	files := regexp.MustCompile(`(?m)^Full result: (.+\.csv)$`).FindAllStringSubmatch(got, -1)
+	if err != nil || len(got) > room || len(files) != 1 {
+		t.Fatalf("three sections under a long spill path = %v, %d bytes for a room of %d:\n%s", err, len(got), room, got)
+	}
+	lines := readRecords(t, files[0][1])
+	held := map[string][][]string{} // by the line before "Full result: <file>": the records of the file
+	for i, line := range lines {
+		if file, isFile := strings.CutPrefix(line[0], "Full result: "); isFile {
+			held[lines[i-1][0]] = readRecords(t, file)
+		}
+	}
+	if records := held["long:"]; len(records) != 2 || records[1][0] != long {
+		t.Errorf("no file the sections name holds the 5000 characters of long whole; the file of sections holds:\n%q", lines)
+	}
+	for _, conn := range []string{"rows1", "rows2"} {
+		if records := held[conn+":"]; len(records) != 21 {
+			t.Errorf("%s: the file the sections name holds %d records, want a header and 20 rows", conn, len(records))
+		}
 	}
 }
