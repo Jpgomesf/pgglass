@@ -1,9 +1,11 @@
 // Package tools implements the MCP tools: pg_list_connections, pg_schema,
-// pg_search, pg_query, pg_explain, pg_profile, pg_diff_schema and pg_health.
+// pg_search, pg_query, pg_explain, pg_profile, pg_diff_schema and pg_health,
+// and the table resources, pgglass://<connection>/<schema>/<table>.
 //
-// Every failure is a tool result with IsError set, never a protocol error,
-// and every call writes one JSON audit line, or one per connection when
-// pg_query fans out, that holds no SQL text, parameter or value.
+// Every tool failure is a tool result with IsError set, never a protocol
+// error; a resource read fails with a JSON-RPC error. Every call writes one
+// JSON audit line, or one per connection when pg_query fans out or the
+// resources are listed, that holds no SQL text, parameter or value.
 package tools
 
 import (
@@ -37,6 +39,7 @@ type Handlers struct {
 	schemas *introspect.Cache
 	checks  *roleChecks
 	log     *slog.Logger
+	tables  *introspect.Cache
 }
 
 // New returns the Handlers for cfg, whose defaults are filled in, as
@@ -51,11 +54,12 @@ func New(cfg config.Config, eng *engine.Manager, store *spill.Store, auditLog io
 		schemas: introspect.NewCache(introspect.DefaultCacheTTL),
 		checks:  newRoleChecks(cfg.Defaults.RoleCheck, eng),
 		log:     slog.New(slog.NewJSONHandler(auditLog, nil)),
+		tables:  introspect.NewCache(introspect.DefaultCacheTTL),
 	}
 }
 
 // NewServer returns an MCP server, named pgglass, that exposes the tools
-// of h and tells clients how to use them well.
+// and table resources of h and tells clients how to use the tools well.
 func NewServer(h *Handlers, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{Name: "pgglass", Version: version}, &mcp.ServerOptions{Instructions: instructions})
 	s.AddTool(listConnectionsTool, h.handle("pg_list_connections", h.listConnections))
@@ -66,6 +70,8 @@ func NewServer(h *Handlers, version string) *mcp.Server {
 	s.AddTool(profileTool, h.handle("pg_profile", h.profile))
 	s.AddTool(explainTool, h.handle("pg_explain", h.explain))
 	s.AddTool(healthTool, h.handle("pg_health", h.health))
+	s.AddResourceTemplate(tableTemplate, h.readTable)
+	s.AddReceivingMiddleware(h.withTableResources)
 	return s
 }
 

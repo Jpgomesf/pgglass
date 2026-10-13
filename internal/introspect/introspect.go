@@ -122,6 +122,10 @@ var errNoRows = errors.New("no rows")
 // errTooLarge reports a catalog result that max_rows or max_bytes cut short.
 var errTooLarge = errors.New("catalog result exceeds the configured limits")
 
+// ErrNotFound is wrapped by the error of Table for a relation that does not
+// exist or that the current role cannot read.
+var ErrNotFound = errors.New("does not exist or the current role cannot read it")
+
 // FirstSchemas lists the first limit of the non-system schemas the current
 // role can see, by name, and returns how many there are in all, so the
 // catalog result stays small however many schemas there are.
@@ -162,14 +166,14 @@ func FirstTables(ctx context.Context, q engine.Querier, schema string, limit int
 	return page.Relations, page.Total, nil
 }
 
-// Table describes the relation schema.name, or returns an error if the
-// current role cannot see it. Names match exactly, as the catalog stores
-// them (unquoted). Partitions can be described too.
+// Table describes the relation schema.name, or returns an error wrapping
+// ErrNotFound if the current role cannot see it. Names match exactly, as the
+// catalog stores them (unquoted). Partitions can be described too.
 func Table(ctx context.Context, q engine.Querier, schema, name string) (*TableDetail, error) {
 	var t TableDetail
 	err := queryJSON(ctx, q, &t, tableSQL, schema, name)
 	if errors.Is(err, errNoRows) {
-		return nil, fmt.Errorf("relation %q.%q does not exist or the current role cannot read it", schema, name)
+		return nil, fmt.Errorf("relation %q.%q %w", schema, name, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("describe relation %q.%q: %w", schema, name, err)

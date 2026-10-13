@@ -43,6 +43,7 @@ type roleCheck struct {
 	mu     sync.Mutex
 	report *preflight.Report // nil until an audit succeeds
 	err    error             // why the last audit failed
+	shown  bool
 }
 
 // blockedError refuses a connection under role_check strict.
@@ -64,13 +65,23 @@ func (e *roleCheckError) Error() string { return roleCheckFailed + e.err.Error()
 func (e *roleCheckError) Unwrap() error { return e.err }
 
 // gate audits the role of conn on first use and decides whether a call may
-// go on. The notice it returns starts the call's result: the findings, the
-// first time they are known, or why the audit failed under role_check warn.
+// go on. The notice it returns starts the call's result: the findings, unless
+// a result has shown them already, or why the audit failed under role_check
+// warn.
 func (rc *roleChecks) gate(ctx context.Context, conn string) (notice string, err error) {
+	return rc.pass(ctx, conn, true)
+}
+
+func (rc *roleChecks) admit(ctx context.Context, conn string) error {
+	_, err := rc.pass(ctx, conn, false)
+	return err
+}
+
+func (rc *roleChecks) pass(ctx context.Context, conn string, show bool) (notice string, err error) {
 	if rc.mode == config.RoleCheckOff {
 		return "", nil
 	}
-	report, fresh, err := rc.check(conn).run(ctx, func(ctx context.Context) (preflight.Report, error) {
+	report, fresh, err := rc.check(conn).run(ctx, show, func(ctx context.Context) (preflight.Report, error) {
 		return rc.audit(ctx, conn)
 	})
 	switch {
@@ -117,27 +128,36 @@ func (rc *roleChecks) check(conn string) *roleCheck {
 }
 
 // run returns the report, auditing first unless an audit has succeeded;
-// fresh reports whether this call made the report. A call that ends while
-// another audits returns its context's error and records no failure.
-func (c *roleCheck) run(ctx context.Context, audit func(context.Context) (preflight.Report, error)) (report preflight.Report, fresh bool, err error) {
+// fresh reports whether this call, which shows the report when show is set,
+// is the first to show it. A call that ends while another audits returns its
+// context's error and records no failure.
+func (c *roleCheck) run(ctx context.Context, show bool, audit func(context.Context) (preflight.Report, error)) (report preflight.Report, fresh bool, err error) {
 	select {
 	case c.running <- struct{}{}:
 	case <-ctx.Done():
 		return preflight.Report{}, false, ctx.Err()
 	}
 	defer func() { <-c.running }()
-	if r, _ := c.state(); r != nil {
-		return *r, false, nil
+	if r, _ := c.state(); r == nil {
+		if err = c.record(audit(ctx)); err != nil {
+			return preflight.Report{}, false, err
+		}
 	}
-	report, err = audit(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if err != nil {
-		c.err = err
-		return preflight.Report{}, false, err
+	fresh = show && !c.shown
+	c.shown = c.shown || show
+	return *c.report, fresh, nil
+}
+
+func (c *roleCheck) record(report preflight.Report, err error) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err == nil {
+		c.report = &report
 	}
-	c.report, c.err = &report, nil
-	return report, true, nil
+	c.err = err
+	return err
 }
 
 func (c *roleCheck) state() (*preflight.Report, error) {
