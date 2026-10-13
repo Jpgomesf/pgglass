@@ -198,3 +198,15 @@ func TestAuditRejectsMalformedValues(t *testing.T) {
 		})
 	}
 }
+
+// PostgreSQL 18's pg_signal_autovacuum_worker cancels or terminates
+// autovacuum workers, as pg_signal_backend does other sessions: a warning.
+func TestAuditWarnsOfSignallingAutovacuumWorkers(t *testing.T) {
+	replies := clean()
+	replies[membershipsQuery] = row("pg_signal_autovacuum_worker")
+	report, err := preflight.Audit(t.Context(), &script{replies: replies})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantFindings(t, report, warning("role_membership", "member of pg_signal_autovacuum_worker"))
+}

@@ -72,10 +72,11 @@ const maxNames = 10
 
 // serverRoles are the predefined roles whose membership is a finding.
 var serverRoles = map[string]string{
-	"pg_execute_server_program": SeverityCritical, // COPY ... PROGRAM runs shell commands
-	"pg_write_server_files":     SeverityCritical, // COPY ... TO writes server files
-	"pg_read_server_files":      SeverityWarning,  // COPY ... FROM reads server files
-	"pg_signal_backend":         SeverityWarning,  // cancels or terminates other sessions
+	"pg_execute_server_program":   SeverityCritical, // COPY ... PROGRAM runs shell commands
+	"pg_write_server_files":       SeverityCritical, // COPY ... TO writes server files
+	"pg_read_server_files":        SeverityWarning,  // COPY ... FROM reads server files
+	"pg_signal_backend":           SeverityWarning,  // cancels or terminates other sessions
+	"pg_signal_autovacuum_worker": SeverityWarning,
 }
 
 // dangerousFunctions are the functions whose EXECUTE privilege is a finding,
@@ -95,7 +96,8 @@ var dangerousFunctions = []struct {
 		`%.autoprewarm\_%`, `%.heap\_force\_%`, `%.pg\_truncate\_visibility\_map`, `%.pg\_log\_standby\_snapshot`}},
 	// They read server files, or make another backend dump its memory
 	// contexts to the server log.
-	{SeverityWarning, []string{`%.lo\_import`, `%.pg\_read\_file`, `%.pg\_read\_binary\_file`, `%.pg\_log\_backend\_memory\_contexts`}},
+	{SeverityWarning, []string{`%.lo\_import`, `%.pg\_read\_file`, `%.pg\_read\_binary\_file`, `%.pg\_log\_backend\_memory\_contexts`,
+		`%.pg\_get\_logical\_snapshot\_%`}},
 }
 
 // Audit inspects, through q, the privileges of the role q connects as: the
