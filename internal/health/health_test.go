@@ -181,7 +181,7 @@ func TestCheckListsSessionsIdleInOldTransactions(t *testing.T) {
 	if _, err := aborted.Exec(t.Context(), "BEGIN; SELECT 1/0"); err == nil {
 		t.Fatal("SELECT 1/0 succeeded")
 	}
-	time.Sleep(1100 * time.Millisecond) // both transactions are over a second old
+	time.Sleep(1100 * time.Millisecond)                           // both transactions are over a second old
 	if _, err := idle.Exec(t.Context(), "SELECT 1"); err != nil { // but idle's last query is not
 		t.Fatal(err)
 	}
