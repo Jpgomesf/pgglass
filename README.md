@@ -113,7 +113,7 @@ What these layers do not cover:
 | Doc | Description |
 |-----|-------------|
 | [Usage Guide](docs/usage.md) | Tools, arguments, formats, large results, errors |
-| [Configuration](docs/configuration.md) | Credential sources, connection options, defaults, PgBouncer |
+| [Configuration](docs/configuration.md) | Credential sources, connection options, defaults, PgBouncer, command line, doctor, Streamable HTTP |
 | [Extending](docs/extending.md) | How to add custom credential sources (Vault, GCP, etc.) |
 | [Contributing](CONTRIBUTING.md) | Branch strategy, commit conventions, development workflow |
 
