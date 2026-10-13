@@ -1,14 +1,11 @@
 package tools_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
-
-	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
@@ -184,21 +181,7 @@ func TestHealthGoesThroughTheRoleCheck(t *testing.T) {
 }
 
 func TestHealthDefinitionIsSmall(t *testing.T) {
-	s := connect(t, newConfig(config.RoleCheckWarn, nil))
-	res, err := s.ListTools(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
+	if _, size := listedTool(t, "pg_health"); size > 700 {
+		t.Errorf("pg_health definition takes %d bytes of JSON, want at most 700", size)
 	}
-	i := slices.IndexFunc(res.Tools, func(tool *mcp.Tool) bool { return tool.Name == "pg_health" })
-	if i < 0 {
-		t.Fatal("pg_health is not listed")
-	}
-	def, err := json.Marshal(res.Tools[i])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(def) > 700 {
-		t.Errorf("pg_health definition takes %d bytes of JSON, want at most 700", len(def))
-	}
-	t.Logf("pg_health definition: %d bytes of JSON", len(def))
 }

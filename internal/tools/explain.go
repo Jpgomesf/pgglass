@@ -6,8 +6,6 @@ import (
 	"strings"
 
 	"github.com/jpgomesf/mcp-postgres/internal/explain"
-	"github.com/jpgomesf/mcp-postgres/internal/render"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
 )
 
 type explainArgs struct {
@@ -46,15 +44,5 @@ func (h *Handlers) explain(ctx context.Context, raw json.RawMessage, c *call) (s
 	if len(summary) <= h.spill.InlineMaxBytes {
 		return summary, nil
 	}
-	return h.spill.Output("pg_explain", args.Connection, lines(summary), render.TSV)
-}
-
-// lines holds text as a result of one text column, one row per line, for
-// the spill store.
-func lines(text string) *result.Result {
-	res := &result.Result{Columns: []result.Column{{Name: "line", TypeName: "text"}}}
-	for _, line := range strings.Split(text, "\n") {
-		res.Rows = append(res.Rows, []*string{&line})
-	}
-	return res
+	return h.linesOutput("pg_explain", args.Connection, "line", strings.Split(summary, "\n"))
 }

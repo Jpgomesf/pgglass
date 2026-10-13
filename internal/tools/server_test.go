@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -177,6 +178,27 @@ func (s *session) auditLines(t *testing.T) []auditLine {
 		lines = append(lines, line)
 	}
 	return lines
+}
+
+// listedTool returns the definition of the tool named name, as tools/list
+// sends it, and its size in bytes of JSON.
+func listedTool(t *testing.T, name string) (*mcp.Tool, int) {
+	t.Helper()
+	s := connect(t, newConfig(config.RoleCheckWarn, nil))
+	res, err := s.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(res.Tools, func(tool *mcp.Tool) bool { return tool.Name == name })
+	if i < 0 {
+		t.Fatalf("%s is not listed among %d tools", name, len(res.Tools))
+	}
+	def, err := json.Marshal(res.Tools[i])
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("%s definition: %d bytes of JSON", name, len(def))
+	return res.Tools[i], len(def)
 }
 
 func TestToolsListIsAnnotatedAndSmall(t *testing.T) {

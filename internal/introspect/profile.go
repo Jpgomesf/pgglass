@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/result"
@@ -230,15 +229,15 @@ func (p *TableProfile) Summary() string {
 // values in the sample.
 func (p *TableProfile) Result() *result.Result {
 	if p.Sampled {
-		res := textResult("column", "type", "nulls", "distinct")
+		res := result.Text("column", "type", "nulls", "distinct")
 		for _, c := range p.Columns {
-			addRow(res, c.Name, c.Type, strconv.FormatInt(c.Nulls, 10), strconv.FormatInt(c.Distinct, 10))
+			res.AddRow(c.Name, c.Type, strconv.FormatInt(c.Nulls, 10), strconv.FormatInt(c.Distinct, 10))
 		}
 		return res
 	}
-	res := textResult("column", "type", "nulls", "distinct", "width", "common", "min", "max")
+	res := result.Text("column", "type", "nulls", "distinct", "width", "common", "min", "max")
 	for _, c := range p.Columns {
-		addRow(res, append([]string{c.Name, c.Type}, c.Stats.cells()...)...)
+		res.AddRow(append([]string{c.Name, c.Type}, c.Stats.cells()...)...)
 	}
 	return res
 }
@@ -291,21 +290,4 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
-}
-
-// textResult returns an empty result whose columns, named names, hold text.
-func textResult(names ...string) *result.Result {
-	cols := make([]result.Column, len(names))
-	for i, name := range names {
-		cols[i] = result.Column{Name: name, TypeOID: pgtype.TextOID, TypeName: "text"}
-	}
-	return &result.Result{Columns: cols}
-}
-
-func addRow(res *result.Result, cells ...string) {
-	row := make([]*string, len(cells))
-	for i := range cells {
-		row[i] = &cells[i]
-	}
-	res.Rows = append(res.Rows, row)
 }

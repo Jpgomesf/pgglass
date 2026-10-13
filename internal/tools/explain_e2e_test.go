@@ -1,7 +1,6 @@
 package tools_test
 
 import (
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
@@ -12,29 +11,13 @@ import (
 )
 
 func TestExplainToolDefinition(t *testing.T) {
-	s := connect(t, newConfig(config.RoleCheckWarn, nil))
-	res, err := s.ListTools(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
+	tool, size := listedTool(t, "pg_explain")
+	if a := tool.Annotations; !a.ReadOnlyHint || *a.DestructiveHint || *a.OpenWorldHint {
+		t.Errorf("annotations = %+v, want read-only, not destructive, closed world", a)
 	}
-	for _, tool := range res.Tools {
-		if tool.Name != "pg_explain" {
-			continue
-		}
-		if a := tool.Annotations; !a.ReadOnlyHint || *a.DestructiveHint || *a.OpenWorldHint {
-			t.Errorf("annotations = %+v, want read-only, not destructive, closed world", a)
-		}
-		def, err := json.Marshal(tool)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(def) > 700 {
-			t.Errorf("definition takes %d bytes of JSON, want at most 700:\n%s", len(def), def)
-		}
-		t.Logf("pg_explain definition: %d bytes of JSON", len(def))
-		return
+	if size > 700 {
+		t.Errorf("definition takes %d bytes of JSON, want at most 700", size)
 	}
-	t.Fatal("pg_explain is not listed")
 }
 
 // The guard, the search_path check and argument errors come before the

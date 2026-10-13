@@ -9,8 +9,6 @@ import (
 
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/introspect"
-	"github.com/jpgomesf/mcp-postgres/internal/render"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
 )
 
 // defaultDiffSchema is the schema pg_diff_schema compares when given none.
@@ -106,11 +104,7 @@ func (h *Handlers) diffText(args diffSchemaArgs, relations int, lines []string) 
 	if len(text) <= h.spill.InlineMaxBytes {
 		return text, nil
 	}
-	res := &result.Result{Columns: []result.Column{{Name: "difference", TypeName: "text"}}}
-	for i := range lines {
-		res.Rows = append(res.Rows, []*string{&lines[i]})
-	}
-	summary, err := h.spill.Output("pg_diff_schema", args.Left+"-"+args.Right, res, render.TSV)
+	summary, err := h.linesOutput("pg_diff_schema", args.Left+"-"+args.Right, "difference", lines)
 	if err != nil {
 		return "", err
 	}

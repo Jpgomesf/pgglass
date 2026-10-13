@@ -20,6 +20,8 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/introspect"
+	"github.com/jpgomesf/mcp-postgres/internal/render"
+	"github.com/jpgomesf/mcp-postgres/internal/result"
 	"github.com/jpgomesf/mcp-postgres/internal/spill"
 )
 
@@ -110,4 +112,15 @@ func (h *Handlers) useConnection(name string, c *call) error {
 	}
 	c.connection = name
 	return nil
+}
+
+// linesOutput returns lines as the spill store returns a result of one text
+// column named column, one row per line: for text a tool builds that is too
+// large to return as it is.
+func (h *Handlers) linesOutput(tool, conn, column string, lines []string) (string, error) {
+	res := result.Text(column)
+	for _, line := range lines {
+		res.AddRow(line)
+	}
+	return h.spill.Output(tool, conn, res, render.TSV)
 }

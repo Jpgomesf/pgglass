@@ -2,6 +2,8 @@
 // (uuid, numeric, jsonb, arrays, ...) keeps its exact text form.
 package result
 
+import "github.com/jackc/pgx/v5/pgtype"
+
 // Column describes one result column. Names may repeat (SELECT 1 AS a, 2 AS a).
 type Column struct {
 	Name     string
@@ -19,4 +21,24 @@ type Result struct {
 	// TruncatedReason names (e.g. "max_rows=1000").
 	Truncated       bool
 	TruncatedReason string
+}
+
+// Text returns a result with no rows whose columns, named names, hold text:
+// for output a tool builds itself, rendered and spilled like a query's.
+func Text(names ...string) *Result {
+	cols := make([]Column, len(names))
+	for i, name := range names {
+		cols[i] = Column{Name: name, TypeOID: pgtype.TextOID, TypeName: "text"}
+	}
+	return &Result{Columns: cols}
+}
+
+// AddRow appends a row of values, none of them NULL. The row holds copies,
+// so values may be reused.
+func (r *Result) AddRow(values ...string) {
+	row := make([]*string, len(values))
+	for i, v := range values {
+		row[i] = &v // v is a new variable in each iteration
+	}
+	r.Rows = append(r.Rows, row)
 }

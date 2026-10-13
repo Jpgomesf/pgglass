@@ -1,7 +1,6 @@
 package tools_test
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -159,24 +158,7 @@ func TestProfileRoleCheckStrictRefusesRolesWithCriticalFindings(t *testing.T) {
 }
 
 func TestProfileDefinitionIsSmall(t *testing.T) {
-	s := connect(t, newConfig(config.RoleCheckWarn, nil))
-	res, err := s.ListTools(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
+	if _, size := listedTool(t, "pg_profile"); size >= 700 {
+		t.Errorf("pg_profile definition takes %d bytes of JSON, want under 700", size)
 	}
-	for _, tool := range res.Tools {
-		if tool.Name != "pg_profile" {
-			continue
-		}
-		def, err := json.Marshal(tool)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(def) >= 700 {
-			t.Errorf("pg_profile definition takes %d bytes of JSON, want under 700", len(def))
-		}
-		t.Logf("pg_profile definition: %d bytes of JSON", len(def))
-		return
-	}
-	t.Fatal("pg_profile is not listed")
 }

@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/jpgomesf/mcp-postgres/internal/config"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
@@ -308,16 +306,8 @@ func TestFanoutArgumentErrors(t *testing.T) {
 
 // pg_query takes connections in place of connection, so it requires neither.
 func TestFanoutDefinition(t *testing.T) {
-	s := connect(t, newConfig(config.RoleCheckWarn, nil))
-	res, err := s.ListTools(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	i := slices.IndexFunc(res.Tools, func(tool *mcp.Tool) bool { return tool.Name == "pg_query" })
-	if i < 0 {
-		t.Fatal("no pg_query tool")
-	}
-	data, err := json.Marshal(res.Tools[i].InputSchema)
+	tool, size := listedTool(t, "pg_query")
+	data, err := json.Marshal(tool.InputSchema)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,9 +330,5 @@ func TestFanoutDefinition(t *testing.T) {
 		connections.Items["type"] != "string" || connections.MaxItems != 10 {
 		t.Errorf("pg_query input schema: %s", data)
 	}
-	tool, err := json.Marshal(res.Tools[i])
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Logf("pg_query definition: %d bytes of JSON, %d of them the connections argument", len(tool), len(schema.Properties["connections"]))
+	t.Logf("pg_query definition: %d bytes of JSON, %d of them the connections argument", size, len(schema.Properties["connections"]))
 }

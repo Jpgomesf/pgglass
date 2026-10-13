@@ -1,7 +1,6 @@
 package tools_test
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -198,24 +197,7 @@ func TestDiffSchemaSpillsALargeDiff(t *testing.T) {
 }
 
 func TestDiffSchemaDefinitionIsSmall(t *testing.T) {
-	s := connect(t, newConfig(config.RoleCheckWarn, nil))
-	res, err := s.ListTools(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
+	if _, size := listedTool(t, "pg_diff_schema"); size > 700 {
+		t.Errorf("pg_diff_schema takes %d bytes of JSON, want at most 700", size)
 	}
-	for _, tool := range res.Tools {
-		if tool.Name != "pg_diff_schema" {
-			continue
-		}
-		def, err := json.Marshal(tool)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(def) > 700 {
-			t.Errorf("pg_diff_schema takes %d bytes of JSON, want at most 700:\n%s", len(def), def)
-		}
-		t.Logf("pg_diff_schema definition: %d bytes of JSON", len(def))
-		return
-	}
-	t.Fatalf("pg_diff_schema is not listed among %d tools", len(res.Tools))
 }

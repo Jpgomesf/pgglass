@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	"github.com/jpgomesf/mcp-postgres/internal/health"
 	"github.com/jpgomesf/mcp-postgres/internal/render"
 	"github.com/jpgomesf/mcp-postgres/internal/result"
@@ -41,13 +39,9 @@ func (h *Handlers) health(ctx context.Context, raw json.RawMessage, c *call) (st
 // healthResult returns lines as a result with two text columns, section and
 // detail.
 func healthResult(lines []health.Line) *result.Result {
-	res := &result.Result{Columns: []result.Column{
-		{Name: "section", TypeOID: pgtype.TextOID, TypeName: "text"},
-		{Name: "detail", TypeOID: pgtype.TextOID, TypeName: "text"},
-	}}
+	res := result.Text("section", "detail")
 	for _, l := range lines {
-		section, detail := l.Section, l.Detail
-		res.Rows = append(res.Rows, []*string{&section, &detail})
+		res.AddRow(l.Section, l.Detail)
 	}
 	return res
 }
