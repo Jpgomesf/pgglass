@@ -34,6 +34,7 @@ type node struct {
 	Strategy      string  `json:"Strategy"` // of an aggregate or set operation: "Plain", "Sorted", "Hashed", "Mixed"
 	ParallelAware bool    `json:"Parallel Aware"`
 	Parent        string  `json:"Parent Relationship"` // "Outer", "Inner", "SubPlan", ...
+	Subplan       string  `json:"Subplan Name"`
 	Index         string  `json:"Index Name"`
 	Schema        string  `json:"Schema"` // with VERBOSE only
 	Relation      string  `json:"Relation Name"`
@@ -41,6 +42,7 @@ type node struct {
 	StartupCost   float64 `json:"Startup Cost"`
 	TotalCost     float64 `json:"Total Cost"`
 	PlanRows      float64 `json:"Plan Rows"`
+	Width         float64 `json:"Plan Width"`
 	ActualTime    float64 `json:"Actual Total Time"` // ms
 	ActualRows    float64 `json:"Actual Rows"`
 	Loops         float64 `json:"Actual Loops"`
@@ -98,6 +100,8 @@ func (n *node) setShare(share float64) {
 	for i := range n.Plans {
 		c := &n.Plans[i]
 		switch {
+		case c.Parent == "InitPlan" || c.Parent == "SubPlan":
+			c.setShare(c.subplanShare())
 		case !n.streams(c):
 			c.setShare(1)
 		case n.Type == "Limit":
@@ -128,16 +132,21 @@ func (n *node) streams(c *node) bool {
 	}
 }
 
-// ownStartupCost is n's startup cost less its initplans', which the planner
-// adds to it: they run in full before n returns a row.
 func (n *node) ownStartupCost() float64 {
 	cost := n.StartupCost
 	for i := range n.Plans {
-		if n.Plans[i].Parent == "InitPlan" {
-			cost -= n.Plans[i].TotalCost
+		if c := &n.Plans[i]; c.Parent == "InitPlan" {
+			cost -= c.StartupCost + c.subplanShare()*(c.TotalCost-c.StartupCost)
 		}
 	}
 	return cost
+}
+
+func (n *node) subplanShare() float64 {
+	if n.Width == 0 && !strings.HasPrefix(n.Subplan, "CTE ") {
+		return 1 / max(n.PlanRows, 1)
+	}
+	return 1
 }
 
 // limitShare is the part of its input c that Limit n reads when it does share

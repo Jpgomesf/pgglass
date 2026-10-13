@@ -266,3 +266,20 @@ func TestExplainGoesThroughTheRoleCheck(t *testing.T) {
 		t.Errorf("audit lines: %+v", lines)
 	}
 }
+
+// An EXISTS reads its subquery up to its first row, as the planner charges
+// it: the seq scan under one ranked above the total cost and was flagged as a
+// full scan and, with analyze, for returning 1 row of the 5000 planned. Now it
+// costs its first row, and neither flag is raised.
+func TestExplainChargesAnExistsItsFirstRow(t *testing.T) {
+	t.Parallel()
+	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
+	const sql = "SELECT EXISTS (SELECT 1 FROM events WHERE kind = 'click')"
+	plan := s.ok(t, "pg_explain", args("clean", sql))
+	if !regexp.MustCompile(`\n  Seq Scan on app\.events: cost [0-9.]+, ~1 row\n`).MatchString(plan) || !strings.HasSuffix(plan, "\nflags: none") {
+		t.Errorf("plan only:\n%s", plan)
+	}
+	if got := s.ok(t, "pg_explain", args("clean", sql, "analyze", true)); !strings.HasSuffix(got, "\nflags: none") {
+		t.Errorf("analyze:\n%s", got)
+	}
+}
