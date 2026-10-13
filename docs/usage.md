@@ -2,6 +2,8 @@
 
 Once the server is connected to your agent (for example Claude Code), you ask in natural language and the agent calls the tools. Every tool is read-only, and calls can run in parallel, on one connection or across several.
 
+On connecting, the server tells the agent how to use the tools well: start with `pg_list_connections`, look names up with `pg_schema` or `pg_search` instead of guessing them, pass values as `params`, run one statement on several connections with `connections`, and read a spill file instead of running the query again.
+
 ## Tools
 
 | Tool | Arguments | Returns |

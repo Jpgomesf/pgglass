@@ -53,6 +53,9 @@ func TestStdioServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v\nstderr:\n%s", err, logs())
 	}
+	if got, want := session.InitializeResult().ProtocolVersion, mcp.SupportedProtocolVersions()[0]; got != want {
+		t.Errorf("negotiated protocol version %s, want the newest, %s", got, want)
+	}
 	checkTools(t, session)
 	res, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "pg_query", Arguments: map[string]any{
 		"connection": "app", "sql": "SELECT count(*) FROM customers",

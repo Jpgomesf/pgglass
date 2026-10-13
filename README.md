@@ -21,7 +21,7 @@ pgglass is an [MCP](https://modelcontextprotocol.io) server that gives AI agents
 | `pg_diff_schema` | Compare one schema on two connections: relations, view queries, columns, constraints, indexes and RLS policies |
 | `pg_health` | Check a server: connections, long-running and blocked sessions, cache hit ratio, dead rows, unused indexes, transaction ID wraparound and replica lag |
 
-Calls run in parallel, across connections and on the same one. See the [usage guide](docs/usage.md).
+Calls run in parallel, across connections and on the same one. Each tool has a display title, and on connecting the server gives the agent short instructions on using the tools well. It speaks MCP revisions 2024-11-05 to 2026-07-28 and settles on the newest the client speaks too. See the [usage guide](docs/usage.md).
 
 ## Install
 

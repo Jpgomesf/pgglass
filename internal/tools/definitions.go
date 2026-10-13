@@ -6,6 +6,16 @@ import (
 	"github.com/jpgomesf/pgglass/internal/config"
 )
 
+const instructions = `pgglass gives read-only access to PostgreSQL: pg_query runs one SELECT, EXPLAIN or SHOW in a READ ONLY transaction that is always rolled back.
+
+- Start with pg_list_connections: it names the connections every other tool takes.
+- Do not guess names. Look them up before writing SQL: pg_schema lists the schemas, then a schema's relations, then a relation's columns, constraints and indexes; pg_search finds relations, columns and functions by part of their name.
+- Pass values as params ($1, $2, ...) instead of writing them into the SQL.
+- To run one statement on several databases, call pg_query once with connections (up to 10), not once per connection. pg_diff_schema compares a schema between two connections.
+- Aggregate in SQL rather than reading many rows. A pg_query result too large to return is saved to a CSV file and summarized: read or grep the file instead of running the query again.
+- Check a heavy query's plan with pg_explain before running it. pg_profile shows what a table's columns hold; pg_health checks a server.
+- Calls can run in parallel.`
+
 // annotations hold for every tool: none changes anything.
 var annotations = &mcp.ToolAnnotations{
 	ReadOnlyHint:    true,
@@ -18,13 +28,15 @@ var connectionArg = prop("string", "Connection name, from pg_list_connections.")
 
 var listConnectionsTool = &mcp.Tool{
 	Name:        "pg_list_connections",
+	Title:       "List connections",
 	Description: "List the configured connections and, once checked, what each connection's role can do beyond reading.",
 	Annotations: annotations,
 	InputSchema: object(nil, map[string]any{}),
 }
 
 var queryTool = &mcp.Tool{
-	Name: "pg_query",
+	Name:  "pg_query",
+	Title: "Run read-only query",
 	Description: "Run one SELECT, EXPLAIN SELECT or SHOW in a READ ONLY transaction that is always rolled back. " +
 		"Other statements and functions with side effects are rejected. " +
 		"Rows past max_rows are cut; a result too large to return is saved to a CSV file and summarized.",
@@ -57,7 +69,8 @@ var fanoutConnectionsArg = map[string]any{
 }
 
 var schemaTool = &mcp.Tool{
-	Name: "pg_schema",
+	Name:  "pg_schema",
+	Title: "Describe schema",
 	Description: "Describe a database step by step: without schema, list the schemas; with schema, its tables and views; " +
 		"with schema and table, that relation's columns, constraints, indexes, policies and triggers.",
 	Annotations: annotations,
@@ -70,6 +83,7 @@ var schemaTool = &mcp.Tool{
 
 var searchTool = &mcp.Tool{
 	Name:        "pg_search",
+	Title:       "Search names",
 	Description: "Find relations, columns and functions whose name contains pattern, ignoring case; pattern has no wildcards.",
 	Annotations: annotations,
 	InputSchema: object([]string{"connection", "pattern"}, map[string]any{
@@ -84,7 +98,8 @@ var searchTool = &mcp.Tool{
 }
 
 var diffSchemaTool = &mcp.Tool{
-	Name: "pg_diff_schema",
+	Name:  "pg_diff_schema",
+	Title: "Compare schemas",
 	Description: "Compare one schema on two connections, e.g. prod and staging: relations, view queries, " +
 		"columns, constraints, indexes and RLS policies.",
 	Annotations: annotations,
@@ -96,8 +111,9 @@ var diffSchemaTool = &mcp.Tool{
 }
 
 var profileTool = &mcp.Tool{
-	Name: "pg_profile",
-	Description: "Profile a table's columns from pg_stats: nulls, distinct values, top 5 values, min/max; " +
+	Name:  "pg_profile",
+	Title: "Profile table",
+	Description: "Per column: nulls, distinct values, top 5 values and min/max from pg_stats; " +
 		"if never analyzed, counts in a sample of up to 10000 rows.",
 	Annotations: annotations,
 	InputSchema: object([]string{"connection", "table"}, map[string]any{
@@ -110,18 +126,20 @@ var profileTool = &mcp.Tool{
 
 var explainTool = &mcp.Tool{
 	Name:        "pg_explain",
+	Title:       "Explain query",
 	Description: "Summarize one SELECT's plan: cost, costliest nodes and flags (big seq scans, misestimates, disk spills, big nested loops).",
 	Annotations: annotations,
 	InputSchema: object([]string{"connection", "sql"}, map[string]any{
 		"connection": connectionArg,
 		"sql":        prop("string", "One SELECT."),
 		"analyze":    prop("boolean", "Run it, rolled back, for actual times and rows; default false."),
-		"schema":     prop("string", "search_path; default: the connection's default_schema."),
+		"schema":     prop("string", "search_path; default: default_schema."),
 	}),
 }
 
 var healthTool = &mcp.Tool{
-	Name: "pg_health",
+	Name:  "pg_health",
+	Title: "Check server health",
 	Description: "Check server health from statistics views: connections vs max_connections, " +
 		"queries running or transactions open over a minute, blocked sessions, cache hit ratio, dead rows, " +
 		"unused indexes, xid wraparound and replica lag. Never shows query text.",

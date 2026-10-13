@@ -56,6 +56,11 @@ func connect(t *testing.T, cfg config.Config) *session {
 // connectSpillingTo is connect with its spill files in dir.
 func connectSpillingTo(t *testing.T, cfg config.Config, dir string) *session {
 	t.Helper()
+	return connectAt(t, cfg, dir, "")
+}
+
+func connectAt(t *testing.T, cfg config.Config, dir, protocolVersion string) *session {
+	t.Helper()
 	eng := engine.New(&cfg)
 	t.Cleanup(eng.Close)
 	s := &session{audit: &lockedBuffer{}, spillDir: dir}
@@ -69,7 +74,7 @@ func connectSpillingTo(t *testing.T, cfg config.Config, dir string) *session {
 	}
 	t.Cleanup(func() { _ = ss.Close() })
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, nil)
-	cs, err := client.Connect(t.Context(), clientSide, nil)
+	cs, err := client.Connect(t.Context(), clientSide, &mcp.ClientSessionOptions{ProtocolVersion: protocolVersion})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,10 +243,57 @@ func TestToolsListIsAnnotatedAndSmall(t *testing.T) {
 	t.Logf("tool definitions: %d bytes of JSON", len(defs))
 }
 
+func TestEveryToolHasAHumanReadableTitleOfItsOwn(t *testing.T) {
+	s := connect(t, newConfig(config.RoleCheckWarn, nil))
+	res, err := s.ListTools(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	titles := map[string]bool{}
+	for _, tool := range res.Tools {
+		if tool.Title == "" || strings.Contains(tool.Title, "_") || titles[tool.Title] {
+			t.Errorf("%s title = %q, want a human-readable title no other tool has", tool.Name, tool.Title)
+		}
+		titles[tool.Title] = true
+	}
+}
+
 func TestServerIdentifiesAsPgglass(t *testing.T) {
 	s := connect(t, newConfig(config.RoleCheckWarn, nil))
 	if info := s.InitializeResult().ServerInfo; info == nil || info.Name != "pgglass" || info.Version != "test" {
 		t.Errorf("server info = %+v, want pgglass, version test", info)
+	}
+}
+
+func TestInstructionsTellAgentsHowToUseTheTools(t *testing.T) {
+	s := connect(t, newConfig(config.RoleCheckWarn, nil))
+	got := s.InitializeResult().Instructions
+	if len(got) >= 2048 {
+		t.Errorf("instructions take %d bytes, want fewer than 2048", len(got))
+	}
+	for _, want := range []string{"pg_list_connections", "pg_schema", "pg_search", "params", "connections", "CSV file"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("instructions do not mention %q:\n%s", want, got)
+		}
+	}
+}
+
+func TestServerNegotiatesTheNewestProtocolVersionAndEveryOlderOne(t *testing.T) {
+	cfg := newConfig(config.RoleCheckWarn, nil)
+	instructions := connect(t, cfg).InitializeResult().Instructions
+	cases := map[string]string{"": mcp.SupportedProtocolVersions()[0]}
+	for _, v := range mcp.SupportedProtocolVersions() {
+		cases[v] = v
+	}
+	for ask, want := range cases {
+		s := connectAt(t, cfg, t.TempDir(), ask)
+		if res := s.InitializeResult(); res.ProtocolVersion != want || res.Instructions != instructions {
+			t.Errorf("client asking for %q: version %q, instructions %q; want version %q and the server's instructions",
+				ask, res.ProtocolVersion, res.Instructions, want)
+		}
+		if got := s.ok(t, "pg_list_connections", nil); got != "Connections (0):" {
+			t.Errorf("client asking for %q: pg_list_connections = %q", ask, got)
+		}
 	}
 }
 
