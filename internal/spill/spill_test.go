@@ -404,6 +404,60 @@ func TestOutputSummaryNamesTheFileWhenNoColumnFits(t *testing.T) {
 	}
 }
 
+// lines returns rows rows of one text column, line, each n characters long
+// and ending with its number.
+func lines(rows, n int) *result.Result {
+	res := result.Text("line")
+	for i := range rows {
+		res.AddRow(fmt.Sprintf("%s %03d", strings.Repeat("x", n-4), i))
+	}
+	return res
+}
+
+// wholeOf renders res as it is returned inline, with the given footer, but
+// with no cell cut.
+func wholeOf(t *testing.T, res *result.Result, footer string) string {
+	t.Helper()
+	body, err := render.Render(res, render.TSV, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body + footer
+}
+
+// Spill writes the file and summarizes it even when the inline rendering,
+// its cells cut, would fit: the caller found the output too large to return
+// as it is, and the file holds every line whole.
+func TestSpillAlwaysWritesTheFile(t *testing.T) {
+	res := lines(40, 300) // 12 kB whole, under 9 kB cut
+	store := newStore(t, 10_000)
+	if out, err := store.Output("pg_explain", "prod", res, render.TSV); err != nil || strings.Contains(out, "Full result") {
+		t.Fatalf("Output = %v, want the lines inline, cut:\n%s", err, out)
+	}
+
+	out, err := store.Spill("pg_explain", "prod", res, render.TSV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := len(wholeOf(t, res, "(40 rows)"))
+	if want := fmt.Sprintf("Result too large to return inline (%d bytes, limit 10000): 40 rows × 1 column, truncated=false.\n", size); !strings.HasPrefix(out, want) || len(out) > 10_000 {
+		t.Errorf("summary (%d bytes):\n%s\nwant it to start with\n%s", len(out), out, want)
+	}
+	want, err := render.Render(res, render.CSV, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, spillPath(t, out)); got != want {
+		t.Errorf("spill file is not the full CSV rendering:\n%s", got)
+	}
+
+	store.Dir = "" // no file: as many leading lines as fit
+	if out, err = store.Spill("pg_explain", "prod", res, render.TSV); err != nil ||
+		!strings.Contains(out, " of 40 rows shown; could not write the spill file: ") || len(out) > 10_000 {
+		t.Errorf("without a file = %v: %d bytes:\n%s", err, len(out), out)
+	}
+}
+
 // readFile returns what the file at path holds.
 func readFile(t *testing.T, path string) string {
 	t.Helper()
