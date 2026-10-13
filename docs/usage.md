@@ -51,7 +51,7 @@ app.orders: table
 app.customer_order_totals.order_count: bigint
 ```
 
-Only what the connection's role can read shows up. Matches over 10 KB are written to a spill file, one per row, like a large `pg_query` result, and the summary names the limit that cut them, if one did: `truncated=true (limit=500)`, or `max_rows` when it caps `limit`.
+When there are more matches, a last line names the limit that cut them: `(truncated: limit=50)`, or `max_rows` when it caps `limit`. Only what the connection's role can read shows up. Matches over 10 KB are written to a spill file, one per row, like a large `pg_query` result, and the summary names that limit instead: `truncated=true (limit=500)`.
 
 ## Query
 

@@ -245,7 +245,7 @@ func TestSearch(t *testing.T) {
 		want string
 	}{
 		{map[string]any{"pattern": "ORDER"}, "app.customer_order_totals: view\napp.orders: table\napp.customer_order_totals.order_count: bigint"},
-		{map[string]any{"pattern": "order", "limit": 2}, "app.customer_order_totals: view\napp.orders: table"},
+		{map[string]any{"pattern": "order", "limit": 2}, "app.customer_order_totals: view\napp.orders: table\n(truncated: limit=2)"},
 		{map[string]any{"pattern": "%"}, "no matches"},
 	} {
 		tc.args["connection"] = "clean"
