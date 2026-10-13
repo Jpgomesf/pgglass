@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="jpgomesf/mcp-postgres"
-BINARY="mcp-postgres"
+REPO="jpgomesf/pgglass"
+BINARY="pgglass"
 INSTALL_DIR="/usr/local/bin"
 
 # Detect OS and architecture

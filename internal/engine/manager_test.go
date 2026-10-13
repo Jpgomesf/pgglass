@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 // closedPort returns a local TCP port with nothing listening on it.
@@ -57,7 +57,7 @@ func TestNewResolvesNothingUntilFirstUse(t *testing.T) {
 // reaches it without a restart. pool_max_conn_lifetime=1ms retires every
 // connection after one use.
 func TestEachNewConnectionResolvesTheDSNAgain(t *testing.T) {
-	const role, envVar = "engine_rotating", "MCP_PG_ENGINE_ROTATING_DSN"
+	const role, envVar = "engine_rotating", "PGGLASS_ENGINE_ROTATING_DSN"
 	admin := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
 	exec := func(sql string) {
 		t.Helper()
@@ -98,7 +98,7 @@ func TestEachNewConnectionResolvesTheDSNAgain(t *testing.T) {
 // A DSN that comes to name another user, database or host fails each new
 // connection instead, until a restart: the role check audited the first.
 func TestNewConnectionRefusesAnotherUserDatabaseOrHost(t *testing.T) {
-	const envVar = "MCP_PG_ENGINE_TARGET_DSN"
+	const envVar = "PGGLASS_ENGINE_TARGET_DSN"
 	oneUse := func(dsn string) string { return dsn + "&pool_max_conn_lifetime=1ms" }
 	first := oneUse(testdb.DSN(t, testdb.RoleClean, testdb.DBApp))
 	t.Setenv(envVar, first)
@@ -250,7 +250,7 @@ func TestInvalidDSNErrorHidesPassword(t *testing.T) {
 }
 
 func TestFailedResolveIsRetried(t *testing.T) {
-	const envVar = "MCP_PG_ENGINE_TEST_DSN"
+	const envVar = "PGGLASS_ENGINE_TEST_DSN"
 	t.Setenv(envVar, "")
 	m := managerFor(t, config.Defaults{}, map[string]config.Connection{db: {Source: "env", DSNEnvVar: envVar}})
 

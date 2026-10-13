@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
+	"github.com/jpgomesf/pgglass/internal/config"
 )
 
 // Postgres keeps names of at most 63 bytes and cuts a longer one to its

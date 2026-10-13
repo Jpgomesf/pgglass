@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/spill"
+	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
 // A spilled diff's summary is fitted to the room its first line leaves: in a

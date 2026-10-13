@@ -12,7 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 func TestMain(m *testing.M) { testdb.Main(m) }
@@ -35,7 +35,7 @@ func TestStdioServer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale := plantStaleSpillFile(t, filepath.Join(cacheDir, "mcp-postgres"))
+	stale := plantStaleSpillFile(t, filepath.Join(cacheDir, "pgglass"))
 
 	cmd := exec.Command(bin) //nolint:gosec // the binary this test just built
 	stderr, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
@@ -78,7 +78,7 @@ func TestStdioServer(t *testing.T) {
 func buildServer(t *testing.T, cfg map[string]any) string {
 	t.Helper()
 	dir := t.TempDir()
-	bin := filepath.Join(dir, "mcp-postgres")
+	bin := filepath.Join(dir, "pgglass")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
 	}

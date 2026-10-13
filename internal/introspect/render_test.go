@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/introspect"
+	"github.com/jpgomesf/pgglass/internal/introspect"
 )
 
 type renderer interface{ Render() string }

@@ -10,11 +10,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
-	"github.com/jpgomesf/mcp-postgres/internal/render"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
-	"github.com/jpgomesf/mcp-postgres/internal/spill"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/render"
+	"github.com/jpgomesf/pgglass/internal/result"
+	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
 var (

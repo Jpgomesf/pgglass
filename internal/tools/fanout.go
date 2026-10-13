@@ -10,9 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/render"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/render"
+	"github.com/jpgomesf/pgglass/internal/result"
 )
 
 // maxFanout is the most connections one pg_query call may fan out to.

@@ -14,11 +14,11 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/spill"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
-	"github.com/jpgomesf/mcp-postgres/internal/tools"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/spill"
+	"github.com/jpgomesf/pgglass/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/tools"
 )
 
 func TestMain(m *testing.M) { testdb.Main(m) }
@@ -238,11 +238,18 @@ func TestToolsListIsAnnotatedAndSmall(t *testing.T) {
 	t.Logf("tool definitions: %d bytes of JSON", len(defs))
 }
 
+func TestServerIdentifiesAsPgglass(t *testing.T) {
+	s := connect(t, newConfig(config.RoleCheckWarn, nil))
+	if info := s.InitializeResult().ServerInfo; info == nil || info.Name != "pgglass" || info.Version != "test" {
+		t.Errorf("server info = %+v, want pgglass, version test", info)
+	}
+}
+
 func TestListConnectionsInNameOrder(t *testing.T) {
 	cfg := newConfig(config.RoleCheckWarn, map[string]config.Connection{
 		"zeta":  direct(unusedDSN),
 		"alpha": {Source: "direct", DSN: unusedDSN, DefaultSchema: "app", RequiresVPN: true},
-		"mid":   {Source: "env", DSNEnvVar: "MCP_PG_TOOLS_TEST_UNSET"},
+		"mid":   {Source: "env", DSNEnvVar: "PGGLASS_TOOLS_TEST_UNSET"},
 	})
 	s := connect(t, cfg)
 	want := "Connections (3):\n" +

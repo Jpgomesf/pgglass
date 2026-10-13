@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/result"
 )
 
 const (

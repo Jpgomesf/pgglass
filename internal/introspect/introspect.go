@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/engine"
 )
 
 // Schema is a non-system schema the current role can see.

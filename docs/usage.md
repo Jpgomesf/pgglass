@@ -92,7 +92,7 @@ When the output would exceed 10 KB, the full result is written as CSV to a new f
 
 ```
 Result too large to return inline (33700 bytes, limit 10000): 1000 rows × 3 columns, truncated=true (max_rows=1000).
-Full result: /home/me/.cache/mcp-postgres/spill-pg_query-prod-app-20261012T180244Z-2684963475.csv
+Full result: /home/me/.cache/pgglass/spill-pg_query-prod-app-20261012T180244Z-2684963475.csv
 It is CSV (RFC 4180) with a header row; NULL is an unquoted empty field and "" the empty string.
 Use Read or Grep on the file instead of re-running the query.
 
@@ -108,7 +108,7 @@ First 5 rows:
 
 After the file, the summary lists the first 20 columns and previews the first 5 rows, as many of each as fit in 10 KB, and cuts preview cells at 64 characters.
 
-Spill files live in `mcp-postgres` under your user cache directory (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux), readable only by you (mode 0600). Without one (`HOME` unset), they live in `mcp-postgres-<uid>` in the temp directory, which the server creates: it must be a directory, not a symlink, that you own with mode 0700, or the server does not start. Spill files older than `spill_ttl_hours` are removed at startup, then at most once an hour as tools return results, whichever server instance wrote them.
+Spill files live in `pgglass` under your user cache directory (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux), readable only by you (mode 0600). Without one (`HOME` unset), they live in `pgglass-<uid>` in the temp directory, which the server creates: it must be a directory, not a symlink, that you own with mode 0700, or the server does not start. Spill files older than `spill_ttl_hours` are removed at startup, then at most once an hour as tools return results, whichever server instance wrote them.
 
 ### Fan-out
 

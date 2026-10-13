@@ -3,7 +3,7 @@ package resolver
 import (
 	"context"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
+	"github.com/jpgomesf/pgglass/internal/config"
 )
 
 func init() { RegisterSource(&DirectSource{}) }

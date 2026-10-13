@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/preflight"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/preflight"
 )
 
 // roleChecks audits the role of each connection once, on first use, and

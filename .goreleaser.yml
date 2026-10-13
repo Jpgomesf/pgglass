@@ -1,5 +1,7 @@
 version: 2
 
+project_name: pgglass
+
 builds:
   - env:
       - CGO_ENABLED=0

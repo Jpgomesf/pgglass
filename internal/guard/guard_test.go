@@ -10,8 +10,8 @@ import (
 	pg_query "github.com/pganalyze/pg_query_go/v6"
 	pgquery "github.com/wasilibs/go-pgquery"
 
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
-	"github.com/jpgomesf/mcp-postgres/internal/guard/guardtest"
+	"github.com/jpgomesf/pgglass/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/guard/guardtest"
 )
 
 func assertRejected(t *testing.T, sql, want string) {

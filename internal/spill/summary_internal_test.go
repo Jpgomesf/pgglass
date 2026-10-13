@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/result"
+	"github.com/jpgomesf/pgglass/internal/result"
 )
 
 // A summary says what it does of the file when that fits in its limit, with
@@ -13,7 +13,7 @@ import (
 // limit: a fanned-out section's share can be smaller. Now it only names the
 // file and counts the rows, past its limit only when that alone does not fit.
 func TestSummaryNamesTheFileWithinItsLimit(t *testing.T) {
-	const path = "/home/me/.cache/mcp-postgres/spill-pg_query-prod-20261012T101530Z-1.csv"
+	const path = "/home/me/.cache/pgglass/spill-pg_query-prod-20261012T101530Z-1.csv"
 	res := result.Text("note")
 	for range 50 {
 		res.AddRow(strings.Repeat("x", 100))

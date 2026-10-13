@@ -14,9 +14,9 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/guard/guardtest"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/guard/guardtest"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 // appConns connects to the app fixture as ro_clean (with default_schema

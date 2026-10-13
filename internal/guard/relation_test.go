@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/guard"
 )
 
 // CheckRelation denies by name the relations whose references Check rejects.

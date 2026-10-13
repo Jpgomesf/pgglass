@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/preflight"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/preflight"
+	"github.com/jpgomesf/pgglass/internal/result"
 )
 
 // script is an engine.Querier that answers the n-th query with the n-th reply.

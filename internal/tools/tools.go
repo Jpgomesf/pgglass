@@ -20,12 +20,12 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/introspect"
-	"github.com/jpgomesf/mcp-postgres/internal/render"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
-	"github.com/jpgomesf/mcp-postgres/internal/spill"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/introspect"
+	"github.com/jpgomesf/pgglass/internal/render"
+	"github.com/jpgomesf/pgglass/internal/result"
+	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
 // Handlers serves the tools for the connections of one config. It is safe
@@ -54,10 +54,10 @@ func New(cfg config.Config, eng *engine.Manager, store *spill.Store, auditLog io
 	}
 }
 
-// NewServer returns an MCP server, named mcp-postgres, that exposes the tools
+// NewServer returns an MCP server, named pgglass, that exposes the tools
 // of h.
 func NewServer(h *Handlers, version string) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "mcp-postgres", Version: version}, nil)
+	s := mcp.NewServer(&mcp.Implementation{Name: "pgglass", Version: version}, nil)
 	s.AddTool(listConnectionsTool, h.handle("pg_list_connections", h.listConnections))
 	s.AddTool(queryTool, h.handle("pg_query", h.query))
 	s.AddTool(schemaTool, h.handle("pg_schema", h.schema))

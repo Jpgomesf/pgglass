@@ -9,8 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/jpgomesf/mcp-postgres/internal/render"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
+	"github.com/jpgomesf/pgglass/internal/render"
+	"github.com/jpgomesf/pgglass/internal/result"
 )
 
 // firstCell renders v as the only cell of a column of type oid and returns

@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/secretsmanager"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
+	"github.com/jpgomesf/pgglass/internal/config"
 )
 
 // primeSecret puts a secret, under no AWS profile, in the shared cache with

@@ -26,7 +26,7 @@ jobs:
       matrix:
         pg-image: [postgres:15-alpine, postgres:16-alpine, postgres:17-alpine]
     env:
-      MCP_PG_IMAGE: ${{ matrix.pg-image }}
+      PGGLASS_PG_IMAGE: ${{ matrix.pg-image }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5

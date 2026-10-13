@@ -3,7 +3,7 @@ package tools
 import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
+	"github.com/jpgomesf/pgglass/internal/config"
 )
 
 // annotations hold for every tool: none changes anything.

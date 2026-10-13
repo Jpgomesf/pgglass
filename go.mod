@@ -1,4 +1,4 @@
-module github.com/jpgomesf/mcp-postgres
+module github.com/jpgomesf/pgglass
 
 go 1.24.0
 

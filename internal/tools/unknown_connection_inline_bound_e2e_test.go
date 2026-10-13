@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
+	"github.com/jpgomesf/pgglass/internal/config"
 )
 
 // An unknown connection's error lists every configured name and quotes the

@@ -30,7 +30,7 @@ func noCacheDir(t *testing.T) string {
 
 // fallbackDir is where spill files go without a user cache directory.
 func fallbackDir(tmp string) string {
-	return filepath.Join(tmp, "mcp-postgres-"+strconv.Itoa(os.Geteuid()))
+	return filepath.Join(tmp, "pgglass-"+strconv.Itoa(os.Geteuid()))
 }
 
 func TestSpillDirIsUnderTheUserCacheDirectory(t *testing.T) {
@@ -41,8 +41,8 @@ func TestSpillDirIsUnderTheUserCacheDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := spillDir(); err != nil || got != filepath.Join(cache, "mcp-postgres") {
-		t.Errorf("spillDir() = %q, %v; want mcp-postgres under %s", got, err, cache)
+	if got, err := spillDir(); err != nil || got != filepath.Join(cache, "pgglass") {
+		t.Errorf("spillDir() = %q, %v; want pgglass under %s", got, err, cache)
 	}
 }
 

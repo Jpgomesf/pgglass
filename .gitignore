@@ -1,6 +1,6 @@
 # Binaries
-mcp-postgres
-mcp-postgres-linux-amd64
+/pgglass
+/pgglass-linux-amd64
 *.exe
 *.exe~
 *.dll

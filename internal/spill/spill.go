@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jpgomesf/mcp-postgres/internal/render"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
+	"github.com/jpgomesf/pgglass/internal/render"
+	"github.com/jpgomesf/pgglass/internal/result"
 )
 
 const (

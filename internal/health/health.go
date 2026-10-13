@@ -17,7 +17,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/engine"
 )
 
 // longRunning is how long a query must have been running, or a transaction

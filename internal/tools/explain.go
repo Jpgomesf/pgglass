@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/jpgomesf/mcp-postgres/internal/explain"
+	"github.com/jpgomesf/pgglass/internal/explain"
 )
 
 type explainArgs struct {

@@ -6,10 +6,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/resolver"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/resolver"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 // cached is the "cached" credential source. Like aws_secrets_manager, it

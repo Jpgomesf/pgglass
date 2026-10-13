@@ -3,8 +3,8 @@ package preflight_test
 import (
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/preflight"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/preflight"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 // CREATE EXTENSION pg_prewarm leaves autoprewarm_dump_now, which writes

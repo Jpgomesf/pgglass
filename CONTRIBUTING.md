@@ -1,4 +1,4 @@
-# Contributing to mcp-postgres
+# Contributing to pgglass
 
 Thanks for your interest in contributing! This document covers the workflow and guidelines for getting your changes merged.
 
@@ -130,7 +130,7 @@ go test ./internal/resolver/...  # single package
 ```
 
 Integration tests run a throwaway Postgres container through `internal/testdb`
-(one per test package; set `MCP_PG_IMAGE` to pick the image, default
+(one per test package; set `PGGLASS_PG_IMAGE` to pick the image, default
 `postgres:17-alpine`, which `testdb.Image()` returns). Without Docker they fail
 rather than skip. A package that uses `testdb` needs
 `func TestMain(m *testing.M) { testdb.Main(m) }`. Read through the engine, as

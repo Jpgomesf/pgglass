@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/introspect"
+	"github.com/jpgomesf/pgglass/internal/introspect"
 )
 
 // defs are the definitions of one kind of object in a relation, by name.

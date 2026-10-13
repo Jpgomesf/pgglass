@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/introspect"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/introspect"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 // The listings and a description read a comment of over 200 characters cut

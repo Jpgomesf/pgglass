@@ -15,9 +15,9 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/result"
 )
 
 // reltuplesSQL returns, as JSON, pg_class.reltuples of each relation that

@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/introspect"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/introspect"
+	"github.com/jpgomesf/pgglass/internal/result"
 )
 
 // fakeQuerier returns a canned result and records the query it was given.

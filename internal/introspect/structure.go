@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/engine"
 )
 
 // SchemaStructure is what Diff compares of one schema: the relations

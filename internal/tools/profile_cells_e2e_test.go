@@ -3,8 +3,8 @@ package tools_test
 import (
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 // Five uuids and their shares take 218 characters in pg_profile's common

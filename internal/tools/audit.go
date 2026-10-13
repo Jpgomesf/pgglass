@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/guard"
 )
 
 // Outcomes of a call, as its audit line reports them.

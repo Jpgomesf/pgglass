@@ -9,12 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/explain"
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/explain"
+	"github.com/jpgomesf/pgglass/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/result"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 func TestMain(m *testing.M) { testdb.Main(m) }

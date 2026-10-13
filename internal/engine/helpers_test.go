@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/resolver"
-	"github.com/jpgomesf/mcp-postgres/internal/result"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/resolver"
+	"github.com/jpgomesf/pgglass/internal/result"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 func TestMain(m *testing.M) { testdb.Main(m) }

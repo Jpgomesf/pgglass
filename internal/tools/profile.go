@@ -6,9 +6,9 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
-	"github.com/jpgomesf/mcp-postgres/internal/introspect"
-	"github.com/jpgomesf/mcp-postgres/internal/render"
+	"github.com/jpgomesf/pgglass/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/introspect"
+	"github.com/jpgomesf/pgglass/internal/render"
 )
 
 type profileArgs struct {

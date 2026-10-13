@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/guard"
 )
 
 // With a denied schema on the search path, its functions could be called

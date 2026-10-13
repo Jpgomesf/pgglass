@@ -12,7 +12,7 @@
 //   - DBSupabase: a Supabase pg_net look-alike whose queue table and
 //     net.http_post function PUBLIC can write and execute.
 //
-// Each role's password is its name. The image comes from MCP_PG_IMAGE
+// Each role's password is its name. The image comes from PGGLASS_PG_IMAGE
 // (default DefaultImage). Callers are skipped under -short and fail, never
 // skip, when Docker is unavailable.
 package testdb
@@ -33,8 +33,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
 )
 
 // Roles and databases created by the fixtures.
@@ -47,7 +47,7 @@ const (
 	DBSupabase   = "supabase_like" // the pg_net look-alike
 )
 
-// DefaultImage is the Postgres image used when MCP_PG_IMAGE is unset.
+// DefaultImage is the Postgres image used when PGGLASS_PG_IMAGE is unset.
 const DefaultImage = "postgres:17-alpine"
 
 // maintenanceDB is the database the superuser connects to for cluster-wide statements.
@@ -175,9 +175,9 @@ func (h *harness) terminate() error {
 	return testcontainers.TerminateContainer(h.srv.ctr)
 }
 
-// Image returns the Postgres image to run: MCP_PG_IMAGE, or DefaultImage.
+// Image returns the Postgres image to run: PGGLASS_PG_IMAGE, or DefaultImage.
 func Image() string {
-	if img := os.Getenv("MCP_PG_IMAGE"); img != "" {
+	if img := os.Getenv("PGGLASS_PG_IMAGE"); img != "" {
 		return img
 	}
 	return DefaultImage

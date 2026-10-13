@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/resolver"
+	"github.com/jpgomesf/pgglass/internal/resolver"
 )
 
 func TestValidatorAllPresent(t *testing.T) {

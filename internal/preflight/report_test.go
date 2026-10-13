@@ -3,7 +3,7 @@ package preflight_test
 import (
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/preflight"
+	"github.com/jpgomesf/pgglass/internal/preflight"
 )
 
 func TestBlocking(t *testing.T) {

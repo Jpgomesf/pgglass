@@ -1,4 +1,4 @@
-// Command mcp-postgres is a stdio MCP server that gives AI agents read-only
+// Command pgglass is a stdio MCP server that gives AI agents read-only
 // access to the PostgreSQL connections in config.json.
 package main
 
@@ -16,11 +16,11 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/resolver"
-	"github.com/jpgomesf/mcp-postgres/internal/spill"
-	"github.com/jpgomesf/mcp-postgres/internal/tools"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/resolver"
+	"github.com/jpgomesf/pgglass/internal/spill"
+	"github.com/jpgomesf/pgglass/internal/tools"
 )
 
 // version is set at release time (goreleaser's -X main.version).
@@ -30,7 +30,7 @@ func main() {
 	// stdout carries the protocol: every log line goes to stderr.
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
 	if err := run(context.Background(), logger); err != nil {
-		logger.Error("mcp-postgres stopped", slog.String("error", err.Error()))
+		logger.Error("pgglass stopped", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
 }
@@ -68,17 +68,17 @@ func run(ctx context.Context, logger *slog.Logger) error {
 	return server.Run(ctx, &mcp.StdioTransport{})
 }
 
-// spillDir returns the directory for spill files: mcp-postgres under the
-// user cache directory or, without one (HOME unset), mcp-postgres-<euid> in
+// spillDir returns the directory for spill files: pgglass under the
+// user cache directory or, without one (HOME unset), pgglass-<euid> in
 // the temp directory, which it creates. In a shared temp directory, another
 // user could create that one first and read or replace the files the agent
 // is told to read, so it must be a directory, not a symlink, that only this
 // user may use.
 func spillDir() (string, error) {
 	if cache, err := os.UserCacheDir(); err == nil {
-		return filepath.Join(cache, "mcp-postgres"), nil
+		return filepath.Join(cache, "pgglass"), nil
 	}
-	dir := filepath.Join(os.TempDir(), "mcp-postgres-"+strconv.Itoa(os.Geteuid()))
+	dir := filepath.Join(os.TempDir(), "pgglass-"+strconv.Itoa(os.Geteuid()))
 	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", err
 	}

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jpgomesf/mcp-postgres/internal/preflight"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/preflight"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 //go:embed testdata/escalation.sql

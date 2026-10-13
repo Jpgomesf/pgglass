@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/testdb"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
 var healthSections = []string{"connections", "long_running", "blocked", "cache_hit", "dead_tuples", "unused_indexes", "xid_wraparound", "replication"}

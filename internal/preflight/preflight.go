@@ -12,7 +12,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/engine"
 )
 
 // Finding severities. role_check strict refuses a role with a critical

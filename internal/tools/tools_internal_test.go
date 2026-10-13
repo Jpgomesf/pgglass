@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/engine"
-	"github.com/jpgomesf/mcp-postgres/internal/guard"
-	"github.com/jpgomesf/mcp-postgres/internal/preflight"
-	"github.com/jpgomesf/mcp-postgres/internal/render"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/preflight"
+	"github.com/jpgomesf/pgglass/internal/render"
 )
 
 var (

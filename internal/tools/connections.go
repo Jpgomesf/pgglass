@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/jpgomesf/mcp-postgres/internal/config"
-	"github.com/jpgomesf/mcp-postgres/internal/resolver"
+	"github.com/jpgomesf/pgglass/internal/config"
+	"github.com/jpgomesf/pgglass/internal/resolver"
 )
 
 // listConnections runs pg_list_connections: every connection, by name, with
