@@ -159,3 +159,22 @@ prod-app	98311
 - Rows come in the order of `connections`, after a first column, `connection`. The footer names each connection a limit cut, `(1500 rows; truncated: prod-app max_rows=1000)`, and a result over 10 KB spills to one CSV file.
 - When the connections return different columns, by name or type, each gets its own section under its name, and the sections share the 10 KB.
 - A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The call fails only when every connection does.
+
+## Compare a schema across connections
+
+`pg_diff_schema` compares one schema on two connections, typically production and staging. It takes `left` and `right`, two connection names, and `schema` (default `public`), and reads each side with one catalog query:
+
+```
+schema app, prod → staging: 4 differences (- only in prod, + only in staging)
++ table coupons
+~ column orders.total: numeric(12,2) NOT NULL → numeric(14,2) NOT NULL
++ index orders.orders_placed_at_idx
+- table tenant_notes
+```
+
+`~` marks what both define differently, left then right. It compares relations (their kind and whether row-level security is on), columns (type, `NOT NULL`, default, identity or generation), constraints, indexes and RLS policies; an index that implements a constraint shows as the constraint. Relations come in name order, each followed by its columns, constraints, indexes and policies, and a relation only one side has takes one line. When nothing differs, the result says `identical` and how many relations it compared.
+
+- Only what each connection's role can read is compared, as in `pg_schema`, and partitions are left out. A schema that one side lacks, or whose role lacks `USAGE` on it, is an error naming that side.
+- Definitions are compared as each server prints them, so servers of different major versions can differ in spelling alone.
+- Output past 10 KB is written to a CSV file, one difference per row, and summarized under the first line.
+- Both connections go through the role check, and the audit line names both: `"connection":"prod,staging"`.

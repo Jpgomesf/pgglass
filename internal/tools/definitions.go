@@ -96,3 +96,15 @@ var fanoutConnectionsArg = map[string]any{
 	"maxItems":    maxFanout,
 	"description": "Instead of connection: run on each, in parallel; rows gain a first column, connection.",
 }
+
+var diffSchemaTool = &mcp.Tool{
+	Name: "pg_diff_schema",
+	Description: "Compare one schema on two connections, e.g. prod and staging: relations, columns, " +
+		"constraints, indexes and RLS policies.",
+	Annotations: annotations,
+	InputSchema: object([]string{"left", "right"}, map[string]any{
+		"left":   connectionArg,
+		"right":  connectionArg,
+		"schema": prop("string", "Schema to compare; default public."),
+	}),
+}
