@@ -57,7 +57,7 @@ func TestHealthOnTheAppFixture(t *testing.T) {
 		t.Errorf("ro_clean has no findings, yet: %q", notice)
 	}
 
-	connections := regexp.MustCompile(`^\d+ of max_connections 100: `)
+	connections := regexp.MustCompile(`^(up to )?\d+ of max_connections 100: `)
 	for role, got := range map[string]map[string][]string{"postgres": super, "ro_clean": clean} {
 		if len(got["connections"]) != 1 || !connections.MatchString(got["connections"][0]) {
 			t.Errorf("%s: connections = %q", role, got["connections"])
@@ -69,11 +69,14 @@ func TestHealthOnTheAppFixture(t *testing.T) {
 			t.Errorf("%s: replication = %q", role, got["replication"])
 		}
 	}
-	// Only the superuser sees every session in full.
+	// Only the superuser sees every session in full. To ro_clean, the backends
+	// whose type it may not see make the count of client backends an upper
+	// bound.
 	if slices.ContainsFunc(super["connections"], isHidden) || slices.ContainsFunc(super["long_running"], isHidden) {
 		t.Errorf("the superuser sees every session, yet:\n%q\n%q", super["connections"], super["long_running"])
 	}
-	if !strings.HasSuffix(strings.Join(clean["connections"], "\n"), " is not visible to role ro_clean") ||
+	upperBound := regexp.MustCompile(`^up to \d+ of max_connections 100: .+; the type and state of \d+ are not visible to role ro_clean$`)
+	if !upperBound.MatchString(strings.Join(clean["connections"], "\n")) ||
 		!slices.Contains(clean["long_running"], "other roles' sessions are not visible to role ro_clean") {
 		t.Errorf("ro_clean:\n%q\n%q", clean["connections"], clean["long_running"])
 	}

@@ -28,6 +28,8 @@ type stateCount struct {
 }
 
 // connectionLines renders one line: the connections used, then by state.
+// When the role may not see the type of some backends, which need not be
+// client backends, the count is an upper bound.
 func connectionLines(c connections, v viewer) []string {
 	var states []string
 	hidden := 0
@@ -42,11 +44,14 @@ func connectionLines(c connections, v viewer) []string {
 		}
 	}
 	line := fmt.Sprintf("%d of max_connections %d", c.Used, c.Max)
+	if hidden > 0 {
+		line = "up to " + line
+	}
 	if len(states) > 0 {
 		line += ": " + strings.Join(states, ", ")
 	}
 	if hidden > 0 {
-		line += fmt.Sprintf("; the state of %d is not visible to role %s", hidden, v.Role)
+		line += fmt.Sprintf("; the type and state of %d are not visible to role %s", hidden, v.Role)
 	}
 	return []string{line}
 }

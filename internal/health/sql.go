@@ -7,12 +7,16 @@ package health
 // hold secrets. The lists stop at 10 items and say how many there are in all.
 
 // viewerSQL returns the current role and whether it has the privileges of
-// pg_read_all_stats. Without them, pg_stat_activity shows the state, timing
-// and wait event of the role's own sessions only, and NULL for the others.
+// pg_read_all_stats. Without them, pg_stat_activity shows the type, state,
+// timing and wait event of the role's own sessions only, and NULL for the
+// others.
 const viewerSQL = `SELECT json_build_object('Role', current_user, 'AllStats', pg_has_role('pg_read_all_stats', 'USAGE'))`
 
-// connectionsSQL counts the backends connected to a database, as
-// pg_stat_database.numbackends does, by state.
+// connectionsSQL counts the client backends, which max_connections limits, by
+// state: autovacuum, parallel and other background workers have slots of
+// their own. To a role without the privileges of pg_read_all_stats, the
+// backends that are not its own have no type, so those connected to a
+// database count too, with no state.
 const connectionsSQL = `
 SELECT json_build_object(
 	'Max', current_setting('max_connections')::int,
@@ -21,7 +25,7 @@ SELECT json_build_object(
 FROM (
 	SELECT state, count(*) AS n
 	FROM pg_stat_activity
-	WHERE datid IS NOT NULL
+	WHERE backend_type = 'client backend' OR (backend_type IS NULL AND datid IS NOT NULL)
 	GROUP BY state
 ) s`
 

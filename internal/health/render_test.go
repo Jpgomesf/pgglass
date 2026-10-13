@@ -27,10 +27,13 @@ func ptr[T any](v T) *T { return &v }
 func TestConnectionLines(t *testing.T) {
 	c := connections{Max: 100, Used: 9, States: []stateCount{{"idle", 5}, {"active", 2}, {"", 2}}}
 	equal(t, connectionLines(c, super), []string{"9 of max_connections 100: idle 5, active 2, no state 2"})
+	// Backends whose type the role may not see may not be client backends.
 	equal(t, connectionLines(c, clean),
-		[]string{"9 of max_connections 100: idle 5, active 2; the state of 2 is not visible to role ro_clean"})
+		[]string{"up to 9 of max_connections 100: idle 5, active 2; the type and state of 2 are not visible to role ro_clean"})
 	equal(t, connectionLines(connections{Max: 100, Used: 3, States: []stateCount{{"", 3}}}, clean),
-		[]string{"3 of max_connections 100; the state of 3 is not visible to role ro_clean"})
+		[]string{"up to 3 of max_connections 100; the type and state of 3 are not visible to role ro_clean"})
+	equal(t, connectionLines(connections{Max: 100, Used: 1, States: []stateCount{{"active", 1}}}, clean),
+		[]string{"1 of max_connections 100: active 1"})
 }
 
 func TestSessionLines(t *testing.T) {

@@ -81,7 +81,7 @@ func TestCheckOnTheAppFixture(t *testing.T) {
 		longRunning []string
 	}{
 		{testdb.Superuser, `\d+ of max_connections 100: [a-z ,0-9]+`, []string{"none"}},
-		{testdb.RoleClean, `\d+ of max_connections 100: active 1; the state of \d+ is not visible to role ro_clean`,
+		{testdb.RoleClean, `up to \d+ of max_connections 100: active 1; the type and state of \d+ are not visible to role ro_clean`,
 			[]string{"none", "other roles' sessions are not visible to role ro_clean"}},
 	} {
 		got := checkAs(t, tc.role, testdb.DBApp, longRunning)
@@ -201,6 +201,33 @@ func TestCheckListsSessionsIdleInOldTransactions(t *testing.T) {
 	}
 }
 
+// max_connections limits client backends: autovacuum and parallel workers
+// have slots of their own, so connections leaves them out.
+func TestCheckCountsClientBackendsOnly(t *testing.T) {
+	const name = "health_workers"
+	// A parallel scan that naps on every row keeps its workers running.
+	testdb.CreateDatabase(t, name, `
+		CREATE TABLE t WITH (autovacuum_enabled = off) AS SELECT g FROM generate_series(1, 100000) g;
+		ANALYZE t;
+		CREATE FUNCTION nap() RETURNS bool PARALLEL SAFE LANGUAGE plpgsql AS 'BEGIN PERFORM pg_sleep(0.001); RETURN true; END';`)
+	leader, observer := testdb.Conn(t, testdb.Superuser, name), testdb.Conn(t, testdb.Superuser, name)
+	if _, err := leader.Exec(t.Context(), `SET max_parallel_workers_per_gather = 2; SET parallel_setup_cost = 0;
+		SET parallel_tuple_cost = 0; SET min_parallel_table_scan_size = 0`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = leader.Exec(t.Context(), "SELECT count(*) FROM t WHERE nap()")
+	}()
+	t.Cleanup(func() { <-done }) // t.Context is canceled first, which ends the scan
+	waitFor(t, observer, "SELECT count(*) > 0 FROM pg_stat_activity WHERE backend_type = 'parallel worker'")
+
+	got := checkAs(t, testdb.Superuser, name, longRunning)
+	clients := testdb.Value[int](t, observer, "SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'")
+	match(t, "connections", got["connections"], fmt.Sprintf(`%d of max_connections 100: [a-z ,0-9]+`, clients))
+}
+
 // A section whose query the role may not run says so, and the others still
 // run. The privileges are revoked in this database only.
 func TestCheckSaysWhatTheRoleMayNotSee(t *testing.T) {
@@ -213,7 +240,7 @@ func TestCheckSaysWhatTheRoleMayNotSee(t *testing.T) {
 	hidden := []string{"not visible to role ro_clean"}
 
 	got := checkAs(t, testdb.RoleClean, name, longRunning)
-	match(t, "connections", got["connections"], `\d+ of max_connections 100: .+`)
+	match(t, "connections", got["connections"], `(up to )?\d+ of max_connections 100: .+`)
 	equal(t, got["long_running"], []string{"none", "other roles' sessions are not visible to role ro_clean"})
 	equal(t, got["blocked"], hidden)
 	match(t, "cache_hit", got["cache_hit"], `\d{1,3}\.\d\d% in database health_hidden`)
