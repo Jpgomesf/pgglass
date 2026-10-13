@@ -100,7 +100,8 @@ func TestSearchLimit(t *testing.T) {
 
 func TestFirstLines(t *testing.T) {
 	text := strings.Repeat("0123456789\n", 99) + "0123456789" // 100 lines, 1099 bytes
-	for _, total := range []int{0, 100} {                     // a lower total counts the lines of text
+	// A total lower than the lines of text counts those lines instead.
+	for _, total := range []int{0, 100} {
 		if got := firstLines(text, total, len(text)); got != text {
 			t.Errorf("text that fits, total %d, was cut:\n%s", total, got)
 		}

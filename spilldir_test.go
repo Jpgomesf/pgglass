@@ -108,6 +108,9 @@ func TestPrivateChecksTheOwner(t *testing.T) {
 
 // Without a user cache directory, the server used to stop at startup.
 func TestServerStartsWithoutAUserCacheDirectory(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds and runs the server")
+	}
 	bin := buildServer(t, map[string]any{"connections": map[string]any{}})
 	tmp := noCacheDir(t) // after the build, which caches under HOME
 	stderr, err := os.Create(filepath.Join(t.TempDir(), "stderr"))
