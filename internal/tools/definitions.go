@@ -87,3 +87,11 @@ func prop(typ, description string) map[string]any {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+var healthTool = &mcp.Tool{
+	Name: "pg_health",
+	Description: "Check server health from statistics views: connections vs max_connections, queries running over a minute, " +
+		"blocked sessions, cache hit ratio, dead rows, unused indexes, xid wraparound and replica lag. Never shows query text.",
+	Annotations: annotations,
+	InputSchema: object([]string{"connection"}, map[string]any{"connection": connectionArg}),
+}

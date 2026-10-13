@@ -56,6 +56,7 @@ func NewServer(h *Handlers, version string) *mcp.Server {
 	s.AddTool(queryTool, h.handle("pg_query", h.query))
 	s.AddTool(schemaTool, h.handle("pg_schema", h.schema))
 	s.AddTool(searchTool, h.handle("pg_search", h.search))
+	s.AddTool(healthTool, h.handle("pg_health", h.health))
 	return s
 }
 

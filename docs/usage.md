@@ -140,3 +140,34 @@ Two `pg_query` calls run at the same time, one per connection.
 - **Start with `pg_schema` or `pg_search`.** Agents write better SQL when they know the exact names and types.
 - **Set `default_schema`** so unqualified names resolve without a `schema` argument.
 - **Aggregate in SQL.** A `count(*)` or `GROUP BY` answers in one row where reading rows spills a file.
+
+## Check server health
+
+`pg_health` (`connection`) reads the statistics views and catalogs and returns one row per finding, in the configured format, spilled to a file like a query result when it is too large:
+
+```
+section	detail
+connections	7 of max_connections 100: active 1, idle in transaction 1; the state of 5 is not visible to role app_reader
+long_running	none
+long_running	other roles' sessions are not visible to role app_reader
+blocked	pid 79, database app, state not visible to role app_reader, blocked by 78
+cache_hit	99.99% in database app
+dead_tuples	app.orders: 25.0% dead (25 dead, 75 live), never autovacuumed
+unused_indexes	app.orders_customer_id_idx on app.orders: 16 kB
+xid_wraparound	oldest age(datfrozenxid) 17 (database app): 0.0% of autovacuum_freeze_max_age 200000000
+replication	not a replica
+(9 rows)
+```
+
+| Section | Shows |
+|---------|-------|
+| `connections` | Backends connected to a database, against `max_connections`, by state |
+| `long_running` | Client sessions, other than idle ones, whose query started over a minute ago: pid, database, state, duration, wait event, application name |
+| `blocked` | Sessions that `pg_blocking_pids` reports waiting for a lock, and the pids blocking them |
+| `cache_hit` | The share of this database's block reads found in shared buffers |
+| `dead_tuples` | The 5 tables of this database with the highest share of dead rows, and their last autovacuum |
+| `unused_indexes` | This database's indexes not scanned since the statistics were reset, largest first; unique indexes, primary keys and exclusion constraints' indexes are left out |
+| `xid_wraparound` | The oldest `age(datfrozenxid)` of any database, against `autovacuum_freeze_max_age` |
+| `replication` | On a replica, how long ago it replayed its last transaction, and how many received WAL bytes it has yet to replay |
+
+`long_running`, `blocked` and `unused_indexes` stop at 10 rows and say how many more there are. Sessions are those of the whole server, and their query text is never shown: it can hold secrets. A role without the privileges of `pg_read_all_stats` sees the state, timing and wait event of its own sessions only, as above. A section whose view or function the role may not use says `not visible to role <name>`, and the other sections still run.
