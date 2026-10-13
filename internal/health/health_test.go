@@ -180,9 +180,10 @@ func start(t *testing.T, conn *pgx.Conn, sql string) {
 }
 
 // A session in a transaction is as old as its transaction, which keeps its
-// locks however recent its query, running or not. One whose transaction
-// failed keeps none, and is as old as the query that failed. A procedure
-// that commits starts a new transaction, and is as old as its CALL.
+// locks however recent its query, running or not, and its line says that the
+// transaction, not its state, is that old. One whose transaction failed keeps
+// none, and is as old as the query that failed. A procedure that commits
+// starts a new transaction, and is as old as its CALL.
 func TestCheckListsSessionsInOldTransactions(t *testing.T) {
 	const name = "health_idle"
 	testdb.CreateDatabase(t, name, `CREATE PROCEDURE nap_then_commit() LANGUAGE plpgsql
@@ -221,7 +222,7 @@ func TestCheckListsSessionsInOldTransactions(t *testing.T) {
 	for _, want := range []string{
 		fmt.Sprintf(`pid %d, database health_idle, idle in transaction, transaction open for [1-9]\d*s, waiting on Client:ClientRead`, idlePID),
 		fmt.Sprintf(`pid %d, database health_idle, idle in transaction \(aborted\) for [1-9]\d*s, waiting on Client:ClientRead`, abortedPID),
-		fmt.Sprintf(`pid %d, database health_idle, active for [1-9]\d*s, waiting on Timeout:PgSleep`, activePID),
+		fmt.Sprintf(`pid %d, database health_idle, active, transaction open for [1-9]\d*s, waiting on Timeout:PgSleep`, activePID),
 		fmt.Sprintf(`pid %d, database health_idle, active for [1-9]\d*s, waiting on Timeout:PgSleep`, callPID),
 	} {
 		if !slices.ContainsFunc(long, regexp.MustCompile("^"+want+"$").MatchString) {

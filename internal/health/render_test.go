@@ -66,6 +66,26 @@ func TestSessionLines(t *testing.T) {
 	equal(t, longRunningLines(list[session]{}, super), []string{"none"})
 }
 
+// A long-running session's age is its transaction's when the transaction
+// started before its query: the line then says the transaction is that old,
+// not its state, as it does for a session idle in transaction.
+func TestLongRunningLinesSayWhatTheirAgeMeasures(t *testing.T) {
+	got, err := decoded(longRunningLines)([]byte(`{"Total": 4, "Items": [
+		{"PID": 75, "Database": "app", "State": "active", "Seconds": 7200, "FromTransaction": true, "Wait": "Timeout:PgSleep"},
+		{"PID": 76, "Database": "app", "State": "active", "Seconds": 65, "FromTransaction": false},
+		{"PID": 77, "Database": "app", "State": "idle in transaction", "Seconds": 90, "FromTransaction": false},
+		{"PID": 78, "Database": "app", "State": "idle in transaction (aborted)", "Seconds": 61, "FromTransaction": null}]}`), super)
+	if err != nil {
+		t.Fatal(err)
+	}
+	equal(t, got, []string{
+		"pid 75, database app, active, transaction open for 2h0m0s, waiting on Timeout:PgSleep",
+		"pid 76, database app, active for 1m5s",
+		"pid 77, database app, idle in transaction, transaction open for 1m30s",
+		"pid 78, database app, idle in transaction (aborted) for 1m1s",
+	})
+}
+
 func TestStatisticsLines(t *testing.T) {
 	equal(t, cacheHitLines(cacheHit{Database: "app", Hit: 997, Read: 3}, clean), []string{"99.70% in database app"})
 	equal(t, cacheHitLines(cacheHit{Database: "app"}, clean), []string{"no blocks read yet in database app"})

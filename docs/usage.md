@@ -227,7 +227,7 @@ replication	not a replica
 | Section | Shows |
 |---------|-------|
 | `connections` | Client backends, which `max_connections` limits, by state; autovacuum and parallel workers have slots of their own |
-| `long_running` | Client sessions, other than idle ones, whose transaction or query started over a minute ago, counted from whichever started first: pid, database, state, duration, wait event, application name. An open transaction keeps its locks, so a session in one is listed while it idles or runs a short query; one `idle in transaction (aborted)` holds none, and counts from its last query |
+| `long_running` | Client sessions, other than idle ones, whose transaction or query started over a minute ago, counted from whichever started first: pid, database, state, duration, wait event, application name. An open transaction keeps its locks, so a session in one is listed while it idles or runs a later query, and its line then says `transaction open for` and the transaction's age. One `idle in transaction (aborted)` holds none, and counts from its last query |
 | `blocked` | Sessions that `pg_blocking_pids` reports waiting for a lock, and the pids blocking them |
 | `cache_hit` | The share of this database's block reads found in shared buffers |
 | `dead_tuples` | The 5 tables of this database with the most dead rows, with their share of the table's rows and their last autovacuum |
