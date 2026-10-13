@@ -100,4 +100,4 @@ What these layers do not cover:
 
 ## License
 
-MIT
+[MIT](LICENSE)
