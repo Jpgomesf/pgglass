@@ -152,6 +152,28 @@ flags: none`},
 	}
 }
 
+// With analyze, a Limit that returns fewer rows than planned has run out of
+// rows and stops nothing early; and the rows an offset skips are read in
+// full, even under an outer Limit. Either way the scan under it is flagged.
+func TestExplainFlagsWhatALimitDoesNotStop(t *testing.T) {
+	t.Parallel()
+	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
+	for _, tc := range []struct {
+		args map[string]any
+		want string
+	}{
+		{args("clean", "SELECT id FROM events WHERE payload->>'seq' = 'nope' ORDER BY id LIMIT 10", "analyze", true),
+			`(?s:.*)\nflags:\n  Index Scan using events_pkey on app\.events: 0 rows, planned 100`},
+		{args("clean", "SELECT * FROM (SELECT id FROM events OFFSET 15000 LIMIT 100) s LIMIT 5"),
+			`(?s:.*)\n  Seq Scan on app\.events: cost [0-9.]+, ~15005 rows\n(?s:.*)\nflags:\n  Seq Scan on app\.events: full scan of ~20000 rows`},
+	} {
+		got := s.ok(t, "pg_explain", tc.args)
+		if !regexp.MustCompile(`^` + tc.want + `$`).MatchString(got) {
+			t.Errorf("%v:\n%s\nwant it to match\n%s", tc.args, got, tc.want)
+		}
+	}
+}
+
 // count(*) OVER () reads the whole partition before its first row, so the
 // Limit above it does not stop the seq scan under it: with analyze the scan
 // is flagged, and without it too from PostgreSQL 17, whose planner costs the

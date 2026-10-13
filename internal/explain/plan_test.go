@@ -256,6 +256,9 @@ func TestShare(t *testing.T) {
 		{"OFFSET 15000 LIMIT 10", limit(396, 396.26, 10, scan), []float64{1, 0.7505}},
 		{"a LIMIT over fewer rows", limit(0, 578, 1, outer(`"Node Type": "Seq Scan"`, 0, 578, 1)), []float64{1, 1}},
 		{"nested limits", limit(0, 0.26, 10, outer(`"Node Type": "Limit"`, 0, 2.64, 100, scan)), []float64{1, 0.1, 0.0005}},
+		// The inner Limit skips its 15000 rows before its first row, however
+		// few of its rows the outer one reads: only its count part is cut.
+		{"nested limits with an offset", limit(396, 396.13, 5, outer(`"Node Type": "Limit"`, 396, 398.64, 100, scan)), []float64{1, 0.05, 0.75025}},
 		// The Limit's startup cost holds its initplans', which run in full.
 		{"an initplan", limit(578.01, 578.95, 10,
 			planNode(`"Node Type": "Aggregate", "Strategy": "Plain", "Parent Relationship": "InitPlan"`, 578, 578.01, 1, scan),
@@ -338,6 +341,33 @@ func TestFlagsUnderALimit(t *testing.T) {
 		n := parseNode(t, tc.node)
 		n.setShare(tc.share)
 		if got := n.flags(tc.analyzed, sizes); !slices.Equal(got, tc.want) {
+			t.Errorf("%s: flags = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// With ANALYZE, a Limit that returned fewer rows than it planned stopped
+// nothing early: either it ran out of rows, and the index scan under it is
+// flagged as usual, or a Limit above stopped it, and the scan with it.
+func TestFlagsUnderALimitWithAnalyze(t *testing.T) {
+	limit := func(actual, startup, total, rows float64, children ...string) string {
+		return planNode(fmt.Sprintf(`"Node Type": "Limit", "Parent Relationship": "Outer", "Actual Rows": %v, "Actual Loops": 1`, actual),
+			startup, total, rows, children...)
+	}
+	scan := func(actual float64) string {
+		return planNode(fmt.Sprintf(`"Node Type": "Index Scan", "Parent Relationship": "Outer", "Actual Rows": %v, "Actual Loops": 1`, actual),
+			0.29, 959.29, 1000)
+	}
+	for _, tc := range []struct {
+		name, plan string
+		want       []string // the index scan's flags
+	}{
+		{"a Limit that ran out of rows", limit(3, 0.29, 9.88, 10, scan(3)), []string{"3 rows, planned 1000"}},
+		{"a Limit that stopped the scan", limit(10, 0.29, 9.88, 10, scan(10)), nil},
+		{"a Limit that the Limit above stopped", limit(5, 0.29, 5.09, 5, limit(5, 0.29, 96.19, 100, scan(5))), nil},
+	} {
+		nodes := parseNode(t, tc.plan).all()
+		if got := nodes[len(nodes)-1].flags(true, nil); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: flags = %q, want %q", tc.name, got, tc.want)
 		}
 	}
