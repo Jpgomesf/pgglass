@@ -316,8 +316,13 @@ func TestDiffSchemaSpillsALargeDiff(t *testing.T) {
 	}
 }
 
-func TestDiffSchemaDefinitionIsSmall(t *testing.T) {
-	if _, size := listedTool(t, "pg_diff_schema"); size > 700 {
+// The definition is small, and names what is compared, view queries too.
+func TestDiffSchemaDefinition(t *testing.T) {
+	tool, size := listedTool(t, "pg_diff_schema")
+	if size > 700 {
 		t.Errorf("pg_diff_schema takes %d bytes of JSON, want at most 700", size)
+	}
+	if !strings.Contains(tool.Description, "relations, view queries, columns") {
+		t.Errorf("description %q, want it to name view queries", tool.Description)
 	}
 }

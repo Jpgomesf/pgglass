@@ -218,8 +218,14 @@ func TestHealthGoesThroughTheRoleCheck(t *testing.T) {
 	}
 }
 
-func TestHealthDefinitionIsSmall(t *testing.T) {
-	if _, size := listedTool(t, "pg_health"); size > 700 {
+// The definition is small, and says long_running lists open transactions
+// too, not only running queries.
+func TestHealthDefinition(t *testing.T) {
+	tool, size := listedTool(t, "pg_health")
+	if size > 700 {
 		t.Errorf("pg_health definition takes %d bytes of JSON, want at most 700", size)
+	}
+	if !strings.Contains(tool.Description, "queries running or transactions open over a minute") {
+		t.Errorf("description %q, want it to name open transactions", tool.Description)
 	}
 }

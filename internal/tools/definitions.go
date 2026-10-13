@@ -85,8 +85,8 @@ var searchTool = &mcp.Tool{
 
 var diffSchemaTool = &mcp.Tool{
 	Name: "pg_diff_schema",
-	Description: "Compare one schema on two connections, e.g. prod and staging: relations, columns, " +
-		"constraints, indexes and RLS policies.",
+	Description: "Compare one schema on two connections, e.g. prod and staging: relations, view queries, " +
+		"columns, constraints, indexes and RLS policies.",
 	Annotations: annotations,
 	InputSchema: object([]string{"left", "right"}, map[string]any{
 		"left":   connectionArg,
@@ -122,8 +122,9 @@ var explainTool = &mcp.Tool{
 
 var healthTool = &mcp.Tool{
 	Name: "pg_health",
-	Description: "Check server health from statistics views: connections vs max_connections, queries running over a minute, " +
-		"blocked sessions, cache hit ratio, dead rows, unused indexes, xid wraparound and replica lag. Never shows query text.",
+	Description: "Check server health from statistics views: connections vs max_connections, " +
+		"queries running or transactions open over a minute, blocked sessions, cache hit ratio, dead rows, " +
+		"unused indexes, xid wraparound and replica lag. Never shows query text.",
 	Annotations: annotations,
 	InputSchema: object([]string{"connection"}, map[string]any{"connection": connectionArg}),
 }
