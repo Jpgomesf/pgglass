@@ -137,7 +137,8 @@ func (h *Handlers) fanoutText(results []fanoutResult, format render.Format) (str
 
 // fanoutRows renders ok, results that all succeeded: merged when their
 // columns match, otherwise one section per connection, the sections sharing
-// the inline limit. Either way, what does not fit is spilled to a file.
+// the inline limit with their names and the line that introduces them.
+// Either way, what does not fit is spilled to a file.
 func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format) (string, error) {
 	if sameFanoutColumns(ok) {
 		names := make([]string, len(ok))
@@ -147,9 +148,12 @@ func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format) (string, 
 		return h.spill.Output("pg_query", strings.Join(names, "_"), mergeFanout(ok), format)
 	}
 	sections := []string{"Columns differ across connections, so each has its own result."}
-	limit := h.spill.InlineMaxBytes / len(ok)
+	room := h.spill.InlineMaxBytes - len(sections[0])
 	for _, r := range ok {
-		text, err := h.spill.OutputWithin("pg_query", r.conn, r.res, format, limit)
+		room -= len("\n\n" + r.conn + ":\n")
+	}
+	for _, r := range ok {
+		text, err := h.spill.OutputWithin("pg_query", r.conn, r.res, format, room/len(ok))
 		if err != nil {
 			return "", err
 		}

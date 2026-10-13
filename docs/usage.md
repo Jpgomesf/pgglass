@@ -102,7 +102,7 @@ First 5 rows:
 ...
 ```
 
-The summary lists at most 20 columns, previews only as many of the first 5 rows as fit in 10 KB, and cuts preview cells at 64 characters.
+After the file, the summary lists the first 20 columns and previews the first 5 rows, as many of each as fit in 10 KB, and cuts preview cells at 64 characters.
 
 Spill files live in `mcp-postgres` under your user cache directory (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux), readable only by you (mode 0600). Without one (`HOME` unset), they live in `mcp-postgres-<uid>` in the temp directory, which the server creates: it must be a directory, not a symlink, that you own with mode 0700, or the server does not start. Spill files older than `spill_ttl_hours` are removed at startup, then at most once an hour as tools return results, whichever server instance wrote them.
 
@@ -121,7 +121,7 @@ prod-app	98311
 
 - The statement is checked once. Each connection then gets what a call on it alone would: the role check, its `search_path` (`schema`, or its own `default_schema`), the limits and one audit line.
 - Rows come in the order of `connections`, after a first column, `connection`. The footer names each connection a limit cut, `(1500 rows; truncated: prod-app max_rows=1000)`, and a result over 10 KB spills to one CSV file.
-- When the connections return different columns, by name or type, each gets its own section under its name, and the sections share the 10 KB.
+- When the connections return different columns, by name or type, each gets its own section under its name, and the sections, names included, share the 10 KB: a section past its share spills to a CSV file of its own.
 - A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The call fails only when every connection does.
 
 ## Explain a query
@@ -175,7 +175,7 @@ note	text	100	7
 (2 rows)
 ```
 
-Both read as the connection's role: `pg_stats` shows only the columns the role can `SELECT`, and `pg_profile` says so when that leaves none; the sample is subject to privileges and row-level security. Relations the guard denies, such as `pg_authid`, are refused, since their statistics hold their values. Output over 10 KB is written to a file, as `pg_query`'s is.
+Both read as the connection's role: `pg_stats` shows only the columns the role can `SELECT`, and `pg_profile` says so when that leaves none; the sample is subject to privileges and row-level security. Relations the guard denies, such as `pg_authid`, are refused, since their statistics hold their values. Unlike `pg_query`, it does not cut values at 200 characters: five `uuid`s among the most common values alone take more. Output over 10 KB is written to a file, as `pg_query`'s is.
 
 ## Compare a schema across connections
 

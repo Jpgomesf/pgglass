@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -326,6 +327,171 @@ func TestOutputSummaryStaysWithinTheLimit(t *testing.T) {
 	if out := summary(3_000); strings.Contains(out, "First") {
 		t.Errorf("want no preview, got:\n%s", out)
 	}
+}
+
+// longName is the 53-character name of column i of longNamed.
+func longName(i int) string { return fmt.Sprintf("%s_%02d", strings.Repeat("c", 50), i) }
+
+// longNamed is a result of 50 rows of 20 text columns named longName(0) to
+// longName(19).
+func longNamed() *result.Result {
+	res := &result.Result{}
+	for i := range 20 {
+		res.Columns = append(res.Columns, result.Column{Name: longName(i), TypeOID: pgtype.TextOID, TypeName: "text"})
+	}
+	for range 50 {
+		row := make([]*string, len(res.Columns))
+		for j := range row {
+			row[j] = str("value")
+		}
+		res.Rows = append(res.Rows, row)
+	}
+	return res
+}
+
+// listedColumns returns the lines of the column list of a summary of
+// longNamed that lists only some of its columns, checking that their number
+// is the one its heading gives.
+func listedColumns(t *testing.T, out string) []string {
+	t.Helper()
+	m := regexp.MustCompile(`\n\nColumns \(first (\d+) of 20\):\ncolumn\ttype\n`).FindStringSubmatchIndex(out)
+	if m == nil {
+		t.Fatalf("want some of the columns listed:\n%s", out)
+	}
+	list, _, _ := strings.Cut(out[m[1]:], "\n\n")
+	listed := strings.Split(list, "\n")
+	if shown, _ := strconv.Atoi(out[m[2]:m[3]]); shown != len(listed) {
+		t.Errorf("the heading says %d columns, %d are listed:\n%s", shown, len(listed), out)
+	}
+	return listed
+}
+
+// A summary lists only as many of the first 20 columns as fit in its limit,
+// so long column names cannot push it past the limit. The file holds every
+// column.
+func TestOutputSummaryListsTheColumnsThatFit(t *testing.T) {
+	out, err := newStore(t, 10_000).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := listedColumns(t, out)
+	// One more column, 59 bytes and maybe a digit in the heading, would not fit.
+	if len(out) > 1000 || 1000-len(out) > 60 || len(listed) == 20 {
+		t.Errorf("limit 1000: %d bytes listing %d columns:\n%s", len(out), len(listed), out)
+	}
+	for i, line := range listed {
+		if line != longName(i)+"\ttext" {
+			t.Errorf("column line %d = %q", i, line)
+		}
+	}
+	records, err := csv.NewReader(strings.NewReader(readFile(t, spillPath(t, out)))).ReadAll()
+	if err != nil || len(records) != 51 || len(records[0]) != 20 || records[0][19] != longName(19) {
+		t.Errorf("spill file: %d records, %v; want a header of 20 columns and 50 rows", len(records), err)
+	}
+}
+
+// When not one column fits, the summary only names the file.
+func TestOutputSummaryNamesTheFileWhenNoColumnFits(t *testing.T) {
+	out, err := newStore(t, 10_000).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(out, "\nUse Read or Grep on the file instead of re-running the query.") {
+		t.Errorf("want only what names the file, got:\n%s", out)
+	}
+	if _, err := os.Stat(spillPath(t, out)); err != nil {
+		t.Error(err)
+	}
+}
+
+// lines returns rows rows of one text column, line, each n characters long
+// and ending with its number.
+func lines(rows, n int) *result.Result {
+	res := result.Text("line")
+	for i := range rows {
+		res.AddRow(fmt.Sprintf("%s %03d", strings.Repeat("x", n-4), i))
+	}
+	return res
+}
+
+// wholeOf renders res as it is returned inline, with the given footer, but
+// with no cell cut.
+func wholeOf(t *testing.T, res *result.Result, footer string) string {
+	t.Helper()
+	body, err := render.Render(res, render.TSV, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body + footer
+}
+
+// Spill writes the file and summarizes it even when the inline rendering,
+// its cells cut, would fit: the caller found the output too large to return
+// as it is, and the file holds every line whole.
+func TestSpillAlwaysWritesTheFile(t *testing.T) {
+	res := lines(40, 300) // 12 kB whole, under 9 kB cut
+	store := newStore(t, 10_000)
+	if out, err := store.Output("pg_explain", "prod", res, render.TSV); err != nil || strings.Contains(out, "Full result") {
+		t.Fatalf("Output = %v, want the lines inline, cut:\n%s", err, out)
+	}
+
+	out, err := store.Spill("pg_explain", "prod", res, render.TSV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	size := len(wholeOf(t, res, "(40 rows)"))
+	if want := fmt.Sprintf("Result too large to return inline (%d bytes, limit 10000): 40 rows × 1 column, truncated=false.\n", size); !strings.HasPrefix(out, want) || len(out) > 10_000 {
+		t.Errorf("summary (%d bytes):\n%s\nwant it to start with\n%s", len(out), out, want)
+	}
+	want, err := render.Render(res, render.CSV, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readFile(t, spillPath(t, out)); got != want {
+		t.Errorf("spill file is not the full CSV rendering:\n%s", got)
+	}
+
+	store.Dir = "" // no file: as many leading lines as fit
+	if out, err = store.Spill("pg_explain", "prod", res, render.TSV); err != nil ||
+		!strings.Contains(out, " of 40 rows shown; could not write the spill file: ") || len(out) > 10_000 {
+		t.Errorf("without a file = %v: %d bytes:\n%s", err, len(out), out)
+	}
+}
+
+// OutputWhole returns cells inline whole, and spills a result that only fits
+// with its cells cut.
+func TestOutputWholeKeepsCellsWhole(t *testing.T) {
+	store := newStore(t, 10_000)
+	res := people()
+	res.Rows[0][1] = str(strings.Repeat("é", 300))
+	if out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV); err != nil || out != wholeOf(t, res, "(3 rows)") {
+		t.Errorf("OutputWhole = %v:\n%s\nwant the cell whole", err, out)
+	}
+
+	res = lines(20, 600) // 12 kB whole, under 5 kB cut
+	if out, err := store.Output("pg_profile", "prod", res, render.TSV); err != nil || strings.Contains(out, "Full result") {
+		t.Fatalf("Output = %v, want the lines inline, cut:\n%s", err, out)
+	}
+	out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := fmt.Sprintf("Result too large to return inline (%d bytes, limit 10000): 20 rows × 1 column", len(wholeOf(t, res, "(20 rows)"))); !strings.HasPrefix(out, want) {
+		t.Errorf("OutputWhole:\n%s\nwant it to start with\n%s", out, want)
+	}
+	if records, err := csv.NewReader(strings.NewReader(readFile(t, spillPath(t, out)))).ReadAll(); err != nil || len(records) != 21 || records[20][0] != *res.Rows[19][0] {
+		t.Errorf("spill file: %d records, %v; want a header and 20 whole lines", len(records), err)
+	}
+}
+
+// readFile returns what the file at path holds.
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // a file the test's store wrote
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func TestSpillFilePermissions(t *testing.T) {

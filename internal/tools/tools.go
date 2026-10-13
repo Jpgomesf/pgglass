@@ -114,13 +114,14 @@ func (h *Handlers) useConnection(name string, c *call) error {
 	return nil
 }
 
-// linesOutput returns lines as the spill store returns a result of one text
-// column named column, one row per line: for text a tool builds that is too
-// large to return as it is.
+// linesOutput writes lines, text a tool builds that is too large to return
+// as it is, to a spill file as a result of one text column named column, one
+// row per line, and returns its summary. It always writes the file: cut to
+// 200 characters, the lines might fit inline, but without their ends.
 func (h *Handlers) linesOutput(tool, conn, column string, lines []string) (string, error) {
 	res := result.Text(column)
 	for _, line := range lines {
 		res.AddRow(line)
 	}
-	return h.spill.Output(tool, conn, res, render.TSV)
+	return h.spill.Spill(tool, conn, res, render.TSV)
 }

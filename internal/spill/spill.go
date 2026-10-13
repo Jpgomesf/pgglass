@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	inlineMaxCell   = 200 // characters kept per cell in inline output
+	inlineMaxCell   = 200 // characters Output keeps per cell inline
 	cleanupInterval = time.Hour
 	stampLayout     = "20060102T150405Z"
 	maxNamePart     = 32 // bytes kept of the tool and connection names in a file name
@@ -49,10 +49,10 @@ type Store struct {
 // Otherwise Output writes the full result as CSV to a new file under Dir,
 // named spill-<tool>-<conn>-<timestamp>-<random>.csv with tool and conn made
 // safe for file names, and returns a summary instead: row and column counts,
-// the truncation flag, the file path, the first 20 columns with their types
-// and as many of the first 5 rows as fit in InlineMaxBytes. If the file
-// cannot be written, Output returns as many leading rows as fit in
-// InlineMaxBytes, with a note saying why.
+// the truncation flag and the file path, then the first 20 columns with
+// their types and the first 5 rows, as many of each as fit in
+// InlineMaxBytes. If the file cannot be written, Output returns as many
+// leading rows as fit in InlineMaxBytes, with a note saying why.
 //
 // Output runs Cleanup at most once an hour, ignoring its errors.
 func (s *Store) Output(tool, conn string, res *result.Result, f render.Format) (string, error) {
@@ -62,20 +62,61 @@ func (s *Store) Output(tool, conn string, res *result.Result, f render.Format) (
 // OutputWithin is Output with limit in place of InlineMaxBytes, for an
 // output that shares the inline space with others.
 func (s *Store) OutputWithin(tool, conn string, res *result.Result, f render.Format, limit int) (string, error) {
+	return s.output(tool, conn, res, f, limit, inlineMaxCell)
+}
+
+// OutputWhole is Output without the cut of inline cells, for a result of a
+// few rows whose every value counts, such as pg_profile's.
+func (s *Store) OutputWhole(tool, conn string, res *result.Result, f render.Format) (string, error) {
+	return s.output(tool, conn, res, f, s.InlineMaxBytes, 0)
+}
+
+// Spill writes res to a file and returns its summary, as Output does when
+// res does not fit. It is for output its caller found too large to return
+// inline, which Output, cutting its cells, could still return inline without
+// the ends of its long values.
+func (s *Store) Spill(tool, conn string, res *result.Result, f render.Format) (string, error) {
 	s.maybeCleanup()
-	body, err := render.Render(res, f, inlineMaxCell)
+	inline, err := inlineText(res, f, 0)
 	if err != nil {
 		return "", err
 	}
-	inline := body + footer(res)
+	return s.spill(tool, conn, res, f, len(inline), s.InlineMaxBytes)
+}
+
+// output returns res inline, its cells cut to maxCell characters (0 keeps
+// them whole), when that fits in limit bytes, and spills it otherwise.
+func (s *Store) output(tool, conn string, res *result.Result, f render.Format, limit, maxCell int) (string, error) {
+	s.maybeCleanup()
+	inline, err := inlineText(res, f, maxCell)
+	if err != nil {
+		return "", err
+	}
 	if len(inline) <= limit {
 		return inline, nil
 	}
+	return s.spill(tool, conn, res, f, len(inline), limit)
+}
+
+// spill writes res to a file and returns its summary within limit bytes,
+// which says res takes size bytes inline. If the file cannot be written, it
+// returns as many leading rows as fit in limit, with a note saying why.
+func (s *Store) spill(tool, conn string, res *result.Result, f render.Format, size, limit int) (string, error) {
 	path, err := s.write(tool, conn, res)
 	if err != nil {
 		return capped(res, f, err, limit)
 	}
-	return summary(res, path, len(inline), limit)
+	return summary(res, path, size, limit)
+}
+
+// inlineText renders res as it is returned inline: its cells cut to maxCell
+// characters, 0 keeping them whole, then the footer.
+func inlineText(res *result.Result, f render.Format, maxCell int) (string, error) {
+	body, err := render.Render(res, f, maxCell)
+	if err != nil {
+		return "", err
+	}
+	return body + footer(res), nil
 }
 
 // Cleanup removes the regular files in Dir that are named like spill files

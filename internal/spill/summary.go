@@ -16,9 +16,10 @@ const (
 )
 
 // summary describes a result written to path instead of being returned:
-// inlineSize is what its inline rendering would have taken. It lists the
-// first summaryColumns columns with their types, then previews as many of
-// the first previewRows rows as fit in limit.
+// inlineSize is what its inline rendering would have taken. After what it
+// says of the file, it lists the first summaryColumns columns with their
+// types, then previews the first previewRows rows, as many of each as fit in
+// limit. It names the file even when that alone takes more than limit.
 func summary(res *result.Result, path string, inlineSize, limit int) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Result too large to return inline (%d bytes, limit %d): %s × %s, truncated=%t",
@@ -28,31 +29,61 @@ func summary(res *result.Result, path string, inlineSize, limit int) (string, er
 	}
 	fmt.Fprintf(&b, ".\nFull result: %s\n", path)
 	b.WriteString(`It is CSV (RFC 4180) with a header row; NULL is an unquoted empty field and "" the empty string.` + "\n")
-	b.WriteString("Use Read or Grep on the file instead of re-running the query.\n\n")
+	b.WriteString("Use Read or Grep on the file instead of re-running the query.")
+	out := b.String()
 
-	shown := min(len(res.Columns), summaryColumns)
-	if shown < len(res.Columns) {
-		fmt.Fprintf(&b, "Columns (first %d of %d):\n", shown, len(res.Columns))
-	} else {
-		b.WriteString("Columns:\n")
-	}
-	types, err := render.Render(columnTypes(res.Columns[:shown]), render.TSV, previewMaxCell)
+	const gap = "\n\n"
+	columns, shown, err := columnList(res.Columns, limit-len(out)-len(gap))
 	if err != nil {
 		return "", err
 	}
-	b.WriteString(types)
+	if shown == 0 {
+		return out, nil
+	}
+	out += gap + columns
+	rows, err := previewList(res, shown, limit-len(out)-len(gap))
+	if err != nil {
+		return "", err
+	}
+	if rows == "" {
+		return out, nil
+	}
+	return out + gap + rows, nil
+}
 
-	head := b.String()
+// columnList lists the first summaryColumns of cols with their types, or as
+// many as fit in budget bytes, and returns how many it lists: none when not
+// one fits.
+func columnList(cols []result.Column, budget int) (string, int, error) {
+	for k := min(len(cols), summaryColumns); k > 0; k-- {
+		heading := "Columns:\n"
+		if k < len(cols) {
+			heading = fmt.Sprintf("Columns (first %d of %d):\n", k, len(cols))
+		}
+		types, err := render.Render(columnTypes(cols[:k]), render.TSV, previewMaxCell)
+		if err != nil {
+			return "", 0, err
+		}
+		if list := heading + strings.TrimSuffix(types, "\n"); len(list) <= budget {
+			return list, k, nil
+		}
+	}
+	return "", 0, nil
+}
+
+// previewList previews the first previewRows rows of res with their first k
+// columns, as many rows as fit in budget bytes; "" when not one fits.
+func previewList(res *result.Result, k, budget int) (string, error) {
 	for n := min(previewRows, len(res.Rows)); n > 0; n-- {
-		rows, err := render.Render(preview(res, n, shown), render.TSV, previewMaxCell)
+		rows, err := render.Render(preview(res, n, k), render.TSV, previewMaxCell)
 		if err != nil {
 			return "", err
 		}
-		if out := head + "\nFirst " + count(n, "row") + ":\n" + strings.TrimSuffix(rows, "\n"); len(out) <= limit {
-			return out, nil
+		if list := "First " + count(n, "row") + ":\n" + strings.TrimSuffix(rows, "\n"); len(list) <= budget {
+			return list, nil
 		}
 	}
-	return strings.TrimSuffix(head, "\n"), nil
+	return "", nil
 }
 
 // columnTypes returns one row per column of cols: its name and type.
