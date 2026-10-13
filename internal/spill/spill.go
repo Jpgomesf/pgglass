@@ -65,23 +65,23 @@ func (s *Store) OutputWithin(tool, conn string, res *result.Result, f render.For
 	return s.output(tool, conn, res, f, limit, inlineMaxCell)
 }
 
-// OutputWhole is Output without the cut of inline cells, for a result of a
-// few rows whose every value counts, such as pg_profile's.
-func (s *Store) OutputWhole(tool, conn string, res *result.Result, f render.Format) (string, error) {
-	return s.output(tool, conn, res, f, s.InlineMaxBytes, 0)
+// OutputWhole is OutputWithin without the cut of inline cells, for a result
+// of a few rows whose every value counts, such as pg_profile's.
+func (s *Store) OutputWhole(tool, conn string, res *result.Result, f render.Format, limit int) (string, error) {
+	return s.output(tool, conn, res, f, limit, 0)
 }
 
-// Spill writes res to a file and returns its summary, as Output does when
-// res does not fit. It is for output its caller found too large to return
-// inline, which Output, cutting its cells, could still return inline without
-// the ends of its long values.
-func (s *Store) Spill(tool, conn string, res *result.Result, f render.Format) (string, error) {
+// Spill writes res to a file and returns its summary within limit bytes, as
+// OutputWithin does when res does not fit. It is for output its caller found
+// too large to return inline, which OutputWithin, cutting its cells, could
+// still return inline without the ends of its long values.
+func (s *Store) Spill(tool, conn string, res *result.Result, f render.Format, limit int) (string, error) {
 	s.maybeCleanup()
 	inline, err := inlineText(res, f, 0)
 	if err != nil {
 		return "", err
 	}
-	return s.spill(tool, conn, res, f, len(inline), s.InlineMaxBytes)
+	return s.spill(tool, conn, res, f, len(inline), limit)
 }
 
 // output returns res inline, its cells cut to maxCell characters (0 keeps

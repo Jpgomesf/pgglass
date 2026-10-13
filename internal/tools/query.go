@@ -46,7 +46,7 @@ func (h *Handlers) query(ctx context.Context, raw json.RawMessage, c *call) (str
 	if err != nil {
 		return "", err
 	}
-	return h.spill.Output("pg_query", args.Connection, res, format)
+	return h.spill.OutputWithin("pg_query", args.Connection, res, format, h.room(c))
 }
 
 // checkQuery checks the arguments of a pg_query call that hold for every

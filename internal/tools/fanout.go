@@ -51,7 +51,7 @@ func (h *Handlers) fanout(ctx context.Context, args queryArgs, c *call) (string,
 	}
 	results := h.queryEach(ctx, args, c)
 	c.notice = fanoutNotices(results)
-	return h.fanoutText(results, format)
+	return h.fanoutText(results, format, h.room(c))
 }
 
 // checkFanout checks that args name, in place of connection, 1 to maxFanout
@@ -112,43 +112,60 @@ func fanoutNotices(results []fanoutResult) string {
 	return b.String()
 }
 
-// fanoutText renders results: the rows of the connections that succeeded,
-// then a line for each that failed, its error as a single call reports it.
-// When none succeeded, it fails with those lines.
-func (h *Handlers) fanoutText(results []fanoutResult, format render.Format) (string, error) {
-	var ok []fanoutResult
-	var failed []string
+// fanoutText renders results within room bytes: the rows of the connections
+// that succeeded, then a line for each that failed, its error as a single
+// call reports it. The lines share half of room, each cut to its share, and
+// the rows take the rest. When none succeeded, it fails with the lines, which
+// then share all of room.
+func (h *Handlers) fanoutText(results []fanoutResult, format render.Format, room int) (string, error) {
+	var ok, failed []fanoutResult
 	for _, r := range results {
 		if r.err != nil {
-			failed = append(failed, r.conn+": "+strings.ReplaceAll(errorText(r.err), "\n", "\n  "))
+			failed = append(failed, r)
 		} else {
 			ok = append(ok, r)
 		}
 	}
 	if len(ok) == 0 {
-		return "", errors.New(strings.Join(failed, "\n"))
+		return "", errors.New(failureLines(failed, room))
 	}
-	text, err := h.fanoutRows(ok, format)
-	if err != nil || len(failed) == 0 {
-		return text, err
+	if len(failed) == 0 {
+		return h.fanoutRows(ok, format, room)
 	}
-	return text + "\n\n" + strings.Join(failed, "\n"), nil
+	lines := "\n\n" + failureLines(failed, room/2)
+	text, err := h.fanoutRows(ok, format, room-len(lines))
+	if err != nil {
+		return "", err
+	}
+	return text + lines, nil
 }
 
-// fanoutRows renders ok, results that all succeeded: merged when their
-// columns match, otherwise one section per connection, the sections sharing
-// the inline limit with their names and the line that introduces them.
+// failureLines renders a line for each of failed: its connection, then its
+// error as a single call reports it, cut in the middle to an equal share of
+// room.
+func failureLines(failed []fanoutResult, room int) string {
+	lines := make([]string, len(failed))
+	for i, r := range failed {
+		line := r.conn + ": " + strings.ReplaceAll(errorText(r.err), "\n", "\n  ")
+		lines[i] = cutMiddle(line, room/len(failed)-1) // less its line break
+	}
+	return strings.Join(lines, "\n")
+}
+
+// fanoutRows renders ok, results that all succeeded, within room bytes:
+// merged when their columns match, otherwise one section per connection, the
+// sections sharing room with their names and the line that introduces them.
 // Either way, what does not fit is spilled to a file.
-func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format) (string, error) {
+func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format, room int) (string, error) {
 	if sameFanoutColumns(ok) {
 		names := make([]string, len(ok))
 		for i, r := range ok {
 			names[i] = r.conn
 		}
-		return h.spill.Output("pg_query", strings.Join(names, "_"), mergeFanout(ok), format)
+		return h.spill.OutputWithin("pg_query", strings.Join(names, "_"), mergeFanout(ok), format, room)
 	}
 	sections := []string{"Columns differ across connections, so each has its own result."}
-	room := h.spill.InlineMaxBytes - len(sections[0])
+	room -= len(sections[0])
 	for _, r := range ok {
 		room -= len("\n\n" + r.conn + ":\n")
 	}

@@ -25,7 +25,9 @@ Connections (2):
     role not checked yet: checked on first use
 ```
 
-A connection's role is audited on its first use (see [role check](configuration.md#role-check)); from then on `pg_list_connections` shows the report.
+A connection's role is audited on its first use (see [role check](configuration.md#role-check)); from then on `pg_list_connections` shows the report. Past 10 KB, the list is written to a spill file, one line per row, like a large `pg_query` result.
+
+The findings also start the first response on the connection, which keeps to 10 KB with them: they take at most half of it, as many lines as fit and then a line that points to `pg_list_connections`, and the rest of the response fits what they leave.
 
 ## Explore the schema
 
@@ -122,7 +124,7 @@ prod-app	98311
 - The statement is checked once. Each connection then gets what a call on it alone would: the role check, its `search_path` (`schema`, or its own `default_schema`), the limits and one audit line.
 - Rows come in the order of `connections`, after a first column, `connection`. The footer names each connection a limit cut, `(1500 rows; truncated: prod-app max_rows=1000)`, and a result over 10 KB spills to one CSV file.
 - When the connections return different columns, by name or type, each gets its own section under its name, and the sections, names included, share the 10 KB: a section past its share spills to a CSV file of its own.
-- A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The call fails only when every connection does.
+- A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The lines share half of the 10 KB and the rows take the rest: a line longer than its share is cut in the middle, as a long [error](#errors) is. The call fails only when every connection does, and the lines then share all of it.
 
 ## Explain a query
 
@@ -193,6 +195,7 @@ schema app, prod → staging: 5 differences (- only in prod, + only in staging)
 `~` marks what both define differently, left then right. It compares relations (their kind, whether row-level security is on and the query of a view or materialized view), columns (type, `NOT NULL`, default, identity or generation), constraints, indexes and RLS policies; an index that implements a constraint shows as the constraint. Relations come in name order, each followed by its query, columns, constraints, indexes and policies, and a relation only one side has takes one line. A query is compared only when both sides have one: a view that became a table shows as a change of kind. When nothing differs, the result says `identical` and how many relations it compared.
 
 - Only what each connection's role can read is compared, as in `pg_schema`, and partitions are left out.
+- A `schema` over 63 bytes is refused: Postgres keeps no longer name, and would cut it to its first 63 bytes, which may name another schema.
 - When reading one side fails, the error starts with that side's name: for a schema the side lacks or whose role lacks `USAGE` on it, and for a Postgres error, such as `staging: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`.
 - Each side's structure is read as one catalog value, which [`max_bytes`](configuration.md#defaults) bounds like any result: a table of 7 columns, 2 constraints and an index takes about 660 bytes, so the default 1 MiB holds about 1,600 of them. A larger schema fails with `staging: read the structure of schema "public": catalog result exceeds the configured limits (max_bytes=1048576); raise defaults.max_bytes in config.json to read larger schemas`.
 - Definitions and queries are compared as each server prints them, so servers of different major versions can differ in spelling alone: in the query of a view that reads one table, Postgres 15 qualifies the column names and later versions do not, for one.
@@ -246,6 +249,8 @@ A failed call returns a result with `isError` set and the reason as text:
 
 - `connection "prod" refused (role_check strict): its role can do more than read.`, followed by the findings
 - invalid arguments, such as an unknown connection or argument name
+
+An error, with the role check's findings that may start it, keeps to the 10 KB of a response. A Postgres error can quote a value whole, and an unknown connection's lists every configured name: one longer than that is cut in the middle, keeping its start and its end, where the SQLSTATE, position, detail and hint are, as in `ERROR: invalid input syntax for type integer: "yyyy…[10088 bytes cut]…yyyy" (SQLSTATE 22P02)`.
 
 ## Audit log
 

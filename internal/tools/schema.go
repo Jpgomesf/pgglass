@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
@@ -45,9 +46,12 @@ func (h *Handlers) schema(ctx context.Context, raw json.RawMessage, c *call) (st
 	if c.notice, err = h.checks.gate(ctx, args.Connection); err != nil {
 		return "", err
 	}
-	key := args.Connection + "\x00" + args.Schema + "\x00" + args.Table
+	// The key holds the limit too: the role check's findings, which come with
+	// the first call on a connection, leave less room.
+	room := h.room(c)
+	key := args.Connection + "\x00" + args.Schema + "\x00" + args.Table + "\x00" + strconv.Itoa(room)
 	text, err := h.schemas.Get(key, func() (string, error) {
-		return describe(ctx, h.engine.Querier(args.Connection), args.Schema, args.Table, h.spill.InlineMaxBytes)
+		return describe(ctx, h.engine.Querier(args.Connection), args.Schema, args.Table, room)
 	})
 	if err != nil {
 		return "", &dbError{err}
@@ -132,10 +136,11 @@ func (h *Handlers) search(ctx context.Context, raw json.RawMessage, c *call) (st
 		return "", &dbError{err}
 	}
 	c.rows = len(matches)
-	if text := matches.Render(); len(text) <= h.spill.InlineMaxBytes {
+	room := h.room(c)
+	if text := matches.Render(); len(text) <= room {
 		return text, nil
 	}
-	return h.linesOutput("pg_search", args.Connection, "match", matches.Lines())
+	return h.linesOutput("pg_search", args.Connection, "match", matches.Lines(), room)
 }
 
 // searchLimit returns how many matches to return when asked for limit: the

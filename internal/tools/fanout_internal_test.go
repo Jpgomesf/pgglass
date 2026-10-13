@@ -142,12 +142,12 @@ func TestFanoutText(t *testing.T) {
 		{conn: "b", err: &dbError{queryErr}},
 		fanoutOK("c", fanoutIDColumn, "2", "3"),
 		{conn: "d", err: rejected},
-	}, render.TSV)
+	}, render.TSV, 1000)
 	if want := "connection\tid\na\t1\nc\t2\nc\t3\n(3 rows)\n\n" + failedLines; err != nil || got != want {
 		t.Errorf("merged with failures = %v:\n%s\nwant\n%s", err, got, want)
 	}
 
-	got, err = h.fanoutText([]fanoutResult{fanoutOK("a", fanoutIDColumn, "1"), fanoutOK("b", fanoutNameColumn, "x")}, render.TSV)
+	got, err = h.fanoutText([]fanoutResult{fanoutOK("a", fanoutIDColumn, "1"), fanoutOK("b", fanoutNameColumn, "x")}, render.TSV, 1000)
 	want := "Columns differ across connections, so each has its own result.\n\n" +
 		"a:\nid\n1\n(1 row)\n\n" +
 		"b:\nname\nx\n(1 row)"
@@ -155,7 +155,7 @@ func TestFanoutText(t *testing.T) {
 		t.Errorf("columns differ = %v:\n%s\nwant\n%s", err, got, want)
 	}
 
-	_, err = h.fanoutText([]fanoutResult{{conn: "b", err: &dbError{queryErr}}, {conn: "d", err: rejected}}, render.TSV)
+	_, err = h.fanoutText([]fanoutResult{{conn: "b", err: &dbError{queryErr}}, {conn: "d", err: rejected}}, render.TSV, 1000)
 	if err == nil || errorText(err) != failedLines {
 		t.Errorf("all failed = %v, want an error showing\n%s", err, failedLines)
 	}
@@ -171,7 +171,7 @@ func TestFanoutSectionsShareTheInlineLimit(t *testing.T) {
 		values = append(values, strconv.Itoa(i))
 	}
 	ids, names := fanoutOK("ids", fanoutIDColumn, values...), fanoutOK("names", fanoutNameColumn, values...)
-	got, err := h.fanoutText([]fanoutResult{ids, names}, render.TSV)
+	got, err := h.fanoutText([]fanoutResult{ids, names}, render.TSV, 1000)
 	if err != nil || strings.Contains(got, "Full result") {
 		t.Fatalf("two sections of about 180 bytes, sharing 1000 = %v:\n%s", err, got)
 	}
@@ -180,7 +180,7 @@ func TestFanoutSectionsShareTheInlineLimit(t *testing.T) {
 	for i := range 8 {
 		ok = append(ok, fanoutOK(fmt.Sprintf("more%d", i), fanoutNameColumn, "x"))
 	}
-	if got, err = h.fanoutText(ok, render.TSV); err != nil {
+	if got, err = h.fanoutText(ok, render.TSV, 1000); err != nil {
 		t.Fatal(err)
 	}
 	// Each gets a tenth of 1000 bytes, less the first line (62 bytes) and the
@@ -217,7 +217,7 @@ func TestFanoutSectionsFitTogether(t *testing.T) {
 		}
 		ok = append(ok, fanoutResult{conn: fmt.Sprintf("connection_%d", i), res: res})
 	}
-	got, err := h.fanoutText(ok, render.TSV)
+	got, err := h.fanoutText(ok, render.TSV, config.InlineMaxBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

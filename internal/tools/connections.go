@@ -13,21 +13,25 @@ import (
 )
 
 // listConnections runs pg_list_connections: every connection, by name, with
-// its role check once that has run.
-func (h *Handlers) listConnections(_ context.Context, raw json.RawMessage, _ *call) (string, error) {
+// its role check once that has run, inline or, past the inline limit,
+// spilled to a file, one line per row.
+func (h *Handlers) listConnections(_ context.Context, raw json.RawMessage, c *call) (string, error) {
 	if err := decode(raw, &struct{}{}); err != nil {
 		return "", err
 	}
 	names := slices.Sorted(maps.Keys(h.cfg.Connections))
-	var b strings.Builder
-	fmt.Fprintf(&b, "Connections (%d):", len(names))
+	lines := []string{fmt.Sprintf("Connections (%d):", len(names))}
 	for _, name := range names {
-		fmt.Fprintf(&b, "\n  %s [%s]", name, strings.Join(flags(h.cfg.Connections[name]), ", "))
+		lines = append(lines, fmt.Sprintf("  %s [%s]", name, strings.Join(flags(h.cfg.Connections[name]), ", ")))
 		for _, line := range strings.Split(h.checks.status(name), "\n") {
-			b.WriteString("\n    " + line)
+			lines = append(lines, "    "+line)
 		}
 	}
-	return b.String(), nil
+	room := h.room(c)
+	if text := strings.Join(lines, "\n"); len(text) <= room {
+		return text, nil
+	}
+	return h.linesOutput("pg_list_connections", "", "line", lines, room)
 }
 
 // flags describes how a connection is configured.

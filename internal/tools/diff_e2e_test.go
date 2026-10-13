@@ -236,6 +236,29 @@ func TestDiffSchemaInvalidCalls(t *testing.T) {
 	}
 }
 
+// Postgres cuts a name to 63 bytes, so a longer schema argument matched the
+// schema its first 63 bytes name, and the first line repeated it whole. It is
+// refused; a schema of 63 bytes is compared.
+func TestDiffSchemaRefusesANameLongerThanPostgresKeeps(t *testing.T) {
+	t.Parallel()
+	schema := strings.Repeat("s", 63)
+	testdb.CreateDatabase(t, "tools_diff_name_left", "CREATE SCHEMA "+schema+"; CREATE TABLE "+schema+".a (id int);")
+	testdb.CreateDatabase(t, "tools_diff_name_right", "CREATE SCHEMA "+schema+";")
+	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{
+		"left":  direct(testdb.DSN(t, testdb.Superuser, "tools_diff_name_left")),
+		"right": direct(testdb.DSN(t, testdb.Superuser, "tools_diff_name_right")),
+	}))
+
+	want := "schema " + schema + ", left → right: 1 difference (- only in left, + only in right)\n- table a"
+	if got := s.ok(t, "pg_diff_schema", diffArgs("left", "right", "schema", schema)); got != want {
+		t.Errorf("a 63-byte schema:\n%s\nwant\n%s", got, want)
+	}
+	want = "schema is 64 bytes: Postgres names take at most 63, and it cuts a longer one"
+	if got := s.fails(t, "pg_diff_schema", diffArgs("left", "right", "schema", schema+"x")); got != want {
+		t.Errorf("a 64-byte schema = %q, want %q", got, want)
+	}
+}
+
 // A diff past the inline limit is spilled to a CSV file, one difference per
 // row, under the line that says which side is which.
 func TestDiffSchemaSpillsALargeDiff(t *testing.T) {

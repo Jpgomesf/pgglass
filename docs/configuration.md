@@ -158,6 +158,8 @@ On a connection's first use, the server audits the role it connects as, once, an
 | `warn` | Findings are shown once, at the top of the first response on the connection |
 | `off` | No audit |
 
+The findings shown with a response take at most half of its 10 KB: past that, a line points to `pg_list_connections`, which shows them all.
+
 Critical findings, each a way out of the read-only transaction: superuser; membership in a superuser role, which `SET ROLE` reaches; membership in `pg_execute_server_program` or `pg_write_server_files`; `EXECUTE` on `dblink*`, `pg_background*`, `http*`, `net.*`, `aws_s3.*`, `aws_lambda.*`, `lo_export` or `autoprewarm_*` (pg_prewarm), or on a function that writes in place: `heap_force_*` (pg_surgery), `pg_truncate_visibility_map` (pg_visibility) or `pg_log_standby_snapshot`. Warnings: `BYPASSRLS`, `CREATEROLE`, `CREATEDB`; membership in `pg_read_server_files` or `pg_signal_backend`; `INSERT`, `UPDATE`, `DELETE` or `TRUNCATE` on a relation; `EXECUTE` on `lo_import`, `pg_read_file`, `pg_read_binary_file` or `pg_log_backend_memory_contexts`. Only objects in schemas the role can use count. `CREATE EXTENSION pg_prewarm` grants `EXECUTE` on `autoprewarm_dump_now` and `autoprewarm_start_worker`, which write a server file, to `PUBLIC`: revoke it, or `strict` refuses every role that can use the extension's schema.
 
 If the audit itself fails, it is retried on the next call; meanwhile `strict` refuses the connection and `warn` lets calls through with a note.

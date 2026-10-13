@@ -41,8 +41,9 @@ func (h *Handlers) explain(ctx context.Context, raw json.RawMessage, c *call) (s
 	if err != nil {
 		return "", &dbError{err}
 	}
-	if len(summary) <= h.spill.InlineMaxBytes {
+	room := h.room(c)
+	if len(summary) <= room {
 		return summary, nil
 	}
-	return h.linesOutput("pg_explain", args.Connection, "line", strings.Split(summary, "\n"))
+	return h.linesOutput("pg_explain", args.Connection, "line", strings.Split(summary, "\n"), room)
 }

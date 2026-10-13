@@ -435,7 +435,7 @@ func TestSpillAlwaysWritesTheFile(t *testing.T) {
 		t.Fatalf("Output = %v, want the lines inline, cut:\n%s", err, out)
 	}
 
-	out, err := store.Spill("pg_explain", "prod", res, render.TSV)
+	out, err := store.Spill("pg_explain", "prod", res, render.TSV, 10_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,7 +452,7 @@ func TestSpillAlwaysWritesTheFile(t *testing.T) {
 	}
 
 	store.Dir = "" // no file: as many leading lines as fit
-	if out, err = store.Spill("pg_explain", "prod", res, render.TSV); err != nil ||
+	if out, err = store.Spill("pg_explain", "prod", res, render.TSV, 10_000); err != nil ||
 		!strings.Contains(out, " of 40 rows shown; could not write the spill file: ") || len(out) > 10_000 {
 		t.Errorf("without a file = %v: %d bytes:\n%s", err, len(out), out)
 	}
@@ -464,7 +464,7 @@ func TestOutputWholeKeepsCellsWhole(t *testing.T) {
 	store := newStore(t, 10_000)
 	res := people()
 	res.Rows[0][1] = str(strings.Repeat("é", 300))
-	if out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV); err != nil || out != wholeOf(t, res, "(3 rows)") {
+	if out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV, 10_000); err != nil || out != wholeOf(t, res, "(3 rows)") {
 		t.Errorf("OutputWhole = %v:\n%s\nwant the cell whole", err, out)
 	}
 
@@ -472,7 +472,7 @@ func TestOutputWholeKeepsCellsWhole(t *testing.T) {
 	if out, err := store.Output("pg_profile", "prod", res, render.TSV); err != nil || strings.Contains(out, "Full result") {
 		t.Fatalf("Output = %v, want the lines inline, cut:\n%s", err, out)
 	}
-	out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV)
+	out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV, 10_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,6 +481,29 @@ func TestOutputWholeKeepsCellsWhole(t *testing.T) {
 	}
 	if records, err := csv.NewReader(strings.NewReader(readFile(t, spillPath(t, out)))).ReadAll(); err != nil || len(records) != 21 || records[20][0] != *res.Rows[19][0] {
 		t.Errorf("spill file: %d records, %v; want a header and 20 whole lines", len(records), err)
+	}
+}
+
+// OutputWhole and Spill fit what they return in the limit they are given, not
+// in InlineMaxBytes: a tool lowers it to leave room for what comes before
+// its output, such as the role check's findings.
+func TestOutputWholeAndSpillUseTheirLimit(t *testing.T) {
+	store := newStore(t, 10_000)
+	res := lines(10, 300)
+	whole := wholeOf(t, res, "(10 rows)") // 3 kB
+	if out, err := store.OutputWhole("pg_health", "prod", res, render.TSV, len(whole)); err != nil || out != whole {
+		t.Errorf("OutputWhole at its limit = %v:\n%s\nwant the lines inline", err, out)
+	}
+	for _, limit := range []int{len(whole) - 1, 1000} {
+		want := fmt.Sprintf("Result too large to return inline (%d bytes, limit %d): 10 rows × 1 column", len(whole), limit)
+		out, err := store.OutputWhole("pg_health", "prod", res, render.TSV, limit)
+		if err != nil || !strings.HasPrefix(out, want) || len(out) > limit {
+			t.Errorf("OutputWhole within %d = %v, %d bytes:\n%s", limit, err, len(out), out)
+		}
+		out, err = store.Spill("pg_explain", "prod", res, render.TSV, limit)
+		if err != nil || !strings.HasPrefix(out, want) || len(out) > limit {
+			t.Errorf("Spill within %d = %v, %d bytes:\n%s", limit, err, len(out), out)
+		}
 	}
 }
 

@@ -14,6 +14,10 @@ import (
 // defaultDiffSchema is the schema pg_diff_schema compares when given none.
 const defaultDiffSchema = "public"
 
+// maxNameBytes is the longest name Postgres keeps (NAMEDATALEN - 1). It cuts
+// a longer one, so a schema argument past it would match another schema.
+const maxNameBytes = 63
+
 type diffSchemaArgs struct {
 	Left   string `json:"left"`
 	Right  string `json:"right"`
@@ -34,6 +38,9 @@ func (h *Handlers) diffSchema(ctx context.Context, raw json.RawMessage, c *call)
 	if args.Schema == "" {
 		args.Schema = defaultDiffSchema
 	}
+	if len(args.Schema) > maxNameBytes {
+		return "", fmt.Errorf("schema is %d bytes: Postgres names take at most %d, and it cuts a longer one", len(args.Schema), maxNameBytes)
+	}
 	if err := h.gatePair(ctx, args.Left, args.Right, c); err != nil {
 		return "", err
 	}
@@ -47,7 +54,7 @@ func (h *Handlers) diffSchema(ctx context.Context, raw json.RawMessage, c *call)
 	}
 	lines := introspect.Diff(left, right)
 	c.rows = len(lines)
-	return h.diffText(args, len(left), lines)
+	return h.diffText(args, len(left), lines, h.room(c))
 }
 
 // useConnectionPair checks that left and right name two configured
@@ -90,22 +97,22 @@ func (h *Handlers) readStructure(ctx context.Context, conn, schema string) (intr
 	return s, nil
 }
 
-// diffText renders the result of pg_diff_schema. Its first line says what
-// was compared and either that it is identical, counting its relations, or
-// how many differences follow and which side is which. Past the inline
-// limit, the differences go to a spill file instead, one per row, and their
+// diffText renders the result of pg_diff_schema within room bytes. Its first
+// line says what was compared and either that it is identical, counting its
+// relations, or how many differences follow and which side is which. Past
+// room, the differences go to a spill file instead, one per row, and their
 // summary follows the first line.
-func (h *Handlers) diffText(args diffSchemaArgs, relations int, lines []string) (string, error) {
+func (h *Handlers) diffText(args diffSchemaArgs, relations int, lines []string, room int) (string, error) {
 	head := fmt.Sprintf("schema %s, %s → %s: ", args.Schema, args.Left, args.Right)
 	if len(lines) == 0 {
 		return head + "identical (" + plural(relations, "relation") + ")", nil
 	}
 	head += fmt.Sprintf("%s (- only in %s, + only in %s)", plural(len(lines), "difference"), args.Left, args.Right)
 	text := head + "\n" + strings.Join(lines, "\n")
-	if len(text) <= h.spill.InlineMaxBytes {
+	if len(text) <= room {
 		return text, nil
 	}
-	summary, err := h.linesOutput("pg_diff_schema", args.Left+"-"+args.Right, "difference", lines)
+	summary, err := h.linesOutput("pg_diff_schema", args.Left+"-"+args.Right, "difference", lines, room-len(head+"\n"))
 	if err != nil {
 		return "", err
 	}

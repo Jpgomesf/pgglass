@@ -33,7 +33,7 @@ func (h *Handlers) health(ctx context.Context, raw json.RawMessage, c *call) (st
 	}
 	res := healthResult(lines)
 	c.rows = len(res.Rows)
-	return h.spill.Output("pg_health", args.Connection, res, render.Format(h.cfg.Defaults.Format))
+	return h.spill.OutputWithin("pg_health", args.Connection, res, render.Format(h.cfg.Defaults.Format), h.room(c))
 }
 
 // healthResult returns lines as a result with two text columns, section and
