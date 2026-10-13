@@ -1,7 +1,9 @@
 package explain_test
 
 import (
+	"context"
 	"errors"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -11,12 +13,26 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 	"github.com/jpgomesf/mcp-postgres/internal/explain"
 	"github.com/jpgomesf/mcp-postgres/internal/guard"
+	"github.com/jpgomesf/mcp-postgres/internal/result"
 	"github.com/jpgomesf/mcp-postgres/internal/testdb"
 )
 
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-func TestNew(t *testing.T) {
+// recorder is a Querier that records the query it is given and fails it, so
+// Run stops there.
+type recorder struct{ got engine.Query }
+
+var errRecorded = errors.New("recorded")
+
+func (r *recorder) Query(_ context.Context, q engine.Query) (*result.Result, error) {
+	r.got = q
+	return nil, errRecorded
+}
+
+// Run sends the EXPLAIN that New puts around the SELECT, with the
+// search_path it is given.
+func TestRunSendsTheExplain(t *testing.T) {
 	for _, tc := range []struct {
 		sql     string
 		analyze bool
@@ -27,8 +43,17 @@ func TestNew(t *testing.T) {
 		{"(SELECT 1) UNION ALL VALUES (2)", false, "EXPLAIN (FORMAT JSON, VERBOSE) (SELECT 1) UNION ALL VALUES (2)"},
 		{"SELECT 1 -- trailing comment", false, "EXPLAIN (FORMAT JSON, VERBOSE) SELECT 1 -- trailing comment"},
 	} {
-		if s, err := explain.New(tc.sql, tc.analyze); err != nil || s.SQL() != tc.want {
-			t.Errorf("New(%q, %v) = %q, %v; want %q", tc.sql, tc.analyze, s.SQL(), err, tc.want)
+		stmt, err := explain.New(tc.sql, tc.analyze)
+		if err != nil {
+			t.Errorf("New(%q, %v): %v", tc.sql, tc.analyze, err)
+			continue
+		}
+		var q recorder
+		if _, err := stmt.Run(t.Context(), &q, "app"); !errors.Is(err, errRecorded) {
+			t.Errorf("Run of %q = %v, want the querier's error", tc.sql, err)
+		}
+		if want := (engine.Query{SQL: tc.want, SearchPath: "app"}); !reflect.DeepEqual(q.got, want) {
+			t.Errorf("New(%q, %v) then Run sent %+v, want %+v", tc.sql, tc.analyze, q.got, want)
 		}
 	}
 }
