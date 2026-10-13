@@ -21,7 +21,8 @@ const (
 	// The role can act outside the read-only transaction: as a superuser,
 	// directly or through SET ROLE, with the server program or file-write
 	// roles, or through functions that open sessions, send requests or rows
-	// out, or write server files.
+	// out, write server files, or write in place, past READ ONLY and the
+	// rollback.
 	SeverityCritical = "critical"
 	// Risky, but no way out of the read-only transaction on its own: role
 	// attributes, table write privileges (the transaction refuses the
@@ -86,8 +87,11 @@ var dangerousFunctions = []struct {
 	// Ways out of the read-only transaction: dblink* opens sessions of its
 	// own, pg_background* runs SQL in a worker's own transaction, http*
 	// (pgsql-http), net.* (Supabase pg_net), aws_s3.* and aws_lambda.* (RDS)
-	// send requests or rows out, and lo_export writes server files.
-	{SeverityCritical, []string{`%.dblink%`, `%.pg\_background%`, `%.http%`, `net.%`, `aws\_s3.%`, `aws\_lambda.%`, `%.lo\_export`}},
+	// send requests or rows out, lo_export writes server files, and
+	// heap_force_* (pg_surgery), pg_truncate_visibility_map (pg_visibility)
+	// and pg_log_standby_snapshot, which writes a WAL record, write in place.
+	{SeverityCritical, []string{`%.dblink%`, `%.pg\_background%`, `%.http%`, `net.%`, `aws\_s3.%`, `aws\_lambda.%`, `%.lo\_export`,
+		`%.heap\_force\_%`, `%.pg\_truncate\_visibility\_map`, `%.pg\_log\_standby\_snapshot`}},
 	// They read server files, or make another backend dump its memory
 	// contexts to the server log.
 	{SeverityWarning, []string{`%.lo\_import`, `%.pg\_read\_file`, `%.pg\_read\_binary\_file`, `%.pg\_log\_backend\_memory\_contexts`}},
