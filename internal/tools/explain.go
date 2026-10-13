@@ -45,5 +45,5 @@ func (h *Handlers) explain(ctx context.Context, raw json.RawMessage, c *call) (s
 	if len(summary) <= room {
 		return summary, nil
 	}
-	return h.linesOutput("pg_explain", args.Connection, "line", strings.Split(summary, "\n"), room)
+	return h.linesOutput("pg_explain", args.Connection, "line", strings.Split(summary, "\n"), "", room)
 }

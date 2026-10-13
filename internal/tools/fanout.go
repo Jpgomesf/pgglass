@@ -170,7 +170,7 @@ func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format, room int)
 	if err != nil || len(text) <= room {
 		return text, err
 	}
-	return h.linesOutput("pg_query", strings.Join(names, "_"), "line", strings.Split(text, "\n"), room)
+	return h.linesOutput("pg_query", strings.Join(names, "_"), "line", strings.Split(text, "\n"), "", room)
 }
 
 // fanoutSections renders ok, results whose columns differ, as a section per

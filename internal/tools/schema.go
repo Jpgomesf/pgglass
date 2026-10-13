@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -115,7 +116,7 @@ type searchArgs struct {
 }
 
 // search runs pg_search: the matches, one per line, inline or spilled to a
-// file.
+// file whose summary says when the limit cut them.
 func (h *Handlers) search(ctx context.Context, raw json.RawMessage, c *call) (string, error) {
 	var args searchArgs
 	if err := decode(raw, &args); err != nil {
@@ -127,34 +128,43 @@ func (h *Handlers) search(ctx context.Context, raw json.RawMessage, c *call) (st
 	if args.Pattern == "" {
 		return "", errors.New("pattern must not be empty")
 	}
-	limit, err := searchLimit(args.Limit, h.cfg.Defaults.MaxRows)
+	limit, cut, err := searchLimit(args.Limit, h.cfg.Defaults.MaxRows)
 	if err != nil {
 		return "", err
 	}
 	if c.notice, err = h.checks.gate(ctx, args.Connection); err != nil {
 		return "", err
 	}
-	matches, err := introspect.Search(ctx, h.engine.Querier(args.Connection), args.Pattern, limit)
+	// One match past limit tells whether the limit cut the matches.
+	matches, err := introspect.Search(ctx, h.engine.Querier(args.Connection), args.Pattern, min(limit, math.MaxInt-1)+1)
 	if err != nil {
 		return "", &dbError{err}
 	}
-	c.rows = len(matches)
+	if len(matches) <= limit {
+		cut = "" // every match came back
+	}
+	matches = matches[:min(len(matches), limit)]
+	c.rows, c.truncated = len(matches), cut != ""
 	room := h.room(c)
 	if text := matches.Render(); len(text) <= room {
 		return text, nil
 	}
-	return h.linesOutput("pg_search", args.Connection, "match", matches.Lines(), room)
+	return h.linesOutput("pg_search", args.Connection, "match", matches.Lines(), cut, room)
 }
 
-// searchLimit returns how many matches to return when asked for limit: the
-// default when limit is 0, and never more than maxRows.
-func searchLimit(limit, maxRows int) (int, error) {
+// searchLimit returns how many matches to return when asked for limit, the
+// default when limit is 0 and never more than maxRows, and the limit that
+// sets it, as a truncation reason: "limit=50", or "max_rows=1000" when the
+// matches asked for are as many or more.
+func searchLimit(limit, maxRows int) (int, string, error) {
 	switch {
 	case limit < 0:
-		return 0, fmt.Errorf("limit must be at least 1, got %d", limit)
+		return 0, "", fmt.Errorf("limit must be at least 1, got %d", limit)
 	case limit == 0:
-		return min(defaultSearchLimit, maxRows), nil
-	default:
-		return min(limit, maxRows), nil
+		limit = defaultSearchLimit
 	}
+	if limit >= maxRows {
+		return maxRows, "max_rows=" + strconv.Itoa(maxRows), nil
+	}
+	return limit, "limit=" + strconv.Itoa(limit), nil
 }

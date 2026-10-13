@@ -23,7 +23,7 @@ func TestLinesOutputSpillsLinesWhole(t *testing.T) {
 		lines = append(lines, fmt.Sprintf("line %02d: %s.", i, strings.Repeat("x", 300)))
 	}
 
-	got, err := h.linesOutput("pg_explain", "db", "line", lines, config.InlineMaxBytes)
+	got, err := h.linesOutput("pg_explain", "db", "line", lines, "", config.InlineMaxBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

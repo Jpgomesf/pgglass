@@ -31,7 +31,7 @@ func (h *Handlers) listConnections(_ context.Context, raw json.RawMessage, c *ca
 	if text := strings.Join(lines, "\n"); len(text) <= room {
 		return text, nil
 	}
-	return h.linesOutput("pg_list_connections", "", "line", lines, room)
+	return h.linesOutput("pg_list_connections", "", "line", lines, "", room)
 }
 
 // flags describes how a connection is configured.

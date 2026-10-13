@@ -178,14 +178,17 @@ func checkName(arg, name string) error {
 
 // linesOutput writes lines, text a tool builds that is too large to return
 // as it is, to a spill file as a result of one text column named column, one
-// row per line, and returns its summary within limit bytes. The lines stay
-// whole: cut to 200 characters, they might fit inline, but without their
-// ends. Rendered with a header and a footer, text longer than limit is longer
-// still, so it always goes to the file.
-func (h *Handlers) linesOutput(tool, conn, column string, lines []string, limit int) (string, error) {
+// row per line, and returns its summary within limit bytes. cut names the
+// limit that dropped the lines past these, as in "max_rows=1000", for the
+// summary to say so; it is empty when none did. The lines stay whole: cut to
+// 200 characters, they might fit inline, but without their ends. Rendered
+// with a header and a footer, text longer than limit is longer still, so it
+// always goes to the file.
+func (h *Handlers) linesOutput(tool, conn, column string, lines []string, cut string, limit int) (string, error) {
 	res := result.Text(column)
 	for _, line := range lines {
 		res.AddRow(line)
 	}
+	res.Truncated, res.TruncatedReason = cut != "", cut
 	return h.spill.OutputWhole(tool, conn, res, render.TSV, limit)
 }

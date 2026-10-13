@@ -19,7 +19,7 @@ func TestDiffTextFitsTheSummaryUnderItsFirstLine(t *testing.T) {
 	// Rendered with a header and a footer, the lines take more than they do
 	// alone, so within that they spill, and the summary has room for all of
 	// itself.
-	whole, err := h.linesOutput("pg_diff_schema", "prod-staging", "difference", lines, len(strings.Join(lines, "\n")))
+	whole, err := h.linesOutput("pg_diff_schema", "prod-staging", "difference", lines, "", len(strings.Join(lines, "\n")))
 	if err != nil || !strings.HasPrefix(whole, "Result too large to return inline (") {
 		t.Fatalf("linesOutput = %v, want a summary:\n%s", err, whole)
 	}

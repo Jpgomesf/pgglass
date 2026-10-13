@@ -113,7 +113,7 @@ func (h *Handlers) diffText(args diffSchemaArgs, relations int, lines []string, 
 	if len(text) <= room {
 		return text, nil
 	}
-	summary, err := h.linesOutput("pg_diff_schema", args.Left+"-"+args.Right, "difference", lines, room-len(head+"\n"))
+	summary, err := h.linesOutput("pg_diff_schema", args.Left+"-"+args.Right, "difference", lines, "", room-len(head+"\n"))
 	if err != nil {
 		return "", err
 	}

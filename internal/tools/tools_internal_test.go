@@ -88,18 +88,24 @@ func TestSQLHash(t *testing.T) {
 	}
 }
 
+// The limit comes with the reason a search it cuts gives: the limit asked
+// for, or max_rows when it is no higher.
 func TestSearchLimit(t *testing.T) {
-	for _, tc := range []struct{ limit, maxRows, want int }{
-		{0, 1000, 50},
-		{0, 10, 10},
-		{5, 1000, 5},
-		{5000, 1000, 1000},
+	for _, tc := range []struct {
+		limit, maxRows, want int
+		cut                  string
+	}{
+		{0, 1000, 50, "limit=50"},
+		{0, 10, 10, "max_rows=10"},
+		{5, 1000, 5, "limit=5"},
+		{1000, 1000, 1000, "max_rows=1000"},
+		{5000, 1000, 1000, "max_rows=1000"},
 	} {
-		if got, err := searchLimit(tc.limit, tc.maxRows); err != nil || got != tc.want {
-			t.Errorf("searchLimit(%d, %d) = %d, %v; want %d", tc.limit, tc.maxRows, got, err, tc.want)
+		if got, cut, err := searchLimit(tc.limit, tc.maxRows); err != nil || got != tc.want || cut != tc.cut {
+			t.Errorf("searchLimit(%d, %d) = %d, %q, %v; want %d, %q", tc.limit, tc.maxRows, got, cut, err, tc.want, tc.cut)
 		}
 	}
-	if _, err := searchLimit(-1, 1000); err == nil {
+	if _, _, err := searchLimit(-1, 1000); err == nil {
 		t.Error("searchLimit(-1) succeeded, want an error")
 	}
 }
