@@ -425,6 +425,7 @@ var deniedPrefixes = []string{
 	"table_to_xml",    // table_to_xml*: reads the relation it is given by name (see checkRelation)
 	"crosstab",        // tablefunc: crosstab and its wrappers run SQL passed as a string
 	"heap_force_",     // pg_surgery: kills or freezes rows in place, past READ ONLY and the rollback
+	"autoprewarm_",    // pg_prewarm, which PUBLIC may execute: writes a server file, itself or through a worker it starts
 	"pg_restore_",     // pg_restore_relation_stats, pg_restore_attribute_stats (PostgreSQL 18): write planner statistics to the catalogs
 	"pg_clear_",       // pg_clear_relation_stats, pg_clear_attribute_stats (PostgreSQL 18): clear them
 }

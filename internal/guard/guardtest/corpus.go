@@ -402,6 +402,12 @@ var Rejected = []Case{
 	{`SELECT * FROM pg_logical_slot_get_changes('s', NULL, NULL)`, "pg_logical_slot_get_changes"},
 	// [redteam] pg_log_*: writes WAL, which READ ONLY does not stop and rollback does not undo.
 	{`SELECT pg_log_standby_snapshot()`, "pg_log_standby_snapshot"},
+	// [redteam] pg_prewarm writes $PGDATA/autoprewarm.blocks, past READ ONLY and
+	// the rollback, as any role: EXECUTE is PUBLIC.
+	{`SELECT autoprewarm_dump_now()`, "autoprewarm_dump_now"},
+	// [policy] The same family: starts a background worker that outlives the
+	// call and rewrites that file.
+	{`SELECT public.autoprewarm_start_worker()`, "public.autoprewarm_start_worker"},
 	// [policy] heap_force_*: pg_surgery deletes a row in place, which READ ONLY and the rollback do not stop.
 	{`SELECT heap_force_kill('app.orders'::regclass, ARRAY['(0,1)']::tid[])`, "heap_force_kill"},
 	// [policy] heap_force_*: freezes a row in place.
