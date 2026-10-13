@@ -188,6 +188,26 @@ func TestParseRejectsConnectionNamesOver63Bytes(t *testing.T) {
 	}
 }
 
+// A default_schema over 63 bytes started the server, and then failed every
+// call that used it, naming a schema argument the agent never passed:
+// Postgres would cut it to its first 63 bytes, which may name another schema.
+// The server now refuses to start with one.
+func TestParseRejectsDefaultSchemasOver63Bytes(t *testing.T) {
+	withSchema := func(schema string) []byte {
+		return []byte(`{"connections": {"db": {"source": "direct", "default_schema": "` + schema + `"}}}`)
+	}
+	for _, schema := range []string{strings.Repeat("s", 63), strings.Repeat("é", 31) + "x"} {
+		if _, err := Parse(withSchema(schema)); err != nil {
+			t.Errorf("a default_schema of 63 bytes: %v", err)
+		}
+	}
+	_, err := Parse(withSchema(strings.Repeat("é", 32)))
+	const want = `invalid config.json: connection "db": default_schema is 64 bytes: Postgres names take at most 63, and it cuts a longer one`
+	if err == nil || err.Error() != want {
+		t.Errorf("a default_schema of 64 bytes: error = %v, want\n%s", err, want)
+	}
+}
+
 func TestParseAcceptsAndReportsDeprecatedReadonly(t *testing.T) {
 	for _, tc := range []struct {
 		doc  string

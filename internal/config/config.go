@@ -203,6 +203,10 @@ func checkNames(conns map[string]Connection) error {
 			errs = append(errs, fmt.Errorf("connection name %q is %d bytes: connection names take at most %d, as Postgres names do",
 				name, len(name), MaxNameBytes))
 		}
+		if schema := conns[name].DefaultSchema; len(schema) > MaxNameBytes {
+			errs = append(errs, fmt.Errorf("connection %q: default_schema is %d bytes: Postgres names take at most %d, and it cuts a longer one",
+				name, len(schema), MaxNameBytes))
+		}
 	}
 	return errors.Join(errs...)
 }

@@ -17,7 +17,7 @@ On connecting, the server tells the agent how to use the tools well: start with 
 | `pg_diff_schema` | `left`, `right`, `schema`? | What differs in a schema between two connections |
 | `pg_health` | `connection` | One line per finding on connections, sessions, cache, dead rows, indexes, wraparound and replication |
 
-Postgres keeps names of at most 63 bytes and cuts a longer one to its first 63, which may name another object. So a `schema`, `table` or `column` over 63 bytes is refused before any query, as is a `default_schema` that long in the calls that use it: `table is 64 bytes: Postgres names take at most 63, and it cuts a longer one`. Connection names take at most 63 bytes too (see [Configuration](configuration.md#connection-structure)).
+Postgres keeps names of at most 63 bytes and cuts a longer one to its first 63, which may name another object. So a `schema`, `table` or `column` over 63 bytes is refused before any query: `table is 64 bytes: Postgres names take at most 63, and it cuts a longer one`. Connection names and `default_schema` take at most 63 bytes too, or the server does not start (see [Configuration](configuration.md#validation-rules)).
 
 ## Discover connections
 
