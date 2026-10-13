@@ -8,8 +8,8 @@ import (
 	"github.com/jpgomesf/mcp-postgres/internal/engine"
 )
 
-// SchemaStructure is what Diff compares of one schema: the relations Tables
-// lists, by name.
+// SchemaStructure is what Diff compares of one schema: the relations
+// FirstTables lists, all of them, by name.
 type SchemaStructure map[string]RelationStructure
 
 // RelationStructure is what Diff compares of one relation. Each map holds
@@ -33,7 +33,7 @@ type RelationStructure struct {
 
 // Structure reads the structure of schema with one catalog query. It returns
 // an error if the schema does not exist or the current role lacks USAGE on
-// it. As in Tables, what the role cannot read is left out, and so are
+// it. As in FirstTables, what the role cannot read is left out, and so are
 // partitions.
 func Structure(ctx context.Context, q engine.Querier, schema string) (SchemaStructure, error) {
 	var s SchemaStructure
@@ -97,7 +97,7 @@ const policyDefinitionsSQL = `SELECT json_object_agg(p.polname, concat_ws(' ',
 	FROM pg_policy p
 	WHERE p.polrelid = c.oid`
 
-// structureSQL returns the relations of schema $1 that Tables lists, each
+// structureSQL returns the relations of schema $1 that FirstTables lists, each
 // with the definitions of its columns, constraints, indexes and policies; no
 // row when the schema does not exist or the role lacks USAGE on it.
 const structureSQL = `

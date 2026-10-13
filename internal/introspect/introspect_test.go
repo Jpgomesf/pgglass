@@ -61,12 +61,16 @@ func wantErr(t *testing.T, err error, want string) {
 	}
 }
 
+// everything is a listing limit past all the schemas and relations of the
+// fixtures.
+const everything = 100
+
 func TestSchemasAsCleanRole(t *testing.T) {
-	got, err := introspect.Schemas(t.Context(), testdb.Querier(t, testdb.RoleClean, testdb.DBApp))
+	got, _, err := introspect.FirstSchemas(t.Context(), testdb.Querier(t, testdb.RoleClean, testdb.DBApp), everything)
 	if err != nil {
 		t.Fatal(err)
 	}
-	equal(t, "Schemas", got, introspect.SchemaList{
+	equal(t, "FirstSchemas", got, introspect.SchemaList{
 		{Name: "app", Relations: 7, Comment: "Fixture application schema"},
 		{Name: "public", Relations: 0, Comment: "standard public schema"},
 	})
@@ -86,11 +90,11 @@ func TestSchemasExcludeSystemSchemas(t *testing.T) {
 		}
 	}
 
-	got, err := introspect.Schemas(t.Context(), testdb.Querier(t, testdb.Superuser, testdb.DBApp))
+	got, _, err := introspect.FirstSchemas(t.Context(), testdb.Querier(t, testdb.Superuser, testdb.DBApp), everything)
 	if err != nil {
 		t.Fatal(err)
 	}
-	equal(t, "Schemas", got, introspect.SchemaList{
+	equal(t, "FirstSchemas", got, introspect.SchemaList{
 		{Name: "app", Relations: 7, Comment: "Fixture application schema"},
 		{Name: "public", Relations: 0, Comment: "standard public schema"},
 	})
@@ -100,21 +104,21 @@ func TestSchemasCountReadableRelationsWithoutPartitions(t *testing.T) {
 	loadLab(t)
 
 	// ro_clean cannot read lab.hidden, nor use schema locked.
-	got, err := introspect.Schemas(t.Context(), testdb.Querier(t, testdb.RoleClean, labDB))
+	got, _, err := introspect.FirstSchemas(t.Context(), testdb.Querier(t, testdb.RoleClean, labDB), everything)
 	if err != nil {
 		t.Fatal(err)
 	}
-	equal(t, "Schemas as ro_clean", got, introspect.SchemaList{
+	equal(t, "FirstSchemas as ro_clean", got, introspect.SchemaList{
 		{Name: "lab", Relations: 7, Comment: "Introspection lab"},
 		{Name: "public", Relations: 0, Comment: "standard public schema"},
 	})
 
 	// The superuser reads everything; the two partitions still do not count.
-	got, err = introspect.Schemas(t.Context(), testdb.Querier(t, testdb.Superuser, labDB))
+	got, _, err = introspect.FirstSchemas(t.Context(), testdb.Querier(t, testdb.Superuser, labDB), everything)
 	if err != nil {
 		t.Fatal(err)
 	}
-	equal(t, "Schemas as superuser", got, introspect.SchemaList{
+	equal(t, "FirstSchemas as superuser", got, introspect.SchemaList{
 		{Name: "lab", Relations: 8, Comment: "Introspection lab"},
 		{Name: "locked", Relations: 1},
 		{Name: "public", Relations: 0, Comment: "standard public schema"},
@@ -122,7 +126,7 @@ func TestSchemasCountReadableRelationsWithoutPartitions(t *testing.T) {
 }
 
 func TestTablesListsAppRelations(t *testing.T) {
-	got, err := introspect.Tables(t.Context(), testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app")
+	got, _, err := introspect.FirstTables(t.Context(), testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app", everything)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +136,7 @@ func TestTablesListsAppRelations(t *testing.T) {
 		}
 		got[i].Size = ""
 	}
-	equal(t, "Tables(app)", got, introspect.RelationList{
+	equal(t, "FirstTables(app)", got, introspect.RelationList{
 		{Schema: "app", Name: "audit_log", Kind: "table", Rows: 50},
 		{Schema: "app", Name: "customer_order_totals", Kind: "view", Rows: -1},
 		{Schema: "app", Name: "customers", Kind: "table", Rows: 50, Comment: "People who place orders"},
@@ -145,7 +149,7 @@ func TestTablesListsAppRelations(t *testing.T) {
 
 func TestTablesListsEveryKindButPartitions(t *testing.T) {
 	loadLab(t)
-	got, err := introspect.Tables(t.Context(), testdb.Querier(t, testdb.RoleClean, labDB), "lab")
+	got, _, err := introspect.FirstTables(t.Context(), testdb.Querier(t, testdb.RoleClean, labDB), "lab", everything)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -156,7 +160,7 @@ func TestTablesListsEveryKindButPartitions(t *testing.T) {
 	}
 	// Not listed: the partitions measurements_2024 (readable) and
 	// measurements_2025, and lab.hidden, which ro_clean cannot read.
-	equal(t, "Tables(lab)", got, introspect.RelationList{
+	equal(t, "FirstTables(lab)", got, introspect.RelationList{
 		{Schema: "lab", Name: "Mixed Case", Kind: "table", Rows: 0},
 		{Schema: "lab", Name: "child", Kind: "table", Rows: 0, RLS: true, Comment: "Line items.\nSecond line of the comment."},
 		{Schema: "lab", Name: "measurements", Kind: "partitioned table", Rows: 600},
@@ -180,10 +184,10 @@ func TestTablesRejectsUnusableSchemas(t *testing.T) {
 	loadLab(t)
 	q := testdb.Querier(t, testdb.RoleClean, labDB)
 	for _, schema := range []string{"locked", "nope"} {
-		got, err := introspect.Tables(t.Context(), q, schema)
+		got, _, err := introspect.FirstTables(t.Context(), q, schema, everything)
 		wantErr(t, err, fmt.Sprintf("schema %q does not exist or the current role lacks USAGE on it", schema))
 		if got != nil {
-			t.Errorf("Tables(%s) = %v, want nil", schema, got)
+			t.Errorf("FirstTables(%s) = %v, want nil", schema, got)
 		}
 	}
 }

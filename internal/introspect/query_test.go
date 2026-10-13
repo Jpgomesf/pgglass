@@ -32,25 +32,22 @@ func oneValue(v string) *result.Result {
 // call runs each public query function against q and returns their errors.
 func call(q engine.Querier) map[string]error {
 	ctx := context.Background()
-	_, schemasErr := introspect.Schemas(ctx, q)
-	_, tablesErr := introspect.Tables(ctx, q, "app")
+	_, _, schemasErr := introspect.FirstSchemas(ctx, q, 3)
+	_, _, tablesErr := introspect.FirstTables(ctx, q, "app", 3)
 	_, tableErr := introspect.Table(ctx, q, "app", "orders")
 	_, searchErr := introspect.Search(ctx, q, "order", 5)
-	return map[string]error{"Schemas": schemasErr, "Tables": tablesErr, "Table": tableErr, "Search": searchErr}
+	return map[string]error{"FirstSchemas": schemasErr, "FirstTables": tablesErr, "Table": tableErr, "Search": searchErr}
 }
 
 func TestQueriesPinSearchPathAndPassParameters(t *testing.T) {
 	ctx := context.Background()
-	limit, all := 3, (*int)(nil) // a listing's limit, or none
 	for _, tc := range []struct {
 		name string
 		run  func(engine.Querier) error
 		want []any
 	}{
-		{"Schemas", func(q engine.Querier) error { _, err := introspect.Schemas(ctx, q); return err }, []any{all}},
-		{"FirstSchemas", func(q engine.Querier) error { _, _, err := introspect.FirstSchemas(ctx, q, 3); return err }, []any{&limit}},
-		{"Tables", func(q engine.Querier) error { _, err := introspect.Tables(ctx, q, "app"); return err }, []any{"app", all}},
-		{"FirstTables", func(q engine.Querier) error { _, _, err := introspect.FirstTables(ctx, q, "app", 3); return err }, []any{"app", &limit}},
+		{"FirstSchemas", func(q engine.Querier) error { _, _, err := introspect.FirstSchemas(ctx, q, 3); return err }, []any{3}},
+		{"FirstTables", func(q engine.Querier) error { _, _, err := introspect.FirstTables(ctx, q, "app", 3); return err }, []any{"app", 3}},
 		{"Table", func(q engine.Querier) error { _, err := introspect.Table(ctx, q, "app", "orders"); return err }, []any{"app", "orders"}},
 		// The pattern matches literally: ILIKE wildcards and the escape are escaped.
 		{"Search", func(q engine.Querier) error { _, err := introspect.Search(ctx, q, `a_b%c\d`, 5); return err }, []any{`%a\_b\%c\\d%`, 5}},
@@ -92,11 +89,11 @@ func TestTruncatedCatalogResultIsAnError(t *testing.T) {
 func TestNoRowMeansNotFound(t *testing.T) {
 	for _, res := range []*result.Result{{}, {Rows: [][]*string{{nil}}}} {
 		errs := call(&fakeQuerier{res: res})
-		wantErr(t, errs["Tables"], `schema "app" does not exist or the current role lacks USAGE on it`)
+		wantErr(t, errs["FirstTables"], `schema "app" does not exist or the current role lacks USAGE on it`)
 		wantErr(t, errs["Table"], `relation "app"."orders" does not exist or the current role cannot read it`)
 		// Their aggregates always return a row, so none is a broken result.
-		if errs["Schemas"] == nil || errs["Search"] == nil {
-			t.Errorf("Schemas: %v, Search: %v, want errors", errs["Schemas"], errs["Search"])
+		if errs["FirstSchemas"] == nil || errs["Search"] == nil {
+			t.Errorf("FirstSchemas: %v, Search: %v, want errors", errs["FirstSchemas"], errs["Search"])
 		}
 	}
 }
@@ -108,9 +105,9 @@ func TestUnexpectedJSONIsAnError(t *testing.T) {
 		`{"Schemas": `,
 		`[]`,
 	} {
-		_, err := introspect.Schemas(context.Background(), &fakeQuerier{res: oneValue(value)})
+		_, _, err := introspect.FirstSchemas(context.Background(), &fakeQuerier{res: oneValue(value)}, 3)
 		if err == nil {
-			t.Errorf("Schemas decoded %s without error", value)
+			t.Errorf("FirstSchemas decoded %s without error", value)
 		}
 	}
 }

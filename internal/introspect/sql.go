@@ -44,8 +44,7 @@ const relationJSON = `json_build_object(
 	'RLS', c.relrowsecurity,
 	'Comment', obj_description(c.oid, 'pg_class'))`
 
-// schemasSQL lists the first $1 schemas, every one when $1 is NULL, and
-// counts them all.
+// schemasSQL lists the first $1 schemas and counts them all.
 const schemasSQL = `
 SELECT json_build_object(
 	'Schemas', coalesce(json_agg(json_build_object(
@@ -56,9 +55,9 @@ SELECT json_build_object(
 	'Total', (SELECT count(*) FROM pg_namespace n WHERE ` + userSchema + `))
 FROM (SELECT n.oid, n.nspname FROM pg_namespace n WHERE ` + userSchema + ` ORDER BY n.nspname LIMIT $1) n`
 
-// tablesSQL lists the first $2 relations of schema $1, every one when $2 is
-// NULL, and counts them all. It returns no row when the schema does not
-// exist or the role lacks USAGE on it.
+// tablesSQL lists the first $2 relations of schema $1 and counts them all.
+// It returns no row when the schema does not exist or the role lacks USAGE
+// on it.
 const tablesSQL = `
 SELECT json_build_object(
 	'Relations', (SELECT coalesce(json_agg(` + relationJSON + ` ORDER BY c.relname), '[]')
