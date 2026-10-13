@@ -161,8 +161,9 @@ func TestFanoutText(t *testing.T) {
 	}
 }
 
-// Sections share the inline limit: one that would fit alone spills when it
-// does not fit its share.
+// Sections share the inline limit, less the line that introduces them and
+// their names: one that would fit alone spills when it does not fit its
+// share.
 func TestFanoutSectionsShareTheInlineLimit(t *testing.T) {
 	h := &Handlers{spill: &spill.Store{Dir: t.TempDir(), InlineMaxBytes: 1000}}
 	var values []string
@@ -182,8 +183,10 @@ func TestFanoutSectionsShareTheInlineLimit(t *testing.T) {
 	if got, err = h.fanoutText(ok, render.TSV); err != nil {
 		t.Fatal(err)
 	}
+	// Each gets a tenth of 1000 bytes, less the first line (62 bytes) and the
+	// names with their colons and blank lines (88): 85.
 	files := regexp.MustCompile(`(?m)^Full result: (.+)$`).FindAllStringSubmatch(got, -1)
-	if len(files) != 2 || !regexp.MustCompile(`\n\nids:\nResult too large to return inline \(\d+ bytes, limit 100\): 60 rows × 1 column`).MatchString(got) ||
+	if len(files) != 2 || !regexp.MustCompile(`\n\nids:\nResult too large to return inline \(\d+ bytes, limit 85\): 60 rows × 1 column`).MatchString(got) ||
 		!strings.HasSuffix(got, "\n\nmore7:\nname\nx\n(1 row)") {
 		t.Fatalf("ten sections sharing 1000 bytes:\n%s", got)
 	}
@@ -191,5 +194,34 @@ func TestFanoutSectionsShareTheInlineLimit(t *testing.T) {
 		if _, err := os.Stat(f[1]); err != nil {
 			t.Error(err)
 		}
+	}
+}
+
+// Ten sections, each a summary of twenty long column names, fit together in
+// the inline limit, with the line that introduces them and their names.
+func TestFanoutSectionsFitTogether(t *testing.T) {
+	h := &Handlers{spill: &spill.Store{Dir: t.TempDir(), InlineMaxBytes: config.InlineMaxBytes}}
+	var ok []fanoutResult
+	for i := range 10 {
+		res := &result.Result{}
+		for c := range 20 {
+			name := fmt.Sprintf("%s_%d_%d", strings.Repeat("c", 50), i, c)
+			res.Columns = append(res.Columns, result.Column{Name: name, TypeOID: pgtype.TextOID, TypeName: "text"})
+		}
+		for range 50 {
+			row := make([]*string, len(res.Columns))
+			for c := range row {
+				row[c] = ptr("value")
+			}
+			res.Rows = append(res.Rows, row)
+		}
+		ok = append(ok, fanoutResult{conn: fmt.Sprintf("connection_%d", i), res: res})
+	}
+	got, err := h.fanoutText(ok, render.TSV)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(got, "\nFull result: "); len(got) > config.InlineMaxBytes || n != 10 {
+		t.Errorf("%d bytes naming %d spill files, want at most %d naming 10:\n%s", len(got), n, config.InlineMaxBytes, got)
 	}
 }

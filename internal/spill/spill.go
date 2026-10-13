@@ -49,10 +49,10 @@ type Store struct {
 // Otherwise Output writes the full result as CSV to a new file under Dir,
 // named spill-<tool>-<conn>-<timestamp>-<random>.csv with tool and conn made
 // safe for file names, and returns a summary instead: row and column counts,
-// the truncation flag, the file path, the first 20 columns with their types
-// and as many of the first 5 rows as fit in InlineMaxBytes. If the file
-// cannot be written, Output returns as many leading rows as fit in
-// InlineMaxBytes, with a note saying why.
+// the truncation flag and the file path, then the first 20 columns with
+// their types and the first 5 rows, as many of each as fit in
+// InlineMaxBytes. If the file cannot be written, Output returns as many
+// leading rows as fit in InlineMaxBytes, with a note saying why.
 //
 // Output runs Cleanup at most once an hour, ignoring its errors.
 func (s *Store) Output(tool, conn string, res *result.Result, f render.Format) (string, error) {

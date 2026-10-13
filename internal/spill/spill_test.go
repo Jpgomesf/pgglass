@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -326,6 +327,91 @@ func TestOutputSummaryStaysWithinTheLimit(t *testing.T) {
 	if out := summary(3_000); strings.Contains(out, "First") {
 		t.Errorf("want no preview, got:\n%s", out)
 	}
+}
+
+// longName is the 53-character name of column i of longNamed.
+func longName(i int) string { return fmt.Sprintf("%s_%02d", strings.Repeat("c", 50), i) }
+
+// longNamed is a result of 50 rows of 20 text columns named longName(0) to
+// longName(19).
+func longNamed() *result.Result {
+	res := &result.Result{}
+	for i := range 20 {
+		res.Columns = append(res.Columns, result.Column{Name: longName(i), TypeOID: pgtype.TextOID, TypeName: "text"})
+	}
+	for range 50 {
+		row := make([]*string, len(res.Columns))
+		for j := range row {
+			row[j] = str("value")
+		}
+		res.Rows = append(res.Rows, row)
+	}
+	return res
+}
+
+// listedColumns returns the lines of the column list of a summary of
+// longNamed that lists only some of its columns, checking that their number
+// is the one its heading gives.
+func listedColumns(t *testing.T, out string) []string {
+	t.Helper()
+	m := regexp.MustCompile(`\n\nColumns \(first (\d+) of 20\):\ncolumn\ttype\n`).FindStringSubmatchIndex(out)
+	if m == nil {
+		t.Fatalf("want some of the columns listed:\n%s", out)
+	}
+	list, _, _ := strings.Cut(out[m[1]:], "\n\n")
+	listed := strings.Split(list, "\n")
+	if shown, _ := strconv.Atoi(out[m[2]:m[3]]); shown != len(listed) {
+		t.Errorf("the heading says %d columns, %d are listed:\n%s", shown, len(listed), out)
+	}
+	return listed
+}
+
+// A summary lists only as many of the first 20 columns as fit in its limit,
+// so long column names cannot push it past the limit. The file holds every
+// column.
+func TestOutputSummaryListsTheColumnsThatFit(t *testing.T) {
+	out, err := newStore(t, 10_000).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed := listedColumns(t, out)
+	// One more column, 59 bytes and maybe a digit in the heading, would not fit.
+	if len(out) > 1000 || 1000-len(out) > 60 || len(listed) == 20 {
+		t.Errorf("limit 1000: %d bytes listing %d columns:\n%s", len(out), len(listed), out)
+	}
+	for i, line := range listed {
+		if line != longName(i)+"\ttext" {
+			t.Errorf("column line %d = %q", i, line)
+		}
+	}
+	records, err := csv.NewReader(strings.NewReader(readFile(t, spillPath(t, out)))).ReadAll()
+	if err != nil || len(records) != 51 || len(records[0]) != 20 || records[0][19] != longName(19) {
+		t.Errorf("spill file: %d records, %v; want a header of 20 columns and 50 rows", len(records), err)
+	}
+}
+
+// When not one column fits, the summary only names the file.
+func TestOutputSummaryNamesTheFileWhenNoColumnFits(t *testing.T) {
+	out, err := newStore(t, 10_000).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 300)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(out, "\nUse Read or Grep on the file instead of re-running the query.") {
+		t.Errorf("want only what names the file, got:\n%s", out)
+	}
+	if _, err := os.Stat(spillPath(t, out)); err != nil {
+		t.Error(err)
+	}
+}
+
+// readFile returns what the file at path holds.
+func readFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // a file the test's store wrote
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
 }
 
 func TestSpillFilePermissions(t *testing.T) {
