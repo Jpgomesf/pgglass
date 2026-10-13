@@ -98,7 +98,7 @@ postgres://user:password@host:5432/dbname?sslmode=require
 host=localhost port=5432 dbname=mydb user=admin password=secret
 ```
 
-Whatever the DSN says, every session starts with `default_transaction_read_only=on` and `client_encoding=UTF8`, and each query sets `statement_timeout`, `lock_timeout` and `standard_conforming_strings=on` for its own transaction.
+Whatever the DSN says, every session asks at startup for `default_transaction_read_only=on` and `client_encoding=UTF8`, and each query runs in a READ ONLY transaction that sets `statement_timeout`, `lock_timeout` and `standard_conforming_strings=on` for itself. Behind PgBouncer, `ignore_startup_parameters` drops the former, and the READ ONLY transaction alone remains (see [PgBouncer](#pgbouncer)).
 
 Each connection's DSN is resolved on first use and again for every new database connection, which takes its password and TLS settings from it: a rotated password needs no restart. A DSN that comes to name another user, database or host fails new database connections until the server restarts, since the [role check](#role-check) audited the first one. The rest of the DSN, such as `pool_max_conns`, is read on first use only.
 
