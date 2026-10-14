@@ -15,6 +15,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -876,5 +877,44 @@ func TestStoreWithoutNowUsesTheCurrentTime(t *testing.T) {
 	}
 	if _, err := os.Stat(fresh); err != nil {
 		t.Errorf("the file a minute old was removed: %v", err)
+	}
+}
+
+var cutCount = regexp.MustCompile(`…\[(\d+) bytes cut\]…`)
+
+// A text longer than its limit keeps its start and its end, where an error's
+// SQLSTATE and hint are, and the note counts the bytes dropped; a limit that
+// cannot hold the note gets the note alone.
+func TestCutMiddle(t *testing.T) {
+	if got := spill.CutMiddle("ERROR: short", 12); got != "ERROR: short" {
+		t.Errorf("text that fits was cut: %q", got)
+	}
+	long := `ERROR: invalid input syntax for type integer: "` + strings.Repeat("y", 20000) + `" (SQLSTATE 22P02)` + "\nHINT: Cast it to text first."
+	for _, limit := range []int{len(long) - 1, 1000, 200} {
+		got := spill.CutMiddle(long, limit)
+		m := cutCount.FindStringSubmatch(got)
+		if len(got) > limit || m == nil || !strings.HasPrefix(got, `ERROR: invalid input syntax for type integer: "yyy`) ||
+			!strings.HasSuffix(got, `yyy" (SQLSTATE 22P02)`+"\nHINT: Cast it to text first.") {
+			t.Errorf("cut to %d: %d bytes:\n%s", limit, len(got), got)
+			continue
+		}
+		if n, _ := strconv.Atoi(m[1]); len(got)-len(m[0])+n != len(long) {
+			t.Errorf("cut to %d: dropped %d bytes, the note says %d", limit, len(long)-len(got)+len(m[0]), n)
+		}
+	}
+	accents := strings.Repeat("é", 1000)
+	for limit := 100; limit < 108; limit++ {
+		got := spill.CutMiddle(accents, limit)
+		m := cutCount.FindStringSubmatch(got)
+		if len(got) > limit || !utf8.ValidString(got) || m == nil {
+			t.Errorf("cut of 2-byte characters to %d bytes: %d bytes, valid UTF-8 %t:\n%s", limit, len(got), utf8.ValidString(got), got)
+			continue
+		}
+		if n, _ := strconv.Atoi(m[1]); len(got)-len(m[0])+n != len(accents) {
+			t.Errorf("cut to %d: dropped %d bytes, the note says %d", limit, len(accents)-len(got)+len(m[0]), n)
+		}
+	}
+	if got, want := spill.CutMiddle(long, 5), "…["+strconv.Itoa(len(long))+" bytes cut]…"; got != want {
+		t.Errorf("cut to 5 bytes = %q, want the note alone, %q", got, want)
 	}
 }

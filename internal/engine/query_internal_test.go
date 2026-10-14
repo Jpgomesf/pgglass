@@ -60,6 +60,25 @@ func TestLimitsForOnlyLowersMaxRows(t *testing.T) {
 	}
 }
 
+func TestLimitsForOnlyRaisesMaxBytes(t *testing.T) {
+	m := &Manager{limits: limits{MaxRows: 100, MaxBytes: 1000}}
+	for _, tc := range []struct{ asked, want int }{
+		{0, 1000},
+		{-5, 1000},
+		{999, 1000},
+		{1000, 1000},
+		{1001, 1001},
+	} {
+		got := m.limitsFor(Query{MaxBytes: tc.asked})
+		if got.MaxBytes != tc.want || got.MaxRows != 100 {
+			t.Errorf("limitsFor(MaxBytes %d) = %+v, want MaxBytes %d and MaxRows 100", tc.asked, got, tc.want)
+		}
+	}
+	if m.limits.MaxBytes != 1000 {
+		t.Errorf("limitsFor changed the Manager's limits: %+v", m.limits)
+	}
+}
+
 // A new connection may take another password or TLS settings, never another
 // user, database or host.
 func TestTargetIsUserDatabaseAndHosts(t *testing.T) {
@@ -232,12 +251,17 @@ func TestQueryErrorKeepsOtherErrors(t *testing.T) {
 	}
 }
 
-// JSON carries each byte that is not UTF-8 as U+FFFD, three bytes, so values
-// and error texts replace them first, to measure what the client decodes.
+// JSON carries each byte that is not UTF-8 as U+FFFD, three bytes, so values,
+// column names and error texts replace them first, to measure what the client
+// decodes.
 func TestValuesAndErrorsReplaceBytesThatAreNotUTF8(t *testing.T) {
 	res, _ := collectAll(limits{MaxRows: 10, MaxBytes: 1000}, rawRow("caf\xe9\xe9", "caf\u00e9", "\x00"))
 	if row := res.Rows[0]; *row[0] != "caf\uFFFD" || *row[1] != "caf\u00e9" || row[2] != nil {
 		t.Errorf("row = %q, %q, %v; want the run of bytes that are not UTF-8 replaced by one U+FFFD", *row[0], *row[1], row[2])
+	}
+	cols := columns(pgtype.NewMap(), []pgconn.FieldDescription{{Name: "caf\xe9\xe9", DataTypeOID: pgtype.TextOID}, {Name: "café", DataTypeOID: 1}})
+	if want := []result.Column{{Name: "caf�", TypeOID: pgtype.TextOID, TypeName: "text"}, {Name: "café", TypeOID: 1}}; !slices.Equal(cols, want) {
+		t.Errorf("columns = %#v, want the run of bytes that are not UTF-8 in a name replaced by one U+FFFD", cols)
 	}
 	err := queryError(context.Background(), &pgconn.PgError{Code: "22P02", Message: "bad \"\xff\"", Detail: "d\xfe", Hint: "h\xfd", Position: 3})
 	want := &QueryError{SQLState: "22P02", Message: "bad \"\uFFFD\"", Detail: "d\uFFFD", Hint: "h\uFFFD", Position: 3}

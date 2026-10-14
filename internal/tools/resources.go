@@ -18,6 +18,7 @@ import (
 	"github.com/jpgomesf/pgglass/internal/config"
 	"github.com/jpgomesf/pgglass/internal/engine"
 	"github.com/jpgomesf/pgglass/internal/introspect"
+	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
 const (
@@ -106,7 +107,7 @@ func (h *Handlers) resourceError(uri string, err error, c *call) error {
 		}
 		return notFound
 	}
-	return &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: c.notice + cutMiddle(errorText(err), room)}
+	return &jsonrpc.Error{Code: jsonrpc.CodeInternalError, Message: c.notice + spill.CutMiddle(errorText(err), room)}
 }
 
 func (h *Handlers) withTableResources(next mcp.MethodHandler) mcp.MethodHandler {
@@ -130,7 +131,7 @@ func (h *Handlers) withinInlineLimit(next mcp.MethodHandler) mcp.MethodHandler {
 			wire.Data = uriData(read.Params.URI, h.spill.InlineMaxBytes-len(wire.Message))
 		}
 		if room := h.spill.InlineMaxBytes - len(wire.Data); len(wire.Message) > room {
-			wire.Message = cutMiddle(wire.Message, room)
+			wire.Message = spill.CutMiddle(wire.Message, room)
 		}
 		return res, err
 	}
@@ -141,7 +142,7 @@ const escapedByteMax = len(`\u0000`)
 func uriData(uri string, limit int) json.RawMessage {
 	data, _ := json.Marshal(map[string]string{"uri": uri})
 	if len(data) > limit {
-		data, _ = json.Marshal(map[string]string{"uri": cutMiddle(uri, (limit-len(`{"uri":""}`))/escapedByteMax)})
+		data, _ = json.Marshal(map[string]string{"uri": spill.CutMiddle(uri, (limit-len(`{"uri":""}`))/escapedByteMax)})
 	}
 	return data
 }

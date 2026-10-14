@@ -56,6 +56,10 @@ type Query struct {
 	// MaxRows, when positive, lowers the max_rows limit for this query only.
 	// It never raises it.
 	MaxRows int
+	// MaxBytes, when larger than max_bytes, raises it for this query only, and
+	// with it the size of a server message the query reads: for a value read
+	// only to be summarized, such as a plan. It never lowers it.
+	MaxBytes int
 }
 
 // QueryError is an error reported by Postgres, flattened for display.
@@ -134,6 +138,7 @@ func (m *Manager) limitsFor(q Query) limits {
 	if q.MaxRows > 0 && q.MaxRows < l.MaxRows {
 		l.MaxRows = q.MaxRows
 	}
+	l.MaxBytes = max(l.MaxBytes, q.MaxBytes)
 	return l
 }
 

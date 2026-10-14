@@ -25,6 +25,7 @@ func run(ctx context.Context, p connPool, q Query, l limits) (*result.Result, er
 		return nil, err
 	}
 	defer c.Release()
+	c.Conn().PgConn().Frontend().SetMaxBodyLen(l.MaxBytes + rowByteHeadroom)
 	tx, err := c.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err
@@ -137,7 +138,7 @@ func validUTF8(s string) string {
 func columns(types *pgtype.Map, fields []pgconn.FieldDescription) []result.Column {
 	cols := make([]result.Column, len(fields))
 	for i, f := range fields {
-		cols[i] = result.Column{Name: f.Name, TypeOID: f.DataTypeOID}
+		cols[i] = result.Column{Name: validUTF8(f.Name), TypeOID: f.DataTypeOID}
 		if t, ok := types.TypeForOID(f.DataTypeOID); ok {
 			cols[i].TypeName = t.Name
 		}
@@ -169,7 +170,7 @@ func nameTypes(ctx context.Context, p connPool, cols []result.Column) error {
 	var oid uint32
 	var name string
 	if _, err := pgx.ForEachRow(rows, []any{&oid, &name}, func() error {
-		names[oid] = name
+		names[oid] = validUTF8(name)
 		return nil
 	}); err != nil {
 		return err

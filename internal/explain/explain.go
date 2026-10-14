@@ -6,7 +6,9 @@
 // BUFFERS on request, run through an engine.Querier: in a READ ONLY
 // transaction that is always rolled back, under the statement timeout, so
 // ANALYZE runs the query but keeps nothing it changes. VERBOSE names the
-// schema of each relation, by which its size is looked up.
+// schema of each relation, by which its size is looked up. The plan, which
+// grows with every partition a query scans, is read whole to be summarized,
+// up to 16 MiB or max_bytes, whichever is larger.
 package explain
 
 import (
@@ -19,6 +21,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/guard"
 	"github.com/jpgomesf/pgglass/internal/result"
 )
+
+const planMaxBytes = 16 << 20
 
 const reltuplesSQL = `SELECT coalesce(json_agg(json_build_object('Schema', n.nspname, 'Name', c.relname, 'Rows', c.reltuples)), '[]')
 FROM unnest($1::text[], $2::text[]) AS r (nspname, relname)
@@ -51,7 +55,7 @@ func New(sql string, analyze bool) (Statement, error) {
 // Run runs s through q under searchPath, the connection's own when empty, and
 // returns the summary. Error positions point into the SELECT New was given.
 func (s Statement) Run(ctx context.Context, q engine.Querier, searchPath string) (string, error) {
-	res, err := q.Query(ctx, engine.Query{SQL: s.sql, SearchPath: searchPath})
+	res, err := q.Query(ctx, engine.Query{SQL: s.sql, SearchPath: searchPath, MaxBytes: planMaxBytes})
 	if err != nil {
 		var qe *engine.QueryError
 		if errors.As(err, &qe) && qe.Position > s.offset {
@@ -83,7 +87,7 @@ func relationSizes(ctx context.Context, q engine.Querier, rels []relation) (map[
 	for i, r := range rels {
 		schemas[i], names[i] = r.schema, r.name
 	}
-	res, err := q.Query(ctx, engine.Query{SQL: reltuplesSQL, Params: []any{schemas, names}, SearchPath: "pg_catalog"})
+	res, err := q.Query(ctx, engine.Query{SQL: reltuplesSQL, Params: []any{schemas, names}, SearchPath: "pg_catalog", MaxBytes: planMaxBytes})
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +111,7 @@ func relationSizes(ctx context.Context, q engine.Querier, rels []relation) (map[
 func onlyValue(res *result.Result, what string) (string, error) {
 	switch {
 	case res.Truncated:
-		return "", fmt.Errorf("read %s: it exceeds the configured limits (%s)", what, res.TruncatedReason)
+		return "", fmt.Errorf("read %s: it exceeds %s", what, res.TruncatedReason)
 	case len(res.Rows) != 1 || len(res.Rows[0]) != 1 || res.Rows[0][0] == nil:
 		return "", errors.New("read " + what + ": no value came back")
 	}

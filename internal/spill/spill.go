@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jpgomesf/pgglass/internal/render"
 	"github.com/jpgomesf/pgglass/internal/result"
@@ -178,7 +179,8 @@ func safeName(s string) string {
 
 func capped(res *result.Result, f render.Format, cause error, limit, maxCell int) (string, error) {
 	total := len(res.Rows)
-	budget := limit - len(cappedNote(total, res, cause))
+	why := fit(cause.Error(), limit/2-len(cappedNote(total, res, "")))
+	budget := limit - len(cappedNote(total, res, why))
 	body, shown := "", 0
 	for lo, hi := 0, total; lo <= hi; {
 		mid := (lo + hi) / 2
@@ -192,12 +194,41 @@ func capped(res *result.Result, f render.Format, cause error, limit, maxCell int
 			hi = mid - 1
 		}
 	}
-	return body + cappedNote(shown, res, cause), nil
+	return body + cappedNote(shown, res, why), nil
 }
 
-func cappedNote(shown int, res *result.Result, cause error) string {
-	note := fmt.Sprintf("(%d of %s shown; could not write the spill file: %v", shown, count(len(res.Rows), "row"), cause)
-	return note + truncation(res) + ")"
+func cappedNote(shown int, res *result.Result, why string) string {
+	return fmt.Sprintf("(%d of %s shown; could not write the spill file: %s", shown, count(len(res.Rows), "row"), why) + truncation(res) + ")"
+}
+
+// CutMiddle returns s if it fits in limit bytes, or else its start and its end
+// around a note of how many bytes it cut, "…[1234 bytes cut]…", within limit
+// when that holds the note. It cuts between UTF-8 characters.
+func CutMiddle(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	keep := max(limit-len(cutNote(len(s))), 0)
+	end := keep / 2
+	for end > 0 && !utf8.RuneStart(s[end]) {
+		end--
+	}
+	start := len(s) - (keep - keep/2)
+	for start < len(s) && !utf8.RuneStart(s[start]) {
+		start++
+	}
+	return s[:end] + cutNote(start-end) + s[start:]
+}
+
+func cutNote(n int) string {
+	return "…[" + strconv.Itoa(n) + " bytes cut]…"
+}
+
+func fit(s string, limit int) string {
+	if cut := CutMiddle(s, limit); len(cut) <= limit {
+		return cut
+	}
+	return s
 }
 
 func footer(res *result.Result) string {

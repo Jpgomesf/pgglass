@@ -108,3 +108,35 @@ func TestSmallBudgetStillReadsDescriptionsAndErrors(t *testing.T) {
 	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT 'x'::jsonb"})
 	wantSQLState(t, err, "22P02")
 }
+
+// A query may raise max_bytes for itself, as pg_explain does to read a plan it
+// only summarizes: a value and the message holding it may grow to that, never
+// past it, and the next query on the connection reads under the configured
+// limits again. A smaller MaxBytes leaves them as they are.
+func TestAQueryRaisesMaxBytesForItself(t *testing.T) {
+	t.Parallel()
+	const maxBytes, raised, size = 1 << 20, 4 << 20, 3_000_000
+	m := cleanApp(t, config.Defaults{MaxBytes: maxBytes})
+	repeat := func(n int) string { return "SELECT repeat('x', " + strconv.Itoa(n) + ")" }
+
+	res := mustQuery(t, m, engine.Query{SQL: repeat(size), MaxBytes: raised})
+	if res.Truncated || len(res.Rows) != 1 || len(deref(res.Rows[0][0])) != size {
+		t.Errorf("under a raised max_bytes: %d rows, truncated %q; want the value of %d bytes whole", len(res.Rows), res.TruncatedReason, size)
+	}
+	res = mustQuery(t, m, engine.Query{SQL: repeat(raised + headroom + 1), MaxBytes: raised})
+	if !res.Truncated || res.TruncatedReason != "max_bytes="+strconv.Itoa(raised) || len(res.Rows) != 0 {
+		t.Errorf("past the raised max_bytes: %d rows, truncated %q; want none, max_bytes=%d", len(res.Rows), res.TruncatedReason, raised)
+	}
+	pid := value(t, m, "SELECT pg_backend_pid()")
+	for _, asked := range []int{0, maxBytes / 2} {
+		res = mustQuery(t, m, engine.Query{SQL: repeat(size), MaxBytes: asked})
+		if !res.Truncated || res.TruncatedReason != "max_bytes="+strconv.Itoa(maxBytes) || len(res.Rows) != 0 {
+			t.Errorf("MaxBytes %d after a raised query: %d rows, truncated %q; want none, max_bytes=%d", asked, len(res.Rows), res.TruncatedReason, maxBytes)
+		}
+		if got := value(t, m, "SELECT pg_backend_pid()"); got == pid {
+			t.Errorf("MaxBytes %d: backend %s read a %d-byte message past the configured cap without a reset", asked, got, size)
+		} else {
+			pid = got
+		}
+	}
+}

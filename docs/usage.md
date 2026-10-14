@@ -41,7 +41,7 @@ The findings also start the first response on the connection, which keeps to 10 
 - `schema`: one line per table, view, materialized view or foreign table, `app.orders: table, ~50 rows, 48 kB`, with `RLS` when row-level security is on
 - `schema` and `table`: the relation in a compact DDL-like form, with column types, defaults, identity and generated columns, enum labels, comments, constraints, indexes, policies, triggers and, for views, the definition. A column is `NOT NULL` only when Postgres has checked every row, so not under a `NOT VALID` not-null constraint (PostgreSQL 18), whose older rows may hold nulls; `pg_diff_schema` compares columns the same way
 
-`table` without `schema` looks in the connection's `default_schema`. Names are matched exactly, unquoted, as the catalog stores them. Results are cached for 5 minutes. Output longer than 10 KB is cut after the last whole line that fits, followed by `… 312 of 4000 lines shown (output limit 10000 bytes): use pg_search to find names`. A listing reads only its first 500 schemas or relations from the catalog, however many there are; the note counts them all. A comment longer than 200 characters is cut to its first 200, with a note of how many it drops, `...[+1234 chars]`: so cut, the comments of 500 relations, or of a relation's hundreds of columns, keep well within the default `max_bytes`.
+`table` without `schema` looks in the connection's `default_schema`. Names are matched exactly, unquoted, as the catalog stores them. Results are cached for 5 minutes. Output longer than 10 KB is cut after the last whole line that fits, followed by `… 312 of 4000 lines shown (output limit 10000 bytes): use pg_search to find names`. A listing reads only its first 500 schemas or relations from the catalog, however many there are; the note counts them all. A comment longer than 200 characters is cut to its first 200, with a note of how many it drops, `...[+1234 chars]`: so cut, the comments of 500 relations, or of a relation's hundreds of columns, keep well within the default `max_bytes`. A description reads long definitions cut too, so that no one of them can take it past `max_bytes`: a view's query to its first 2,000 characters, then `-- truncated: 2000 of 12345 characters shown`; a default, generation expression, constraint, index or policy expression to its first 10,000, longer than a line of the 10 KB output, with the note a comment gets; and an enum's labels to its first 2,500.
 
 `pg_search` finds names that contain `pattern`, ignoring case; `%` and `_` are plain characters. Relations come first, then columns, then functions, `limit` (default 50) at most:
 
@@ -78,7 +78,7 @@ id	status	total	placed_at
 
 The last line counts the rows, and says when a limit cut the result: `(1000 rows; truncated: max_rows=1000)`.
 
-A value or Postgres error can hold bytes that are not UTF-8: a session in a `SQL_ASCII` database can write any byte to the shared catalogs, such as a database comment, and `pg_stat_activity` shows other databases' queries in their own encoding. Each run of such bytes comes back as one U+FFFD, `�`, in the spill file too, so that 10 KB holds as the client decodes a response.
+A value, a column or type name, or a Postgres error can hold bytes that are not UTF-8: a session in a `SQL_ASCII` database can write any byte to the shared catalogs, such as a database comment, other databases can name columns and types after what it wrote, and `pg_stat_activity` shows other databases' queries in their own encoding. Each run of such bytes comes back as one U+FFFD, `�`, in the spill file too, so that 10 KB holds as the client decodes a response.
 
 ### Formats
 
@@ -110,7 +110,7 @@ First 5 rows:
 ...
 ```
 
-After the file, the summary lists the first 20 columns and previews the first 5 rows, as many of each as fit in 10 KB, and cuts preview cells at 64 characters.
+After the file, the summary lists the first 20 columns and previews the first 5 rows, as many of each as fit in 10 KB, and cuts preview cells at 64 characters. If the file cannot be written, the rows that fit come back instead, then a note that says why, its error cut in the middle to keep the note within half of the 10 KB: `(42 of 1000 rows shown; could not write the spill file: …)`.
 
 Spill files live in `pgglass` under your user cache directory (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux), readable only by you (mode 0600). Without one (`HOME` unset), they live in `pgglass-<uid>` in the temp directory, which the server creates: it must be a directory, not a symlink, that you own with mode 0700, or the server does not start. Spill files older than `spill_ttl_hours` are removed at startup, then at most once an hour as tools return results, whichever server instance wrote them.
 
@@ -130,7 +130,7 @@ prod-app	98311
 - The statement is checked once. Each connection then gets what a call on it alone would: the role check, its `search_path` (`schema`, or its own `default_schema`), the limits and one audit line.
 - Rows come in the order of `connections`, after a first column, `connection`. The footer names each connection a limit cut, `(1500 rows; truncated: prod-app max_rows=1000)`, and a result over 10 KB spills to one CSV file.
 - When the connections return different columns, by name or type, each gets its own section under its name, and the sections, names included, share the 10 KB: a section past its share spills to a CSV file of its own. When its share is too small for the summary, the section only names the file and counts the rows, `Full result: <path>` then `(100 rows)`. Sections that still take more than their room, as long connection names and a long spill directory path can make them, each spill to a CSV file of their own, those that fit their share too, so that every connection's rows are whole in a file; if the sections, which then only name their files, still take more than the room, they go to one more file, a line each, whose summary takes their place.
-- A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The lines share half of the 10 KB and the rows take the rest: a line longer than its share is cut in the middle, as a long [error](#errors) is. The call fails only when every connection does, and the lines then share all of it.
+- A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The lines share half of the 10 KB and the rows take the rest: a line longer than its share is cut in the middle, as a long [error](#errors) is. When the rows' summary takes more, as a spill directory path thousands of bytes long can make it, the lines are cut in the middle to what it leaves. The call fails only when every connection does, and the lines then share all of it.
 
 ## Explain a query
 
@@ -155,7 +155,7 @@ The 5 top nodes are ranked by what each takes on its own: its total less its chi
 - with `analyze`: a sort, hash or hash aggregate that spilled to disk and, from PostgreSQL 18, which reports it, a window aggregate, materialize or CTE scan that kept its rows on disk
 - a nested loop whose outer side returns over 10,000 rows, so that its inner side runs that many times
 
-Error positions point into `sql` as written. A summary over 10 KB is written to a spill file, one line per row, like a large `pg_query` result.
+Error positions point into `sql` as written. A summary over 10 KB is written to a spill file, one line per row, like a large `pg_query` result. The plan is read whole to be summarized, with 16 MiB in place of a smaller [`max_bytes`](configuration.md#defaults), since it grows with each partition a query scans: a larger plan fails with `read the plan: it exceeds max_bytes=16777216`.
 
 ## Confirmation
 
@@ -290,6 +290,12 @@ A failed call returns a result with `isError` set and the reason as text:
 - `declined by the user` when the user declines or cancels a [confirmation](#confirmation), and `pg_query on prod requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation` when the client cannot ask
 
 An error, with the role check's findings that may start it, keeps to the 10 KB of a response. A Postgres error can quote a value whole, and an unknown connection's lists every configured name: one longer than that is cut in the middle, keeping its start and its end, where the SQLSTATE, position, detail and hint are, as in `ERROR: invalid input syntax for type integer: "yyyy…[10088 bytes cut]…yyyy" (SQLSTATE 22P02)`. A call to a tool the server does not have is a protocol error instead, `unknown tool "…"` (code `-32602`), whose name is cut the same way.
+
+The one exception is an error the MCP SDK returns before pgglass sees the request, which only a client that does not follow the protocol gets, and which quotes the request whole:
+
+- params that do not decode, such as a tool `name` or a resource `uri` that is not a string: `handling 'tools/call': invalid params: unmarshaling "…"` (code `-32602`)
+- an unknown method: `method not found: "…"` (code `-32601`); over `--http`, `JSON RPC not handled: "…" unsupported`, with status 400, or 404 from revision 2026-07-28
+- over `--http`, a request header the SDK refuses, such as `Forbidden: invalid Host header "…"`
 
 ## Audit log
 

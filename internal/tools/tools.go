@@ -16,10 +16,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -97,7 +95,7 @@ func (h *Handlers) handle(tool string, run toolFunc) mcp.ToolHandler {
 		}
 		res := &mcp.CallToolResult{}
 		if err != nil {
-			text, res.IsError = cutMiddle(errorText(err), h.room(c)), true
+			text, res.IsError = spill.CutMiddle(errorText(err), h.room(c)), true
 		}
 		res.Content = []mcp.Content{&mcp.TextContent{Text: c.notice + text}}
 		return res, nil
@@ -116,26 +114,6 @@ func fitNotice(notice string, limit int) string {
 	const more = "… more role check findings: pg_list_connections shows them all\n\n"
 	head := notice[:max(limit-len(more), 0)]
 	return head[:strings.LastIndexByte(head, '\n')+1] + more
-}
-
-func cutMiddle(s string, limit int) string {
-	if len(s) <= limit {
-		return s
-	}
-	keep := max(limit-len(cutNote(len(s))), 0)
-	end := keep / 2
-	for end > 0 && !utf8.RuneStart(s[end]) {
-		end--
-	}
-	start := len(s) - (keep - keep/2)
-	for start < len(s) && !utf8.RuneStart(s[start]) {
-		start++
-	}
-	return s[:end] + cutNote(start-end) + s[start:]
-}
-
-func cutNote(n int) string {
-	return "…[" + strconv.Itoa(n) + " bytes cut]…"
 }
 
 func decode(args json.RawMessage, dst any) error {
