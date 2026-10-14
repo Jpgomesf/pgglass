@@ -60,7 +60,11 @@ func serveHTTP(ctx context.Context, server *mcp.Server, addr, token string, logg
 		return err
 	}
 	server.AddReceivingMiddleware(endListensOn(ctx))
-	srv := &http.Server{Handler: httpHandler(server, token), ReadHeaderTimeout: readHeaderTimeout}
+	srv := &http.Server{
+		Handler:                      httpHandler(server, token),
+		ReadHeaderTimeout:            readHeaderTimeout,
+		DisableGeneralOptionsHandler: true,
+	}
 	logger.Info("listening", slog.String("url", "http://"+ln.Addr().String()+mcpPath), slog.Bool("token_required", token != ""))
 	served := make(chan error, 1)
 	go func() { served <- srv.Serve(ln) }()

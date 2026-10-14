@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync"
@@ -367,6 +369,31 @@ func TestHTTPReportsAnAddressItCannotListenOn(t *testing.T) {
 	code, _, errOut := runCommand(t, "--config", writeConfig(t, connections(map[string]any{})), "--http", busy)
 	if code != 1 || !strings.Contains(errOut, "address already in use") {
 		t.Errorf("run on a busy port = %d, %q; want 1 and the listen error", code, errOut)
+	}
+}
+
+// With PGGLASS_HTTP_TOKEN set, OPTIONS * without the token gets 401 like
+// every other request, not net/http's built-in 200.
+func TestHTTPRequiresTheTokenForOptionsStar(t *testing.T) {
+	isolateHome(t)
+	t.Setenv(authEnv, testToken)
+	srv := startHTTP(t, writeConfig(t, connections(map[string]any{})))
+	host := strings.TrimSuffix(strings.TrimPrefix(srv.url, "http://"), "/mcp")
+	conn, err := net.Dial("tcp", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := fmt.Fprintf(conn, "OPTIONS * HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host); err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusUnauthorized {
+		t.Errorf("OPTIONS * without the token: %d, want 401", res.StatusCode)
 	}
 }
 
