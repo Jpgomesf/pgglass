@@ -27,7 +27,10 @@ func assertRejected(t *testing.T, sql, want string) {
 	}
 }
 
-func TestWarmLeavesTheParserReadyForConcurrentChecks(t *testing.T) {
+// Warm may run while calls check statements, as when the server warms the
+// parser in the background and the first call arrives: what it saves, the
+// time the first Check takes, a test cannot observe.
+func TestWarmRunsSafelyAlongsideChecks(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range 8 {
 		if i%2 == 0 {
