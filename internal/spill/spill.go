@@ -151,6 +151,9 @@ func (s *Store) write(tool, conn string, res *result.Result) (string, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return "", err
+	}
 	stamp := s.now().UTC().Format(stampLayout)
 	file, err := os.CreateTemp(dir, "spill-"+safeName(tool)+"-"+safeName(conn)+"-"+stamp+"-*.csv")
 	if err != nil {
