@@ -50,7 +50,7 @@ func TestRunSendsTheExplain(t *testing.T) {
 		if _, err := stmt.Run(t.Context(), &q, "app"); !errors.Is(err, errRecorded) {
 			t.Errorf("Run of %q = %v, want the querier's error", tc.sql, err)
 		}
-		if want := (engine.Query{SQL: tc.want, SearchPath: "app"}); !reflect.DeepEqual(q.got, want) {
+		if want := (engine.Query{SQL: tc.want, SearchPath: "app", MaxBytes: 16 << 20}); !reflect.DeepEqual(q.got, want) {
 			t.Errorf("New(%q, %v) then Run sent %+v, want %+v", tc.sql, tc.analyze, q.got, want)
 		}
 	}
@@ -92,9 +92,10 @@ func TestRunFailsOnWhatItCannotRead(t *testing.T) {
 	}{
 		{"plan that is not JSON", script{{value: text("QUERY PLAN")}}, "read the plan: invalid character"},
 		{"no plan", script{{}}, "read the plan: no value came back"},
+		{"plan over the limits", script{{truncated: true}}, "read the plan: it exceeds max_bytes=100"},
 		{"sizes that fail", script{{value: seqScan}, {err: errors.New("connection reset by peer")}}, "connection reset by peer"},
 		{"sizes over the limits", script{{value: seqScan}, {truncated: true}},
-			"read relation sizes: it exceeds the configured limits (max_bytes=100)"},
+			"read relation sizes: it exceeds max_bytes=100"},
 		{"no sizes", script{{value: seqScan}, {}}, "read relation sizes: no value came back"},
 		{"sizes that are not JSON", script{{value: seqScan}, {value: text("{")}}, "read relation sizes: unexpected end of JSON input"},
 	} {
@@ -431,11 +432,18 @@ func TestAnalyzeRunsReadOnly(t *testing.T) {
 	}
 }
 
-func TestPlanLargerThanMaxBytesIsAnError(t *testing.T) {
+// The plan and the sizes of the relations it scans are read whole to be
+// summarized, under a max_bytes of their own: 16 MiB, or max_bytes if larger.
+func TestAPlanOverMaxBytesIsSummarized(t *testing.T) {
 	q := limited(t, func(d *config.Defaults) { d.MaxBytes = 100 })
-	_, err := run(t, q, "SELECT id FROM app.events", false)
-	if err == nil || err.Error() != "read the plan: it exceeds the configured limits (max_bytes=100)" {
-		t.Errorf("err = %v", err)
+	summaryOf(t, q, "SELECT id FROM app.events", false,
+		`total cost `+cost+`, ~20000 rows`,
+		`top nodes by own cost:`,
+		`  Seq Scan on app.events: cost `+cost+`, ~20000 rows`,
+		`flags:`,
+		`  Seq Scan on app.events: full scan of ~20000 rows`)
+	if _, err := run(t, q, "SELECT e.id FROM app.events e CROSS JOIN app.orders o", false); err != nil {
+		t.Errorf("the plan of scans of two relations, whose sizes take more than max_bytes: %v", err)
 	}
 }
 

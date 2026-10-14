@@ -60,6 +60,25 @@ func TestLimitsForOnlyLowersMaxRows(t *testing.T) {
 	}
 }
 
+func TestLimitsForOnlyRaisesMaxBytes(t *testing.T) {
+	m := &Manager{limits: limits{MaxRows: 100, MaxBytes: 1000}}
+	for _, tc := range []struct{ asked, want int }{
+		{0, 1000},
+		{-5, 1000},
+		{999, 1000},
+		{1000, 1000},
+		{1001, 1001},
+	} {
+		got := m.limitsFor(Query{MaxBytes: tc.asked})
+		if got.MaxBytes != tc.want || got.MaxRows != 100 {
+			t.Errorf("limitsFor(MaxBytes %d) = %+v, want MaxBytes %d and MaxRows 100", tc.asked, got, tc.want)
+		}
+	}
+	if m.limits.MaxBytes != 1000 {
+		t.Errorf("limitsFor changed the Manager's limits: %+v", m.limits)
+	}
+}
+
 // A new connection may take another password or TLS settings, never another
 // user, database or host.
 func TestTargetIsUserDatabaseAndHosts(t *testing.T) {

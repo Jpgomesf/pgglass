@@ -25,6 +25,7 @@ func run(ctx context.Context, p connPool, q Query, l limits) (*result.Result, er
 		return nil, err
 	}
 	defer c.Release()
+	c.Conn().PgConn().Frontend().SetMaxBodyLen(l.MaxBytes + rowByteHeadroom)
 	tx, err := c.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, err

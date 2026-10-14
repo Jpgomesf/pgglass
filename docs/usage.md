@@ -155,7 +155,7 @@ The 5 top nodes are ranked by what each takes on its own: its total less its chi
 - with `analyze`: a sort, hash or hash aggregate that spilled to disk and, from PostgreSQL 18, which reports it, a window aggregate, materialize or CTE scan that kept its rows on disk
 - a nested loop whose outer side returns over 10,000 rows, so that its inner side runs that many times
 
-Error positions point into `sql` as written. A summary over 10 KB is written to a spill file, one line per row, like a large `pg_query` result.
+Error positions point into `sql` as written. A summary over 10 KB is written to a spill file, one line per row, like a large `pg_query` result. The plan is read whole to be summarized, with 16 MiB in place of a smaller [`max_bytes`](configuration.md#defaults), since it grows with each partition a query scans: a larger plan fails with `read the plan: it exceeds max_bytes=16777216`.
 
 ## Confirmation
 

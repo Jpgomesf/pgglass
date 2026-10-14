@@ -145,7 +145,7 @@ Every field is optional: a missing or zero value takes the default. Numbers must
 | `statement_timeout_seconds` | `30` | Max query execution time |
 | `lock_timeout_seconds` | `5` | Max time a query waits for a lock |
 | `max_rows` | `1000` | Rows a query returns before its result is truncated. A `pg_query` call can lower it with `max_rows`, never raise it. Also caps `pg_search` |
-| `max_bytes` | `1048576` (1 MiB) | Bytes a query's result holds before it is truncated: each value counts its length plus 24, so empty and NULL values count too. A server message larger than `max_bytes` plus 1 MiB is not read: the connection is reset and, once the columns are described, the result is truncated there; before, the query fails |
+| `max_bytes` | `1048576` (1 MiB) | Bytes a query's result holds before it is truncated: each value counts its length plus 24, so empty and NULL values count too. A server message larger than `max_bytes` plus 1 MiB is not read: the connection is reset and, once the columns are described, the result is truncated there; before, the query fails. `pg_explain` reads the plan it summarizes with 16 MiB in place of a smaller `max_bytes` |
 | `spill_ttl_hours` | `24` | How long spill files of large results are kept. They live in `pgglass` under the user cache directory (or `pgglass-<uid>` in the temp directory without one), and cleanup removes every spill file there older than this, including those of other server instances that share the directory |
 | `format` | `tsv` | Result format of `pg_query` by default, and of `pg_profile` and `pg_health`: `tsv`, `json` or `markdown` |
 | `role_check` | `warn` | What to do when a connection's role can do more than read (see below) |
