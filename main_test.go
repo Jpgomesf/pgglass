@@ -15,10 +15,14 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/jpgomesf/pgglass/internal/guard"
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-func TestMain(m *testing.M) { testdb.Main(m) }
+func TestMain(m *testing.M) {
+	guard.Warm()
+	testdb.Main(m)
+}
 
 type lockedBuffer struct {
 	mu  sync.Mutex
@@ -316,6 +320,41 @@ func TestStdioStopsWhenTheContextEnds(t *testing.T) {
 	cancel()
 	if code := exitCode(t, done, logs); code != 0 || logs.String() != "" {
 		t.Errorf("run = %d, stderr %q after the context ended; want 0 and no log", code, logs)
+	}
+}
+
+// The server compiles the SQL parser in the background as it starts, over
+// stdio and over HTTP, so that the first statement need not wait for it.
+func TestServeWarmsTheParserAtStart(t *testing.T) {
+	warm := warmParser
+	t.Cleanup(func() { warmParser = warm })
+	warmed := make(chan struct{}, 1)
+	warmParser = func() { warmed <- struct{}{} }
+	isolateHome(t)
+	t.Setenv(authEnv, "")
+	path := writeConfig(t, connections(map[string]any{}))
+	awaitWarm := func(transport string) {
+		t.Helper()
+		select {
+		case <-warmed:
+		case <-time.After(10 * time.Second):
+			t.Errorf("serving over %s did not warm the parser within 10s", transport)
+		}
+	}
+
+	startHTTP(t, path)
+	awaitWarm("HTTP")
+
+	inR, inW := io.Pipe()
+	defer func() { _ = inW.Close() }()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan int, 1)
+	logs := &lockedBuffer{}
+	go func() { done <- run(ctx, []string{"--config", path}, inR, io.Discard, logs) }()
+	awaitWarm("stdio")
+	cancel()
+	if code := exitCode(t, done, logs); code != 0 {
+		t.Errorf("run = %d over stdio, want 0\nstderr:\n%s", code, logs)
 	}
 }
 

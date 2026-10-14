@@ -148,7 +148,10 @@ Integration tests run a throwaway Postgres container through `internal/testdb`
 `testdb` needs `func TestMain(m *testing.M) { testdb.Main(m) }`. Read through
 the engine, as the server does, with `testdb.Querier(t, role, db)`; set up or
 observe from outside it with `testdb.Conn(t, role, db)` and `testdb.Value`,
-and branch on `testdb.ServerVersion(t)` where PostgreSQL versions differ.
+and branch on `testdb.ServerVersion(t)` where PostgreSQL versions differ. The
+first SQL check compiles the parser, which takes seconds under `-race`: a
+package whose tests time calls that check SQL calls `guard.Warm()` in its
+`TestMain` first.
 
 ## Releases
 

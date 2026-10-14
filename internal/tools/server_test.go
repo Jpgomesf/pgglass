@@ -17,12 +17,16 @@ import (
 
 	"github.com/jpgomesf/pgglass/internal/config"
 	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/guard"
 	"github.com/jpgomesf/pgglass/internal/spill"
 	"github.com/jpgomesf/pgglass/internal/testdb"
 	"github.com/jpgomesf/pgglass/internal/tools"
 )
 
-func TestMain(m *testing.M) { testdb.Main(m) }
+func TestMain(m *testing.M) {
+	guard.Warm()
+	testdb.Main(m)
+}
 
 type lockedBuffer struct {
 	mu  sync.Mutex

@@ -27,6 +27,23 @@ func assertRejected(t *testing.T, sql, want string) {
 	}
 }
 
+func TestWarmLeavesTheParserReadyForConcurrentChecks(t *testing.T) {
+	var wg sync.WaitGroup
+	for i := range 8 {
+		if i%2 == 0 {
+			wg.Go(guard.Warm)
+			continue
+		}
+		wg.Go(func() {
+			if err := guard.Check("SELECT 1"); err != nil {
+				t.Errorf("Check while warming = %v, want nil", err)
+			}
+		})
+	}
+	wg.Wait()
+	assertRejected(t, "DELETE FROM app.orders", "DeleteStmt is not allowed")
+}
+
 func TestCheckRejectsBypassCorpus(t *testing.T) {
 	for _, c := range guardtest.Rejected {
 		assertRejected(t, c.SQL, c.Want)

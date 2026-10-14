@@ -17,10 +17,13 @@ import (
 
 	"github.com/jpgomesf/pgglass/internal/config"
 	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/guard"
 	"github.com/jpgomesf/pgglass/internal/resolver"
 	"github.com/jpgomesf/pgglass/internal/spill"
 	"github.com/jpgomesf/pgglass/internal/tools"
 )
+
+var warmParser = guard.Warm
 
 func serve(ctx context.Context, opts options, stdin io.Reader, stdout, stderr io.Writer) int {
 	logger := slog.New(slog.NewJSONHandler(stderr, nil))
@@ -50,6 +53,7 @@ func serveTools(ctx context.Context, opts options, stdin io.Reader, stdout, stde
 	}
 	eng := engine.New(&cfg)
 	defer eng.Close()
+	go warmParser()
 	server := tools.NewServer(tools.New(cfg, eng, store, stderr), buildVersion())
 	if addr != "" {
 		return serveHTTP(ctx, server, addr, token, logger)
