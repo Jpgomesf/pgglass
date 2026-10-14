@@ -85,7 +85,7 @@ Or clone the repository and run `make build`.
 
 ## Configure
 
-Create `~/.config/pgglass/config.json`, or pass another file with `--config`:
+Create `~/.config/pgglass/config.json` (`$XDG_CONFIG_HOME/pgglass/config.json` when `XDG_CONFIG_HOME` is set), or pass another file with `--config`:
 
 ```json
 {

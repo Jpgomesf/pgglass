@@ -67,7 +67,7 @@ func (nopWriteCloser) Close() error { return nil }
 
 func loadConfig(path string) (config.Config, error) {
 	if path == "" {
-		return config.Config{}, errors.New("no config file: pass --config FILE, or set HOME to read ~/.config/pgglass/config.json")
+		return config.Config{}, errors.New("no config file: pass --config FILE, or set XDG_CONFIG_HOME or HOME to read the default one")
 	}
 	cfg, err := config.Load(path)
 	if err != nil {

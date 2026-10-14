@@ -24,7 +24,8 @@ const usage = `Usage:
   pgglass --version                      print the version
 
 Flags:
-  --config FILE  config file (default ~/.config/pgglass/config.json)
+  --config FILE  config file (default $XDG_CONFIG_HOME/pgglass/config.json,
+                 else ~/.config/pgglass/config.json)
   --http ADDR    serve http://ADDR/mcp, such as :8411 for 127.0.0.1:8411; a host other
                  than loopback needs PGGLASS_HTTP_TOKEN, a token every request must carry
   --version      print the version
@@ -88,6 +89,9 @@ func parseArgs(args []string) (options, error) {
 }
 
 func defaultConfigPath() string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(dir) {
+		return filepath.Join(dir, "pgglass", "config.json")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""

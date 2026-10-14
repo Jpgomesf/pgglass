@@ -63,6 +63,7 @@ func isolateHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	t.Setenv("XDG_CONFIG_HOME", "")
 	return home
 }
 
@@ -132,7 +133,7 @@ func TestHelpPrintsTheUsage(t *testing.T) {
 			t.Errorf("%s = %d, %q, %q; want 0 and the usage", flag, code, out, errOut)
 		}
 	}
-	for _, want := range []string{"--config FILE", "~/.config/pgglass/config.json", "--http ADDR", "PGGLASS_HTTP_TOKEN", "doctor", "--version"} {
+	for _, want := range []string{"--config FILE", "$XDG_CONFIG_HOME/pgglass/config.json", "~/.config/pgglass/config.json", "--http ADDR", "PGGLASS_HTTP_TOKEN", "doctor", "--version"} {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage does not mention %s", want)
 		}
@@ -204,6 +205,36 @@ func TestConfigDefaultsToTheUserConfigDirectory(t *testing.T) {
 		if code, _, errOut := runCommand(t, args...); code != 1 || !strings.Contains(errOut, "no config file: pass --config FILE") {
 			t.Errorf("%v without HOME = %d, %q; want 1 and a request for --config", args, code, errOut)
 		}
+	}
+}
+
+// XDG_CONFIG_HOME, when it is an absolute path, moves the default config file
+// to $XDG_CONFIG_HOME/pgglass/config.json; a relative one is ignored, as the
+// XDG Base Directory Specification asks.
+func TestConfigDefaultsToXDGConfigHome(t *testing.T) {
+	home := isolateHome(t)
+	xdg := filepath.Join(t.TempDir(), "xdg")
+	path := filepath.Join(xdg, "pgglass", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if code, out, errOut := runCommand(t, "doctor"); code != 0 || !strings.HasPrefix(out, "config "+path+" ") {
+		t.Errorf("doctor with XDG_CONFIG_HOME = %d, %q, %q; want 0 and %s", code, out, errOut, path)
+	}
+	t.Setenv("HOME", "")
+	if code, out, errOut := runCommand(t, "doctor"); code != 0 || !strings.HasPrefix(out, "config "+path+" ") {
+		t.Errorf("doctor with XDG_CONFIG_HOME and without HOME = %d, %q, %q; want 0 and %s", code, out, errOut, path)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "relative")
+	fallback := filepath.Join(home, ".config", "pgglass", "config.json")
+	if code, _, errOut := runCommand(t, "doctor"); code != 1 || !strings.Contains(errOut, "read config: open "+fallback) {
+		t.Errorf("doctor with a relative XDG_CONFIG_HOME = %d, %q; want 1 and %s", code, errOut, fallback)
 	}
 }
 

@@ -1,6 +1,6 @@
 # Configuration
 
-pgglass reads `~/.config/pgglass/config.json`, or the file `--config` names (see [Command line](#command-line)). `pgglass doctor` checks it (see [Doctor](#doctor)).
+pgglass reads `$XDG_CONFIG_HOME/pgglass/config.json` when `XDG_CONFIG_HOME` is set, else `~/.config/pgglass/config.json`, or the file `--config` names (see [Command line](#command-line)). `pgglass doctor` checks it (see [Doctor](#doctor)).
 
 ## Connection Structure
 
@@ -242,7 +242,7 @@ pgglass --version                      print the version
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--config FILE` | `~/.config/pgglass/config.json` | The config file. Without `HOME`, it must be given |
+| `--config FILE` | `$XDG_CONFIG_HOME/pgglass/config.json`, else `~/.config/pgglass/config.json` | The config file. `XDG_CONFIG_HOME` counts only as an absolute path, as the XDG Base Directory Specification asks. Without it or `HOME`, `--config` must be given |
 | `--http ADDR` | — | Serve [Streamable HTTP](#streamable-http) at `http://ADDR/mcp` instead of stdio. A missing host is `127.0.0.1` and a missing port `8411`, so `--http :8411` serves `http://127.0.0.1:8411/mcp` |
 | `--version` | — | Print the version: the release's, else the module version Go records in the build, else `dev` |
 
