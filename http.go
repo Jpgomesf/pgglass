@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/subtle"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -59,7 +60,9 @@ func serveHTTP(ctx context.Context, server *mcp.Server, addr, token string, logg
 	if err != nil {
 		return err
 	}
-	server.AddReceivingMiddleware(endListensOn(ctx))
+	stopped, stop := context.WithCancel(context.Background())
+	defer stop()
+	server.AddReceivingMiddleware(endCalls(ctx, stopped))
 	srv := &http.Server{
 		Handler:                      httpHandler(server, token),
 		ReadHeaderTimeout:            readHeaderTimeout,
@@ -75,18 +78,23 @@ func serveHTTP(ctx context.Context, server *mcp.Server, addr, token string, logg
 	}
 	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownTimeout)
 	defer cancel()
-	return srv.Shutdown(shutdownCtx)
+	err = srv.Shutdown(shutdownCtx)
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("shutdown: cancelled the calls still running after %s", shutdownTimeout)
+	}
+	return err
 }
 
-func endListensOn(shutdown context.Context) mcp.Middleware {
+func endCalls(shutdown, stopped context.Context) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			if method != listenMethod {
-				return next(ctx, method, req)
+			end := stopped
+			if method == listenMethod {
+				end = shutdown
 			}
 			ctx, cancel := context.WithCancel(ctx)
 			defer cancel()
-			defer context.AfterFunc(shutdown, cancel)()
+			defer context.AfterFunc(end, cancel)()
 			return next(ctx, method, req)
 		}
 	}

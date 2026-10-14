@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -90,7 +91,7 @@ func startHTTP(t *testing.T, configPath string) httpServer {
 		return code
 	}
 	t.Cleanup(func() {
-		if code := stop(); code != 0 {
+		if code == -1 && stop() != 0 {
 			t.Errorf("run = %d after shutdown, want 0\nstderr:\n%s", code, logs)
 		}
 	})
@@ -424,5 +425,39 @@ func TestHTTPToolErrorsHideAnUnparsableDSN(t *testing.T) {
 	}
 	if logs := srv.logs.String(); strings.Contains(logs, planted) || strings.Contains(logs, testToken) {
 		t.Errorf("stderr shows the DSN:\n%s", logs)
+	}
+}
+
+func TestEndCallsEndsListensAtShutdownAndEveryOtherCallOnceStopped(t *testing.T) {
+	untilEnded := func(ctx context.Context, _ string, _ mcp.Request) (mcp.Result, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	for _, method := range []string{listenMethod, "tools/call"} {
+		shutdown, startShutdown := context.WithCancel(t.Context())
+		stopped, stop := context.WithCancel(t.Context())
+		ended := make(chan error, 1)
+		go func() {
+			_, err := endCalls(shutdown, stopped)(untilEnded)(t.Context(), method, nil)
+			ended <- err
+		}()
+		startShutdown()
+		if method != listenMethod {
+			select {
+			case <-ended:
+				t.Errorf("%s ended at shutdown, want it to run until stopped", method)
+			case <-time.After(50 * time.Millisecond):
+			}
+			stop()
+		}
+		select {
+		case err := <-ended:
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("%s ended with %v, want context.Canceled", method, err)
+			}
+		case <-time.After(5 * time.Second):
+			t.Errorf("%s still running after it should have ended", method)
+		}
+		stop()
 	}
 }

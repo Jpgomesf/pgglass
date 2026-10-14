@@ -133,3 +133,28 @@ func TestHTTPServesTheTableResources(t *testing.T) {
 	}
 	awaitLog(t, srv, `"tool":"resource","connection":"app"`)
 }
+
+// A call still running when shutdown's 10 seconds run out is cancelled, with
+// its query, so that the server stops then rather than when the query ends.
+func TestHTTPShutdownCancelsCallsThatOutlastIt(t *testing.T) {
+	srv := startApp(t, direct(testdb.DSN(t, testdb.RoleClean, testdb.DBApp)))
+	session, err := connectHTTP(t, srv.url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := query(session, "SELECT 1 AS one"); got != "one\n1\n(1 row)" {
+		t.Fatalf("pg_query = %q", got)
+	}
+	called := make(chan string, 1)
+	go func() { called <- query(session, "SELECT 1 FROM pg_sleep(60) AS outlasts_the_shutdown") }()
+	awaitActiveQuery(t, "outlasts_the_shutdown", true)
+	start := time.Now()
+	if code, took := srv.stop(), time.Since(start); code != 1 || took > shutdownTimeout+5*time.Second {
+		t.Errorf("run = %d after %s, want 1 after about %s\nstderr:\n%s", code, took, shutdownTimeout, srv.logs)
+	}
+	awaitLog(t, srv, `"error":"shutdown: cancelled the calls still running after 10s"`)
+	awaitActiveQuery(t, "outlasts_the_shutdown", false)
+	if got := <-called; got != "error: query cancelled: context canceled" {
+		t.Errorf("the call that outlasted the shutdown = %q, want it cancelled", got)
+	}
+}

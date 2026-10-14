@@ -97,8 +97,8 @@ func exitCode(t *testing.T, done <-chan int, logs *lockedBuffer) int {
 	select {
 	case code := <-done:
 		return code
-	case <-time.After(10 * time.Second):
-		t.Fatalf("run did not return within 10s\nstderr:\n%s", logs)
+	case <-time.After(2 * shutdownTimeout):
+		t.Fatalf("run did not return within %s\nstderr:\n%s", 2*shutdownTimeout, logs)
 		return -1
 	}
 }
