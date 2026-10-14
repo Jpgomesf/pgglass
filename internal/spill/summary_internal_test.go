@@ -66,4 +66,11 @@ func TestSummaryFallbackKeepsToTheLimit(t *testing.T) {
 		!strings.Contains(out, " bytes cut]…") || !strings.HasSuffix(out, "w max_rows=1000)") {
 		t.Errorf("summary = %v, %d bytes for a limit of %d:\n%.120s...%s", err, len(out), limit, out, out[max(0, len(out)-200):])
 	}
+	for room := len("(9000 rows; truncated)"); room < len(footer(res)); room++ {
+		out, err := summary(res, path, 500_000, len(line)+room)
+		got := strings.TrimPrefix(out, line)
+		if err != nil || len(got) > room || !strings.HasPrefix(got, "(9000 rows; truncated") || !strings.HasSuffix(got, ")") {
+			t.Errorf("room %d: %v, %q", room, err, got)
+		}
+	}
 }

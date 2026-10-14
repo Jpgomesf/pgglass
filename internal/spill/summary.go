@@ -28,7 +28,7 @@ func summary(res *result.Result, path string, inlineSize, limit int) (string, er
 	out := b.String()
 	if len(out) > limit {
 		line := "Full result: " + path + "\n"
-		return line + fit(footer(res), limit-len(line)), nil
+		return line + briefFooter(res, limit-len(line)), nil
 	}
 
 	const gap = "\n\n"
@@ -98,4 +98,21 @@ func preview(res *result.Result, n, k int) *result.Result {
 		out.Rows[i] = row[:k]
 	}
 	return out
+}
+
+func briefFooter(res *result.Result, room int) string {
+	whole := footer(res)
+	if room < 0 || len(whole) <= room {
+		return whole
+	}
+	head := "(" + count(len(res.Rows), "row")
+	if res.Truncated {
+		head += "; truncated"
+	}
+	if left := room - len(head) - len(": )"); res.Truncated && res.TruncatedReason != "" {
+		if reason := CutMiddle(res.TruncatedReason, left); len(reason) <= left {
+			head += ": " + reason
+		}
+	}
+	return head + ")"
 }
