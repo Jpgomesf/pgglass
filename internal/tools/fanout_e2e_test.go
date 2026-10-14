@@ -20,24 +20,6 @@ func fanoutArgs(conns []string, sql string, more ...any) map[string]any {
 	return a
 }
 
-// fanoutCall calls pg_query with a and returns the text of its result,
-// whether it is an error, and the audit lines it wrote, sorted by connection
-// and without their durations.
-func (s *session) fanoutCall(t *testing.T, a map[string]any) (string, bool, []auditLine) {
-	t.Helper()
-	before := len(s.auditLines(t))
-	text, isErr := s.call(t, "pg_query", a)
-	lines := s.auditLines(t)[before:]
-	for i := range lines {
-		if lines[i].DurationMS == nil || *lines[i].DurationMS < 0 {
-			t.Errorf("audit line %+v: duration_ms = %v", lines[i], lines[i].DurationMS)
-		}
-		lines[i].DurationMS = nil
-	}
-	slices.SortFunc(lines, func(a, b auditLine) int { return strings.Compare(a.Connection, b.Connection) })
-	return text, isErr, lines
-}
-
 // fanoutLine is the audit line of a pg_query call that ran sql on conn.
 func fanoutLine(conn, sql string, rows int, truncated bool, outcome, sqlState string) auditLine {
 	return auditLine{Msg: "tool call", Tool: "pg_query", Connection: conn, SQLSHA256: sha12(sql), SQLLen: len(sql),
@@ -104,7 +86,7 @@ func TestFanout(t *testing.T) {
 
 func testFanoutMergesRows(t *testing.T, s *session) {
 	const sql = "SELECT id, name FROM items ORDER BY id"
-	text, isErr, lines := s.fanoutCall(t, fanoutArgs([]string{"two", "one"}, sql))
+	text, isErr, lines := s.auditedCall(t, "pg_query", fanoutArgs([]string{"two", "one"}, sql))
 	if want := "connection\tid\tname\ntwo\t1\ttwo-1\ntwo\t2\ttwo-2\none\t1\tone-1\none\t2\tone-2\none\t3\tone-3\n(5 rows)"; isErr || text != want {
 		t.Errorf("tsv (error %t):\n%s\nwant\n%s", isErr, text, want)
 	}
@@ -119,7 +101,7 @@ func testFanoutMergesRows(t *testing.T, s *session) {
 
 func testFanoutFailedConnection(t *testing.T, s *session) {
 	const sql = "SELECT id, price FROM items ORDER BY id"
-	text, isErr, lines := s.fanoutCall(t, fanoutArgs([]string{"one", "two"}, sql))
+	text, isErr, lines := s.auditedCall(t, "pg_query", fanoutArgs([]string{"one", "two"}, sql))
 	want := "connection\tid\tprice\ntwo\t1\t1.5\ntwo\t2\t3.0\n(2 rows)\n\n" +
 		`one: ERROR: column "price" does not exist (SQLSTATE 42703) at character 12`
 	if isErr || text != want {
@@ -130,7 +112,7 @@ func testFanoutFailedConnection(t *testing.T, s *session) {
 
 func testFanoutEveryConnectionFails(t *testing.T, s *session) {
 	const sql = "SELECT 1/0"
-	text, isErr, lines := s.fanoutCall(t, fanoutArgs([]string{"two", "one"}, sql))
+	text, isErr, lines := s.auditedCall(t, "pg_query", fanoutArgs([]string{"two", "one"}, sql))
 	if want := "two: ERROR: division by zero (SQLSTATE 22012)\none: ERROR: division by zero (SQLSTATE 22012)"; !isErr || text != want {
 		t.Errorf("every connection failed (error %t):\n%s\nwant\n%s", isErr, text, want)
 	}
@@ -148,7 +130,7 @@ func testFanoutColumnsDiffer(t *testing.T, s *session) {
 
 func testFanoutLimits(t *testing.T, s *session) {
 	const sql = "SELECT id FROM items ORDER BY id"
-	text, _, lines := s.fanoutCall(t, fanoutArgs([]string{"one", "two"}, sql, "max_rows", 2))
+	text, _, lines := s.auditedCall(t, "pg_query", fanoutArgs([]string{"one", "two"}, sql, "max_rows", 2))
 	if want := "connection\tid\none\t1\none\t2\ntwo\t1\ntwo\t2\n(4 rows; truncated: one max_rows=2)"; text != want {
 		t.Errorf("max_rows 2:\n%s\nwant\n%s", text, want)
 	}
@@ -177,7 +159,7 @@ func testFanoutLimits(t *testing.T, s *session) {
 
 func testFanoutRoleCheckStrict(t *testing.T, s *session) {
 	const sql = "SELECT 1 AS n"
-	text, isErr, lines := s.fanoutCall(t, fanoutArgs([]string{"one", "leaky", "super"}, sql))
+	text, isErr, lines := s.auditedCall(t, "pg_query", fanoutArgs([]string{"one", "leaky", "super"}, sql))
 	if !strings.HasPrefix(text, "connection\tn\none\t1\n(1 row)\n\n"+
 		"leaky: connection \"leaky\" refused (role_check strict): its role can do more than read.\n"+
 		"  role ro_leaky: 3 finding(s)\n    critical function_execute: EXECUTE on ") ||
@@ -207,7 +189,7 @@ func testFanoutRoleCheckWarn(t *testing.T, s *session) {
 
 func testFanoutGuard(t *testing.T, s *session) {
 	const deleteSQL = "DELETE FROM items"
-	text, isErr, lines := s.fanoutCall(t, fanoutArgs([]string{"one", "two"}, deleteSQL))
+	text, isErr, lines := s.auditedCall(t, "pg_query", fanoutArgs([]string{"one", "two"}, deleteSQL))
 	if !isErr || !strings.HasPrefix(text, "query rejected: DeleteStmt is not allowed") {
 		t.Errorf("DELETE (error %t): %s", isErr, text)
 	}
@@ -219,7 +201,7 @@ func testFanoutGuard(t *testing.T, s *session) {
 	// netted's default_schema is net, which the guard refuses as the
 	// search_path: only netted fails.
 	const sql = "SELECT count(*) AS n FROM items"
-	text, isErr, lines = s.fanoutCall(t, fanoutArgs([]string{"netted", "one"}, sql))
+	text, isErr, lines = s.auditedCall(t, "pg_query", fanoutArgs([]string{"netted", "one"}, sql))
 	if want := "connection\tn\none\t3\n(1 row)\n\n" +
 		"netted: query rejected: schema net is not allowed as the search_path: its functions are denied"; isErr || text != want {
 		t.Errorf("netted (error %t):\n%s\nwant\n%s", isErr, text, want)
@@ -289,7 +271,7 @@ func TestFanoutArgumentErrors(t *testing.T) {
 	}
 
 	const deleteSQL = "DELETE FROM items"
-	text, _, got := s.fanoutCall(t, fanoutArgs([]string{"c1", "c0"}, deleteSQL))
+	text, _, got := s.auditedCall(t, "pg_query", fanoutArgs([]string{"c1", "c0"}, deleteSQL))
 	if !strings.HasPrefix(text, "query rejected: DeleteStmt is not allowed") {
 		t.Errorf("DELETE: %s", text)
 	}
@@ -297,7 +279,7 @@ func TestFanoutArgumentErrors(t *testing.T) {
 		fanoutLine("c0", deleteSQL, 0, false, "guard_reject", ""),
 		fanoutLine("c1", deleteSQL, 0, false, "guard_reject", ""),
 	})
-	text, _, got = s.fanoutCall(t, fanoutArgs([]string{"c1", "c0"}, "SELECT 1", "format", "xml"))
+	text, _, got = s.auditedCall(t, "pg_query", fanoutArgs([]string{"c1", "c0"}, "SELECT 1", "format", "xml"))
 	if text != `format must be one of tsv, json, markdown, got "xml"` {
 		t.Errorf("format xml: %s", text)
 	}

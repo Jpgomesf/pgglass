@@ -57,21 +57,6 @@ func confirmed(dsn string) config.Connection {
 	return config.Connection{Source: "direct", DSN: dsn, Confirm: true}
 }
 
-func (s *session) auditedCall(t *testing.T, tool string, a map[string]any) (string, bool, []auditLine) {
-	t.Helper()
-	before := len(s.auditLines(t))
-	text, isErr := s.call(t, tool, a)
-	lines := s.auditLines(t)[before:]
-	for i := range lines {
-		if lines[i].DurationMS == nil || *lines[i].DurationMS < 0 {
-			t.Errorf("audit line %+v: duration_ms = %v", lines[i], lines[i].DurationMS)
-		}
-		lines[i].DurationMS = nil
-	}
-	slices.SortFunc(lines, func(a, b auditLine) int { return strings.Compare(a.Connection, b.Connection) })
-	return text, isErr, lines
-}
-
 func toolLine(tool, conn, sql string, rows int, outcome string) auditLine {
 	return auditLine{Msg: "tool call", Tool: tool, Connection: conn, SQLSHA256: sha12(sql), SQLLen: len(sql), Rows: rows, Outcome: outcome}
 }
