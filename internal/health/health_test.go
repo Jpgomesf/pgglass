@@ -81,7 +81,11 @@ func TestCheckOnTheAppFixture(t *testing.T) {
 		{testdb.RoleClean, `up to \d+ of max_connections 100: active 1; the type and state of \d+ are not visible to role ro_clean`,
 			[]string{"none", "other roles' sessions are not visible to role ro_clean"}},
 	} {
-		got := checkAs(t, tc.role, testdb.DBApp, longRunning)
+		lines, err := Check(t.Context(), testdb.Querier(t, tc.role, testdb.DBApp))
+		if err != nil {
+			t.Fatalf("Check as %s: %v", tc.role, err)
+		}
+		got := report(t, lines)
 		match(t, "connections", got["connections"], tc.connections)
 		equal(t, got["long_running"], tc.longRunning)
 		equal(t, got["blocked"], []string{"none"})

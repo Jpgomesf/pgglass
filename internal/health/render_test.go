@@ -159,6 +159,28 @@ func TestSectionRun(t *testing.T) {
 	}
 }
 
+// check fails, naming the step, on what Postgres did not raise: a current
+// role it cannot read, or a section result it cannot decode. It stops there.
+func TestCheckFailsOnWhatPostgresDidNotRaise(t *testing.T) {
+	for _, tc := range []struct {
+		q       *fakeQuerier
+		want    string
+		queries int
+	}{
+		{&fakeQuerier{err: errors.New("dial tcp: connection refused")}, "health: current role: dial tcp: connection refused", 1},
+		{&fakeQuerier{value: ptr(`{"Role": "ro_clean", "Superuser": true}`)}, `health: current role: json: unknown field "Superuser"`, 1},
+		{&fakeQuerier{value: ptr(`{"Role": "ro_clean", "AllStats": false}`)}, `health: connections: json: unknown field "Role"`, 2},
+	} {
+		lines, err := check(context.Background(), tc.q, sections(longRunning))
+		if lines != nil || err == nil || err.Error() != tc.want {
+			t.Errorf("check = %v, %v; want %q", lines, err, tc.want)
+		}
+		if len(tc.q.got) != tc.queries {
+			t.Errorf("%q: %d queries, want %d", tc.want, len(tc.q.got), tc.queries)
+		}
+	}
+}
+
 func TestQueryValueReadsNullWhenNothingComesBack(t *testing.T) {
 	data, err := queryValue(context.Background(), &fakeQuerier{}, cacheHitSQL)
 	if err != nil || string(data) != "null" {
