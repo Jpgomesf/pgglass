@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -16,9 +17,20 @@ type registryEntry struct {
 		URL string `json:"url"`
 	} `json:"repository"`
 	Packages []struct {
-		RegistryType string `json:"registryType"`
-		Identifier   string `json:"identifier"`
+		RegistryType     string             `json:"registryType"`
+		Identifier       string             `json:"identifier"`
+		RuntimeArguments []registryArgument `json:"runtimeArguments"`
 	} `json:"packages"`
+}
+
+type registryArgument struct {
+	Type       string `json:"type"`
+	Name       string `json:"name"`
+	Value      string `json:"value"`
+	IsRequired bool   `json:"isRequired"`
+	Variables  map[string]struct {
+		IsRequired bool `json:"isRequired"`
+	} `json:"variables"`
 }
 
 func readRegistryEntry(t *testing.T) registryEntry {
@@ -71,6 +83,28 @@ func TestReleaseLabelsTheImageWithTheServerName(t *testing.T) {
 	label := "io.modelcontextprotocol.server.name: " + entry.Name + "\n"
 	if !strings.Contains(readText(t, ".goreleaser.yml"), label) {
 		t.Errorf(".goreleaser.yml lacks the label %q, which the MCP Registry matches against server.json", strings.TrimSpace(label))
+	}
+}
+
+// The image runs as uid 65532, which cannot read a config.json only its owner
+// can read through a bind mount on Linux: the registry entry runs it as the
+// user who asks for it, as the README's docker command does.
+func TestServerJSONRunsTheImageAsItsUser(t *testing.T) {
+	entry := readRegistryEntry(t)
+	if !strings.Contains(readText(t, "README.md"), `docker run --rm -i --user "$(id -u):$(id -g)"`) {
+		t.Error(`README.md's docker command no longer runs the image with --user "$(id -u):$(id -g)"`)
+	}
+	for _, pkg := range entry.Packages {
+		i := slices.IndexFunc(pkg.RuntimeArguments, func(a registryArgument) bool { return a.Type == "named" && a.Name == "--user" })
+		if i < 0 {
+			t.Errorf("package %s does not run the image with --user", pkg.Identifier)
+			continue
+		}
+		user := pkg.RuntimeArguments[i]
+		variable, ok := user.Variables[strings.Trim(user.Value, "{}")]
+		if !user.IsRequired || !ok || !variable.IsRequired {
+			t.Errorf("package %s: --user %+v, want it required, with a value the user is asked for", pkg.Identifier, user)
+		}
 	}
 }
 

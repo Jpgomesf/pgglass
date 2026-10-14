@@ -39,7 +39,7 @@ The release job is the only one with write permissions: `contents` to create the
 
 ## Publish to the MCP Registry
 
-Publishing is a manual step, after the release, once the image is public. The registry checks that the image's `io.modelcontextprotocol.server.name` label equals the `name` in `server.json`, and accepts each version once.
+Publishing is a manual step, after the release, once the image is public. The registry checks that the image's `io.modelcontextprotocol.server.name` label equals the `name` in `server.json`, and accepts each version once. Like the README's docker command, the entry runs the image with `--user` set to the `uid:gid` the client asks for: as the image's own user, uid 65532, the server could not read a `config.json` only its owner can read through a bind mount on Linux.
 
 ```bash
 brew install mcp-publisher

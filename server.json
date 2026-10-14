@@ -19,6 +19,20 @@
       "runtimeArguments": [
         {
           "type": "named",
+          "name": "--user",
+          "description": "Run the server as you, so that it can read a config.json only you can read",
+          "value": "{user}",
+          "isRequired": true,
+          "variables": {
+            "user": {
+              "description": "Your user and group IDs, as uid:gid: what id -u and id -g print",
+              "placeholder": "1000:1000",
+              "isRequired": true
+            }
+          }
+        },
+        {
+          "type": "named",
           "name": "--mount",
           "description": "Mount the directory holding config.json, read-only",
           "value": "type=bind,src={config_dir},dst=/etc/pgglass,readonly",
