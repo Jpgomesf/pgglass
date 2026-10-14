@@ -115,8 +115,22 @@ func (h *Handlers) withTableResources(next mcp.MethodHandler) mcp.MethodHandler 
 		if list, ok := res.(*mcp.ListResourcesResult); ok && err == nil {
 			list.Resources = append(list.Resources, h.listTableResources(ctx)...)
 		}
+		var wire *jsonrpc.Error
+		if read, ok := req.(*mcp.ReadResourceRequest); ok && errors.As(err, &wire) && len(wire.Data) > 0 {
+			wire.Data = uriData(read.Params.URI, h.spill.InlineMaxBytes-len(wire.Message))
+		}
 		return res, err
 	}
+}
+
+const escapedByteMax = len(`\u0000`)
+
+func uriData(uri string, limit int) json.RawMessage {
+	data, _ := json.Marshal(map[string]string{"uri": uri})
+	if len(data) > limit {
+		data, _ = json.Marshal(map[string]string{"uri": cutMiddle(uri, (limit-len(`{"uri":""}`))/escapedByteMax)})
+	}
+	return data
 }
 
 func (h *Handlers) listTableResources(ctx context.Context) []*mcp.Resource {

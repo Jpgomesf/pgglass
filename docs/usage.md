@@ -264,7 +264,7 @@ Every table, view, materialized view and foreign table is also an MCP resource, 
 - `resources/list` names, for each connection, the first 200 relations its role can read, by schema and then name: `prod-app: app.orders`, described by its kind, `table`. It checks the role of every connection and reads its catalog, all at once, so a client that lists resources when it connects opens every connection then. A connection that fails, or that `role_check: strict` refuses, is left out. Each connection's list is cached for 5 minutes.
 - The resource template `pgglass://{connection}/{schema}/{table}` reads any relation, listed or not.
 - A read goes through the role check and keeps to 10 KB, as `pg_schema` does: when it is the first response on a connection, the role check's findings start it. A listing cannot show them, so it leaves them to the next response.
-- An unknown connection, or a schema or relation that does not exist or that the role cannot read, is a resource-not-found error (code `-32602`, with the URI in its data). A connection that `role_check: strict` refuses, or a database error, is an internal error (`-32603`) whose message is the error a tool would return.
+- An unknown connection, or a schema or relation that does not exist or that the role cannot read, is a resource-not-found error (code `-32602`, with the URI in its data, cut in the middle where it would take the error past 10 KB). A connection that `role_check: strict` refuses, or a database error, is an internal error (`-32603`) whose message is the error a tool would return.
 
 ## Errors
 

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -95,5 +96,33 @@ func TestResourceErrorsFollowTheMCPShapeWithinTheInlineLimit(t *testing.T) {
 		len(wire.Message) > config.InlineMaxBytes || !strings.HasPrefix(wire.Message, notice+`ERROR: invalid input syntax for type integer: "yyy`) ||
 		!strings.Contains(wire.Message, " bytes cut]…") || !strings.HasSuffix(wire.Message, "\nHINT: Cast it to text first.") {
 		t.Errorf("resourceError of a long error = %+v", wire)
+	}
+}
+
+func TestURIDataIsTheURIAsJSONWithinItsLimit(t *testing.T) {
+	for _, uri := range []string{
+		"pgglass://db/app/orders",
+		"pgglass://a<b>&\"c\\/app/orders",
+		strings.Repeat("\x01", 5000),
+		strings.Repeat("é", 3000),
+		strings.Repeat("<", 4000),
+		strings.Repeat("u", 20000),
+	} {
+		for _, limit := range []int{config.InlineMaxBytes / 2, config.InlineMaxBytes} {
+			data := uriData(uri, limit)
+			var got struct {
+				URI string `json:"uri"`
+			}
+			if err := json.Unmarshal(data, &got); err != nil || len(data) > limit {
+				t.Errorf("uriData of a %d-byte URI within %d = %d bytes, %v", len(uri), limit, len(data), err)
+				continue
+			}
+			if whole, _ := json.Marshal(map[string]string{"uri": uri}); len(whole) <= limit && got.URI != uri {
+				t.Errorf("uriData of a %d-byte URI within %d cut a URI that fits: %.80q", len(uri), limit, got.URI)
+			}
+			if !strings.HasPrefix(got.URI, uri[:4]) || !strings.HasSuffix(got.URI, uri[len(uri)-4:]) {
+				t.Errorf("uriData of a %d-byte URI within %d = %.80q, want its start and end", len(uri), limit, got.URI)
+			}
+		}
 	}
 }
