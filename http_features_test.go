@@ -151,7 +151,7 @@ func TestHTTPRefusesOlderClientsThatClaimElicitation(t *testing.T) {
 	}
 }
 
-// Over Streamable HTTP, tables are listed and read as resources, as over
+// Over Streamable HTTP, tables are read and listed as resources, as over
 // stdio.
 func TestHTTPServesTheTableResources(t *testing.T) {
 	srv := startApp(t, direct(testdb.DSN(t, testdb.RoleClean, testdb.DBApp)))
@@ -159,14 +159,7 @@ func TestHTTPServesTheTableResources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	list, err := session.ListResources(t.Context(), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	const uri = "pgglass://app/app/customers"
-	if !slices.ContainsFunc(list.Resources, func(r *mcp.Resource) bool { return r.URI == uri }) {
-		t.Errorf("resources/list lacks %s: %d resources", uri, len(list.Resources))
-	}
 	read, err := session.ReadResource(t.Context(), &mcp.ReadResourceParams{URI: uri})
 	if err != nil {
 		t.Fatal(err)
@@ -175,6 +168,13 @@ func TestHTTPServesTheTableResources(t *testing.T) {
 		t.Errorf("resources/read %s = %+v", uri, read.Contents)
 	}
 	awaitLog(t, srv, `"tool":"resource","connection":"app"`)
+	list, err := session.ListResources(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(list.Resources, func(r *mcp.Resource) bool { return r.URI == uri }) {
+		t.Errorf("resources/list lacks %s: %d resources", uri, len(list.Resources))
+	}
 }
 
 // A call still running when shutdown's 10 seconds run out is cancelled, with

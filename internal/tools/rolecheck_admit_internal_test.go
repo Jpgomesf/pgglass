@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -57,6 +58,23 @@ func TestAdmitRefusesWhatGateRefuses(t *testing.T) {
 	rc, calls = fakeChecks(config.RoleCheckOff, report(blockReport))
 	if err := rc.admit(t.Context(), "su"); err != nil || calls.Load() != 0 {
 		t.Errorf("off admit = %v after %d audits, want nil after none", err, calls.Load())
+	}
+}
+
+func TestGateRecordsTheConnectionsInUseAndSaysWhenOneIsFirstUsed(t *testing.T) {
+	for _, mode := range []string{config.RoleCheckStrict, config.RoleCheckWarn, config.RoleCheckOff} {
+		rc, _ := fakeChecks(mode, report(blockReport))
+		var firsts atomic.Int32
+		rc.onFirstUse = func() { firsts.Add(1) }
+		_ = rc.admit(t.Context(), "listed")
+		var wg sync.WaitGroup
+		for i := range 40 {
+			wg.Go(func() { _, _ = rc.gate(context.Background(), []string{"b", "a"}[i%2]) })
+		}
+		wg.Wait()
+		if got := rc.inUse(); !slices.Equal(got, []string{"a", "b"}) || firsts.Load() != 2 {
+			t.Errorf("%s: in use %v after %d first uses, want [a b] after 2", mode, got, firsts.Load())
+		}
 	}
 }
 

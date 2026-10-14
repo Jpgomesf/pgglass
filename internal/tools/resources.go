@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"maps"
 	"net/url"
 	"slices"
 	"strings"
@@ -147,7 +146,7 @@ func uriData(uri string, limit int) json.RawMessage {
 }
 
 func (h *Handlers) listTableResources(ctx context.Context) []*mcp.Resource {
-	conns := slices.Sorted(maps.Keys(h.cfg.Connections))
+	conns := h.checks.inUse()
 	lists := make([][]*mcp.Resource, len(conns))
 	var wg sync.WaitGroup
 	for i, conn := range conns {

@@ -265,7 +265,8 @@ replication	not a replica
 
 Every table, view, materialized view and foreign table is also an MCP resource, `pgglass://<connection>/<schema>/<table>`, each name percent-encoded as in `pgglass://my%20db/app/caf%C3%A9`. In Claude Code, type `@` and pick one, such as `@pgglass:pgglass://prod-app/app/orders`, to add the relation to the prompt as `pg_schema` describes it, in `text/plain`.
 
-- `resources/list` names, for each connection, the first 200 relations its role can read, by schema and then name: `prod-app: app.orders`, described by its kind, `table`. It checks the role of every connection and reads its catalog, all at once, so a client that lists resources when it connects opens every connection then. A connection that fails, or that `role_check: strict` refuses, is left out. Each connection's list is cached for 5 minutes.
+- `resources/list` names, for each connection a tool call or resource read has used since the server started, the first 200 relations its role can read, by schema and then name: `prod-app: app.orders`, described by its kind, `table`. So a listing opens no connection the agent has not used, and before the first call it names nothing. A connection that fails, or that `role_check: strict` refuses, is left out. Each connection's list is cached for 5 minutes.
+- When a call first uses a connection, the server sends `notifications/resources/list_changed`, so a client that listens for it lists the resources again. Over [`--http`](configuration.md#streamable-http), only a client on revision 2026-07-28 or later, which listens on a stream it keeps open, receives it.
 - The resource template `pgglass://{connection}/{schema}/{table}` reads any relation, listed or not.
 - A read goes through the role check and keeps to 10 KB, as `pg_schema` does: when it is the first response on a connection, the role check's findings start it. A listing cannot show them, so it leaves them to the next response.
 - An unknown connection, or a schema or relation that does not exist or that the role cannot read, is a resource-not-found error (code `-32602`, with the URI in its data, cut in the middle where it would take the error past 10 KB). A connection that `role_check: strict` refuses, or a database error, is an internal error (`-32603`) whose message is the error a tool would return.
@@ -301,7 +302,7 @@ Each tool call writes one JSON line to stderr, or one per connection for a [fan-
 
 `connection` names both connections of a `pg_diff_schema` call, `prod,staging`. `sql_sha256` is the first 12 hex digits of the statement's SHA-256, so repeated statements can be matched without logging them; it is empty, and `sql_len` 0, for tools that take no SQL. `outcome` is `ok`, `guard_reject`, `db_error` (with `sqlstate` when Postgres raised it), `preflight_block`, `error` (for example, invalid arguments) or `declined` (the user declined or cancelled a [confirmation](#confirmation)). SQL text, parameters and values are never logged.
 
-[Resources](#mention-tables-as-resources) are audited too: each read writes a line whose `tool` is `resource`, and each listing one line per connection whose `tool` is `resource_list`, with the relations it listed as `rows`.
+[Resources](#mention-tables-as-resources) are audited too: each read writes a line whose `tool` is `resource`, and each listing one line per connection it lists, whose `tool` is `resource_list`, with the relations it listed as `rows`.
 
 ## Parallel calls
 

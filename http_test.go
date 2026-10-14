@@ -365,7 +365,7 @@ func TestHTTPShutdownEndsListenStreams(t *testing.T) {
 	t.Setenv(authEnv, "")
 	srv := startHTTP(t, writeConfig(t, connections(map[string]any{})))
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, &mcp.ClientOptions{
-		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {},
+		ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {},
 	})
 	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: srv.url}, nil)
 	if err != nil {
