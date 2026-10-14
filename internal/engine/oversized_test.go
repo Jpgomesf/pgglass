@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jpgomesf/pgglass/internal/config"
 	"github.com/jpgomesf/pgglass/internal/engine"
@@ -42,7 +43,9 @@ func TestFieldPastTheMessageCapIsNotBuffered(t *testing.T) {
 }
 
 // The rows before an oversized one are kept, and the server stops the query
-// once the connection is gone.
+// once the connection is gone: it notices when a write fails, which a port
+// forwarder in between, such as Docker's, can delay by seconds on a loaded
+// machine.
 func TestRowsBeforeAnOversizedRowAreKept(t *testing.T) {
 	t.Parallel()
 	m := cleanApp(t, config.Defaults{MaxBytes: 1 << 20})
@@ -53,7 +56,7 @@ func TestRowsBeforeAnOversizedRowAreKept(t *testing.T) {
 		t.Errorf("%d rows, truncated %q; want the 2 rows before the oversized one, max_bytes=1048576", len(res.Rows), res.TruncatedReason)
 	}
 	watch := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
-	eventually(t, "the server to end the query", func() bool { return running(t, watch, "repeat('x', 64000000)") == 0 })
+	eventually(t, 30*time.Second, "the server to end the query", func() bool { return running(t, watch, "repeat('x', 64000000)") == 0 })
 	if got := value(t, m, "SELECT pg_backend_pid()"); got == pid {
 		t.Errorf("backend %s serves the next query: the connection was not reset", got)
 	}

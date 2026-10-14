@@ -65,9 +65,9 @@ func deref(s *string) string {
 	return *s
 }
 
-func eventually(t *testing.T, what string, cond func() bool) {
+func eventually(t *testing.T, within time.Duration, what string, cond func() bool) {
 	t.Helper()
-	for deadline := time.Now().Add(5 * time.Second); !cond(); {
+	for deadline := time.Now().Add(within); !cond(); {
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for %s", what)
 		}

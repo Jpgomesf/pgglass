@@ -360,7 +360,7 @@ func TestEndedContextCancelsTheQuery(t *testing.T) {
 	}
 
 	watch := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
-	eventually(t, "the server to stop pg_sleep(30)", func() bool { return running(t, watch, "pg_sleep(30)") == 0 })
+	eventually(t, 5*time.Second, "the server to stop pg_sleep(30)", func() bool { return running(t, watch, "pg_sleep(30)") == 0 })
 	if got := value(t, m, "SELECT pg_backend_pid()"); got != pid {
 		t.Errorf("backend %s after the cancel, was %s: the connection was dropped", got, pid)
 	}

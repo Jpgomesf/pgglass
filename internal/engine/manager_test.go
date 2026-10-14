@@ -216,13 +216,13 @@ func TestQueryWaitingOnOpenDoesNotOpenAfterClose(t *testing.T) {
 		return errs
 	}
 	first := query()
-	eventually(t, "the first query to start opening", func() bool { return stub.callCount(name) == 1 })
+	eventually(t, 5*time.Second, "the first query to start opening", func() bool { return stub.callCount(name) == 1 })
 	second := query()
 	time.Sleep(50 * time.Millisecond)
 
 	closed := make(chan struct{})
 	go func() { m.Close(); close(closed) }()
-	eventually(t, "Close to start", func() bool {
+	eventually(t, 5*time.Second, "Close to start", func() bool {
 		_, err := m.Query(t.Context(), "other", engine.Query{SQL: "SELECT 1"})
 		return strings.Contains(err.Error(), "closed")
 	})
@@ -253,7 +253,7 @@ func TestQueryWaitingOnOpenGivesUpWithItsContext(t *testing.T) {
 		_, err := m.Query(t.Context(), name, engine.Query{SQL: "SELECT 1"})
 		first <- err
 	}()
-	eventually(t, "the first query to start opening", func() bool { return stub.callCount(name) == 1 })
+	eventually(t, 5*time.Second, "the first query to start opening", func() bool { return stub.callCount(name) == 1 })
 
 	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
@@ -352,7 +352,7 @@ func TestOpeningOneConnectionBlocksNoOther(t *testing.T) {
 			}
 		})
 	}
-	eventually(t, "the first query to start opening "+slow, func() bool { return stub.callCount(slow) == 1 })
+	eventually(t, 5*time.Second, "the first query to start opening "+slow, func() bool { return stub.callCount(slow) == 1 })
 
 	done := make(chan error, 1)
 	go func() {
