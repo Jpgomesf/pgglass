@@ -4,7 +4,7 @@ Thanks for your interest in contributing! This document covers the workflow and 
 
 ## Getting Started
 
-You need Go 1.26 or later, [golangci-lint](https://golangci-lint.run) v2.14, the version CI runs, and, for the integration tests, Docker.
+You need Go 1.26.9 or later, as `go.mod` requires (an older `go` command downloads it), [golangci-lint](https://golangci-lint.run) v2.14, the version CI runs, and, for the integration tests, Docker.
 
 1. **Fork** the repository
 2. **Clone** your fork locally
