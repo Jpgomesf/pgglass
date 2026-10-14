@@ -99,6 +99,18 @@ func TestConfirmAsksWhenTheCallBringsNoAnswer(t *testing.T) {
 	if len(res.Content) != 0 || res.IsError || len(res.InputRequests) != 1 || res.InputRequests[ask.key] != q {
 		t.Errorf("result %+v, want the question alone", res)
 	}
+	if got := ask.Error(); got != "the user's confirmation is required" {
+		t.Errorf("Error() = %q", got)
+	}
+}
+
+// A statement whose params the question cannot show is refused, never asked
+// about or run unconfirmed.
+func TestConfirmFailsWhenItCannotWriteTheQuestion(t *testing.T) {
+	err := confirmHandlers().confirm(&call{canAsk: true}, "pg_query", []string{"prod"}, "SELECT $1", []any{json.Number("not a number")})
+	if err == nil || asksUser(err) || errors.Is(err, errDeclined) {
+		t.Errorf("confirm = %v, want the question's error", err)
+	}
 }
 
 func TestConfirmKeysEachQuestionByWhatItAsks(t *testing.T) {

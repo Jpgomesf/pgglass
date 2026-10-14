@@ -39,8 +39,16 @@ func TestCutMiddle(t *testing.T) {
 		}
 	}
 	accents := strings.Repeat("é", 1000)
-	if got := cutMiddle(accents, 101); len(got) > 101 || !utf8.ValidString(got) {
-		t.Errorf("cut of 2-byte characters to 101 bytes: %d bytes, valid UTF-8 %t", len(got), utf8.ValidString(got))
+	for limit := 100; limit < 108; limit++ {
+		got := cutMiddle(accents, limit)
+		m := cutCount.FindStringSubmatch(got)
+		if len(got) > limit || !utf8.ValidString(got) || m == nil {
+			t.Errorf("cut of 2-byte characters to %d bytes: %d bytes, valid UTF-8 %t:\n%s", limit, len(got), utf8.ValidString(got), got)
+			continue
+		}
+		if n, _ := strconv.Atoi(m[1]); len(got)-len(m[0])+n != len(accents) {
+			t.Errorf("cut to %d: dropped %d bytes, the note says %d", limit, len(accents)-len(got)+len(m[0]), n)
+		}
 	}
 }
 

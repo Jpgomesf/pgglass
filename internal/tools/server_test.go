@@ -301,15 +301,18 @@ func TestServerNegotiatesTheNewestProtocolVersionAndEveryOlderOne(t *testing.T) 
 }
 
 func TestListConnectionsInNameOrder(t *testing.T) {
+	const neverFetched = "pgglass/tools-test/never-fetched"
 	cfg := newConfig(config.RoleCheckWarn, map[string]config.Connection{
 		"zeta":  direct(unusedDSN),
 		"alpha": {Source: "direct", DSN: unusedDSN, DefaultSchema: "app", RequiresVPN: true},
 		"mid":   {Source: "env", DSNEnvVar: "PGGLASS_TOOLS_TEST_UNSET"},
+		"prod":  {Source: "aws_secrets_manager", SecretName: neverFetched, Confirm: true},
 	})
 	s := connect(t, cfg)
-	want := "Connections (3):\n" +
+	want := "Connections (4):\n" +
 		"  alpha [direct, vpn, schema:app]\n    role not checked yet: checked on first use\n" +
 		"  mid [env]\n    role not checked yet: checked on first use\n" +
+		"  prod [aws_secrets_manager, confirm, not loaded]\n    role not checked yet: checked on first use\n" +
 		"  zeta [direct]\n    role not checked yet: checked on first use"
 	for range 3 {
 		if got := s.ok(t, "pg_list_connections", nil); got != want {
@@ -346,6 +349,8 @@ func TestInvalidCallsAreToolErrors(t *testing.T) {
 		{"pg_query", map[string]any{"connection": "db", "query": "SELECT 1"}, `invalid arguments: json: unknown field "query"`},
 		{"pg_query", map[string]any{"connection": "db", "sql": 1}, "invalid arguments"},
 		{"pg_schema", map[string]any{"connection": "nope"}, `unknown connection "nope"`},
+		{"pg_schema", map[string]any{"connection": "db", "tables": "orders"}, `invalid arguments: json: unknown field "tables"`},
+		{"pg_search", map[string]any{"connection": "db", "query": "x"}, `invalid arguments: json: unknown field "query"`},
 		{"pg_schema", map[string]any{"connection": "db", "table": "orders"}, "table needs schema"},
 		{"pg_search", map[string]any{"connection": "db"}, "pattern must not be empty"},
 		{"pg_search", map[string]any{"connection": "db", "pattern": "x", "limit": -3}, "limit must be at least 1"},
@@ -354,6 +359,36 @@ func TestInvalidCallsAreToolErrors(t *testing.T) {
 		if got := s.fails(t, tc.tool, tc.args); !strings.Contains(got, tc.want) {
 			t.Errorf("%s %v = %q, want it to contain %q", tc.tool, tc.args, got, tc.want)
 		}
+	}
+}
+
+// An unknown connection fails each tool before any role check or query: the
+// error is the list of configured names alone.
+func TestUnknownConnectionFailsEveryToolAtOnce(t *testing.T) {
+	s := connect(t, newConfig(config.RoleCheckWarn, map[string]config.Connection{"db": direct(unusedDSN)}))
+	const want = `unknown connection "nope" (available: db)`
+	calls := map[string]map[string]any{
+		"pg_schema":      {"connection": "nope"},
+		"pg_search":      {"connection": "nope", "pattern": "x"},
+		"pg_query":       {"connection": "nope", "sql": "SELECT 1"},
+		"pg_explain":     {"connection": "nope", "sql": "SELECT 1"},
+		"pg_profile":     {"connection": "nope", "table": "app.orders"},
+		"pg_health":      {"connection": "nope"},
+		"pg_diff_schema": {"left": "nope", "right": "db"},
+	}
+	for tool, a := range calls {
+		if got := s.fails(t, tool, a); got != want {
+			t.Errorf("%s: %q, want %q", tool, got, want)
+		}
+	}
+	lines := s.auditLines(t)
+	for _, line := range lines {
+		if line.Outcome != "error" || line.Connection != "" {
+			t.Errorf("audit line %+v, want outcome error and no connection", line)
+		}
+	}
+	if len(lines) != len(calls) {
+		t.Errorf("%d audit lines, want %d", len(lines), len(calls))
 	}
 }
 

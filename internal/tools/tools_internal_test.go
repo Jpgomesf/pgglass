@@ -414,6 +414,14 @@ func TestStrictRoleCheckFailureKeepsItsContext(t *testing.T) {
 	if got := errorText(&connError{conn: "staging", err: err}); got != "staging: "+want {
 		t.Errorf("errorText of one side =\n%s\nwant\nstaging: %s", got, want)
 	}
+	const plain = "role check failed, and role_check strict refuses connections it cannot check: " +
+		"preflight: function grants: permission denied for table pg_proc (SQLSTATE 42501)"
+	if got := err.Error(); got != plain {
+		t.Errorf("Error() =\n%s\nwant\n%s", got, plain)
+	}
+	if got := (&connError{conn: "staging", err: err}).Error(); got != "staging: "+plain {
+		t.Errorf("Error() of one side =\n%s\nwant\nstaging: %s", got, plain)
+	}
 	if outcome, sqlState := classify(err); outcome != outcomeDBError || sqlState != "42501" {
 		t.Errorf("classify = %s %q, want db_error 42501", outcome, sqlState)
 	}
