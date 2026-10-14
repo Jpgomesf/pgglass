@@ -180,6 +180,7 @@ If the audit itself fails, it is retried on the next call; meanwhile `strict` re
 | Connect | `env`: `dsn_env_var` must be set, variable must exist | `environment variable "X" is not set` |
 | Connect | `dotenv`: file must exist, key must be present | `"X" not found in .env` |
 | Connect | `aws_secrets_manager`: secret must contain required fields | `missing required fields: host, db_name` |
+| Connect | The DSN must parse; it is never shown, since it may hold a password | `connection "x": the DSN does not parse (not shown: it may hold a password)` |
 | Connect | VPN check (if `requires_vpn: true`) | `host unreachable — is VPN active?` |
 | Connect | The DSN must keep the user, database and host it had on first use | `the DSN now names another user, database or host; restart the server to use it` |
 | First use | `role_check: strict` and a critical finding | `connection "x" refused (role_check strict): its role can do more than read.` |

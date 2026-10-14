@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -366,5 +367,35 @@ func TestHTTPReportsAnAddressItCannotListenOn(t *testing.T) {
 	code, _, errOut := runCommand(t, "--config", writeConfig(t, connections(map[string]any{})), "--http", busy)
 	if code != 1 || !strings.Contains(errOut, "address already in use") {
 		t.Errorf("run on a busy port = %d, %q; want 1 and the listen error", code, errOut)
+	}
+}
+
+// With PGGLASS_HTTP_TOKEN set, a tool call on a connection whose DSN does not
+// parse shows neither that DSN nor the token, as doctor does not.
+func TestHTTPToolErrorsHideAnUnparsableDSN(t *testing.T) {
+	isolateHome(t)
+	t.Setenv(authEnv, testToken)
+	const planted = "hunter2-not-a-dsn"
+	t.Setenv("PGGLASS_TEST_SECRET_DSN", `{"username":"app","password":"`+planted+`","host":"db"}`)
+	srv := startHTTP(t, writeConfig(t, connections(map[string]any{
+		"json":  map[string]any{"source": "env", "dsn_env_var": "PGGLASS_TEST_SECRET_DSN"},
+		"token": map[string]any{"source": "env", "dsn_env_var": authEnv},
+	})))
+	session, err := connectHTTP(t, srv.url, http.Header{"Authorization": {"Bearer " + testToken}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, conn := range []string{"json", "token"} {
+		res, err := session.CallTool(t.Context(), &mcp.CallToolParams{Name: "pg_query", Arguments: map[string]any{"connection": conn, "sql": "SELECT 1"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("connection %q: the DSN does not parse (not shown: it may hold a password)", conn)
+		if text := textOf(t, res); !res.IsError || !strings.Contains(text, want) || strings.Contains(text, planted) || strings.Contains(text, testToken) {
+			t.Errorf("%s: error %t, text:\n%s\nwant an error that says %q and shows neither the DSN nor the token", conn, res.IsError, text, want)
+		}
+	}
+	if logs := srv.logs.String(); strings.Contains(logs, planted) || strings.Contains(logs, testToken) {
+		t.Errorf("stderr shows the DSN:\n%s", logs)
 	}
 }

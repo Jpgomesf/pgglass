@@ -287,7 +287,7 @@ func parseDSN(ctx context.Context, name string, conn config.Connection) (*pgxpoo
 	}
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("connection %q: %w", name, err)
+		return nil, fmt.Errorf("connection %q: the DSN does not parse (not shown: it may hold a password)", name)
 	}
 	return cfg, nil
 }

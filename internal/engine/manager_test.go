@@ -229,7 +229,7 @@ func TestQueryWaitingOnOpenDoesNotOpenAfterClose(t *testing.T) {
 	release()
 	<-closed
 
-	if err := <-first; err == nil || !strings.Contains(err.Error(), "notaport") {
+	if err := <-first; err == nil || !strings.Contains(err.Error(), "the DSN does not parse") {
 		t.Errorf("first query: err = %v, want the DSN error", err)
 	}
 	if err := <-second; err == nil || !strings.Contains(err.Error(), "closed") {
@@ -272,19 +272,26 @@ func TestQueryWaitingOnOpenGivesUpWithItsContext(t *testing.T) {
 	}
 
 	release()
-	if err := <-first; err == nil || !strings.Contains(err.Error(), "notaport") {
+	if err := <-first; err == nil || !strings.Contains(err.Error(), "the DSN does not parse") {
 		t.Errorf("first query: err = %v, want the DSN error", err)
 	}
 }
 
-func TestInvalidDSNErrorHidesPassword(t *testing.T) {
-	m := newManager(t, config.Defaults{}, "postgres://app:s3cret-pw@localhost:notaport/app")
-	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
-	if err == nil || !strings.Contains(err.Error(), `connection "db"`) {
-		t.Fatalf("err = %v, want a DSN error naming the connection", err)
-	}
-	if strings.Contains(err.Error(), "s3cret-pw") {
-		t.Errorf("error leaks the password: %v", err)
+// A DSN that does not parse is not shown: pgx hides the password of only the
+// DSNs it can read, not of a JSON secret or a token put where a DSN goes.
+func TestUnparsableDSNIsNotShown(t *testing.T) {
+	const secret = "s3cret-pw"
+	for _, dsn := range []string{
+		"postgres://app:" + secret + "@localhost:notaport/app",
+		"host=localhost port=notaport user=app password=" + secret,
+		`{"username":"app","password":"` + secret + `","host":"db"}`,
+		secret,
+	} {
+		m := newManager(t, config.Defaults{}, dsn)
+		_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
+		if want := `connection "db": the DSN does not parse (not shown: it may hold a password)`; err == nil || err.Error() != want {
+			t.Errorf("DSN %q: err = %v, want %q", dsn, err, want)
+		}
 	}
 }
 
@@ -300,7 +307,7 @@ func TestFailedResolveIsRetried(t *testing.T) {
 
 	t.Setenv(envVar, "postgres://u:p@localhost:notaport/db")
 	_, err = m.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
-	if err == nil || strings.Contains(err.Error(), envVar) || !strings.Contains(err.Error(), "notaport") {
+	if err == nil || strings.Contains(err.Error(), envVar) || !strings.Contains(err.Error(), "the DSN does not parse") {
 		t.Errorf("err = %v, want the new DSN parsed: a failed resolve must not stick", err)
 	}
 }
