@@ -97,6 +97,9 @@ No changes to `resolver.go`, `main.go`, or any other source files should be need
 ├── http.go                              # serving over Streamable HTTP: token, origins, shutdown
 ├── doctor.go                            # pgglass doctor
 ├── config.json                          # example configuration
+├── install.sh                           # installs a release after checking its SHA-256
+├── Dockerfile                           # the GHCR image, built by GoReleaser
+├── server.json                          # the MCP Registry entry
 ├── internal/
 │   ├── config/                          # types, constants, config loader
 │   ├── resolver/                        # CredentialSource interface + implementations
@@ -140,11 +143,11 @@ make bench-baseline  # rewrites the baseline and the table in docs/benchmark.md
 Integration tests run a throwaway Postgres container through `internal/testdb`
 (one per test package; set `PGGLASS_PG_IMAGE` to pick the image, default
 `postgres:17-alpine`, which `testdb.Image()` returns; CI runs PostgreSQL 15,
-16, 17 and 18). Without Docker they fail
-rather than skip. A package that uses `testdb` needs
-`func TestMain(m *testing.M) { testdb.Main(m) }`. Read through the engine, as
-the server does, with `testdb.Querier(t, role, db)`; set up or observe from
-outside it with `testdb.Conn(t, role, db)` and `testdb.Value`.
+16, 17 and 18). Without Docker they fail rather than skip. A package that uses
+`testdb` needs `func TestMain(m *testing.M) { testdb.Main(m) }`. Read through
+the engine, as the server does, with `testdb.Querier(t, role, db)`; set up or
+observe from outside it with `testdb.Conn(t, role, db)` and `testdb.Value`,
+and branch on `testdb.ServerVersion(t)` where PostgreSQL versions differ.
 
 ## Releases
 
