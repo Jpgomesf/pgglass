@@ -22,8 +22,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/result"
 )
 
-const planMaxBytes = 16 << 20
-
 const reltuplesSQL = `SELECT coalesce(json_agg(json_build_object('Schema', n.nspname, 'Name', c.relname, 'Rows', c.reltuples)), '[]')
 FROM unnest($1::text[], $2::text[]) AS r (nspname, relname)
 JOIN pg_namespace n ON n.nspname = r.nspname
@@ -55,7 +53,7 @@ func New(sql string, analyze bool) (Statement, error) {
 // Run runs s through q under searchPath, the connection's own when empty, and
 // returns the summary. Error positions point into the SELECT New was given.
 func (s Statement) Run(ctx context.Context, q engine.Querier, searchPath string) (string, error) {
-	res, err := q.Query(ctx, engine.Query{SQL: s.sql, SearchPath: searchPath, MaxBytes: planMaxBytes})
+	res, err := q.Query(ctx, engine.Query{SQL: s.sql, SearchPath: searchPath, MaxBytes: engine.WholeValueMaxBytes})
 	if err != nil {
 		var qe *engine.QueryError
 		if errors.As(err, &qe) && qe.Position > s.offset {
@@ -87,7 +85,7 @@ func relationSizes(ctx context.Context, q engine.Querier, rels []relation) (map[
 	for i, r := range rels {
 		schemas[i], names[i] = r.schema, r.name
 	}
-	res, err := q.Query(ctx, engine.Query{SQL: reltuplesSQL, Params: []any{schemas, names}, SearchPath: "pg_catalog", MaxBytes: planMaxBytes})
+	res, err := q.Query(ctx, engine.Query{SQL: reltuplesSQL, Params: []any{schemas, names}, SearchPath: "pg_catalog", MaxBytes: engine.WholeValueMaxBytes})
 	if err != nil {
 		return nil, err
 	}

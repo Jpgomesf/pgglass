@@ -180,7 +180,7 @@ The calling agent is treated as untrusted: instructions can reach it through the
    - Protocol errors keep to 10 KB too, except those the MCP SDK returns before pgglass sees the request, which only a client that does not follow the protocol gets (see [Errors](docs/usage.md#errors)).
    - `pg_schema` reads at most 500 schemas or relations per listing from the catalog, and cuts long comments and definitions as it reads them (see [Explore the schema](docs/usage.md#explore-the-schema)).
    - `pg_diff_schema` reads each side's schema as one catalog value, which `max_bytes` bounds too: a larger schema fails, naming its side, until `max_bytes` is raised.
-   - `pg_explain` reads the plan, which grows with each partition a query scans and which it only summarizes, with 16 MiB in place of a smaller `max_bytes`.
+   - `pg_explain` reads the plan, which grows with each partition a query scans and which it only summarizes, with 16 MiB in place of a smaller `max_bytes`; so do `pg_search` and `pg_profile` for their matches and column statistics, which they do not cut.
 6. **Calls are audited.** Each tool call and resource read writes one JSON line to stderr, one per connection when `pg_query` fans out or the resources are listed: tool, connection (`left,right` for `pg_diff_schema`), SQL hash and length, duration, rows, outcome and SQLSTATE.
    - SQL text, parameters and values are never logged.
    - A call to a tool the server does not have writes one too, with the name it gave cut to 63 bytes.

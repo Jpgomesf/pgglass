@@ -11,7 +11,9 @@
 // definition, however long, takes that value past max_bytes: a comment to its
 // first 200 characters, a view's query to 2000, any other expression to
 // 10,000, longer than a line of a 10 KB description, and an enum to its first
-// 2500 labels.
+// 2500 labels. Search and Profile cut nothing, since every match and value
+// counts whole: they read their value with engine.WholeValueMaxBytes in place
+// of a smaller max_bytes.
 //
 // Only what the current role can read is described: schemas it has USAGE on,
 // relations it can SELECT at least one column of, columns it can SELECT and
@@ -190,14 +192,23 @@ func Search(ctx context.Context, q engine.Querier, pattern string, limit int) (M
 		return nil, fmt.Errorf("search limit must be at least 1, got %d", limit)
 	}
 	var list MatchList
-	if err := queryJSON(ctx, q, &list, searchSQL, likePattern(pattern), limit); err != nil {
+	if err := queryWholeJSON(ctx, q, &list, searchSQL, likePattern(pattern), limit); err != nil {
 		return nil, fmt.Errorf("search %q: %w", pattern, err)
 	}
 	return list, nil
 }
 
 func queryJSON(ctx context.Context, q engine.Querier, dst any, sql string, params ...any) error {
-	res, err := q.Query(ctx, engine.Query{SQL: sql, Params: params, SearchPath: "pg_catalog"})
+	return decodeValue(ctx, q, dst, engine.Query{SQL: sql, Params: params})
+}
+
+func queryWholeJSON(ctx context.Context, q engine.Querier, dst any, sql string, params ...any) error {
+	return decodeValue(ctx, q, dst, engine.Query{SQL: sql, Params: params, MaxBytes: engine.WholeValueMaxBytes})
+}
+
+func decodeValue(ctx context.Context, q engine.Querier, dst any, query engine.Query) error {
+	query.SearchPath = "pg_catalog"
+	res, err := q.Query(ctx, query)
 	if err != nil {
 		return err
 	}

@@ -36,17 +36,21 @@ func call(q engine.Querier) map[string]error {
 	return map[string]error{"FirstSchemas": schemasErr, "FirstTables": tablesErr, "Table": tableErr, "Search": searchErr}
 }
 
+// Search reads its matches whole, with 16 MiB in place of a smaller
+// max_bytes; the listings and Table cut what they read to keep within it.
 func TestQueriesPinSearchPathAndPassParameters(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
-		name string
-		run  func(engine.Querier) error
-		want []any
+		name     string
+		run      func(engine.Querier) error
+		want     []any
+		maxBytes int
 	}{
-		{"FirstSchemas", func(q engine.Querier) error { _, _, err := introspect.FirstSchemas(ctx, q, 3); return err }, []any{3}},
-		{"FirstTables", func(q engine.Querier) error { _, _, err := introspect.FirstTables(ctx, q, "app", 3); return err }, []any{"app", 3}},
-		{"Table", func(q engine.Querier) error { _, err := introspect.Table(ctx, q, "app", "orders"); return err }, []any{"app", "orders"}},
-		{"Search", func(q engine.Querier) error { _, err := introspect.Search(ctx, q, `a_b%c\d`, 5); return err }, []any{`%a\_b\%c\\d%`, 5}},
+		{"FirstSchemas", func(q engine.Querier) error { _, _, err := introspect.FirstSchemas(ctx, q, 3); return err }, []any{3}, 0},
+		{"FirstTables", func(q engine.Querier) error { _, _, err := introspect.FirstTables(ctx, q, "app", 3); return err }, []any{"app", 3}, 0},
+		{"Table", func(q engine.Querier) error { _, err := introspect.Table(ctx, q, "app", "orders"); return err }, []any{"app", "orders"}, 0},
+		{"Search", func(q engine.Querier) error { _, err := introspect.Search(ctx, q, `a_b%c\d`, 5); return err }, []any{`%a\_b\%c\\d%`, 5},
+			engine.WholeValueMaxBytes},
 	} {
 		q := &fakeQuerier{res: oneValue("{}")}
 		if tc.name == "Search" {
@@ -58,8 +62,8 @@ func TestQueriesPinSearchPathAndPassParameters(t *testing.T) {
 		if q.got.SearchPath != "pg_catalog" {
 			t.Errorf("%s: search_path = %q, want pg_catalog", tc.name, q.got.SearchPath)
 		}
-		if !reflect.DeepEqual(q.got.Params, tc.want) {
-			t.Errorf("%s: params = %#v, want %#v", tc.name, q.got.Params, tc.want)
+		if !reflect.DeepEqual(q.got.Params, tc.want) || q.got.MaxBytes != tc.maxBytes {
+			t.Errorf("%s: params = %#v, max_bytes %d; want %#v, %d", tc.name, q.got.Params, q.got.MaxBytes, tc.want, tc.maxBytes)
 		}
 	}
 }

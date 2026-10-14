@@ -186,8 +186,9 @@ func TestProfileQueriesThroughTheQuerier(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if q.got.SearchPath != "pg_catalog" || !reflect.DeepEqual(q.got.Params, []any{"app", "orders", "id", introspect.ProfileColumns}) {
-		t.Errorf("query = %+v, want search_path pg_catalog and the names and column cap as parameters", q.got)
+	if q.got.SearchPath != "pg_catalog" || !reflect.DeepEqual(q.got.Params, []any{"app", "orders", "id", introspect.ProfileColumns}) ||
+		q.got.MaxBytes != engine.WholeValueMaxBytes {
+		t.Errorf("query = %+v, want search_path pg_catalog, the names and column cap as parameters, and max_bytes of 16 MiB", q.got)
 	}
 	if p.Rows != 5 || len(p.Columns) != 1 || p.Columns[0].Stats == nil {
 		t.Errorf("profile = %+v", p)

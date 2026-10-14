@@ -62,6 +62,11 @@ type Query struct {
 	MaxBytes int
 }
 
+// WholeValueMaxBytes is the MaxBytes of a query that reads one value whole
+// only to summarize it, or to render it and spill what is too large, such as
+// a plan: 16 MiB.
+const WholeValueMaxBytes = 16 << 20
+
 // QueryError is an error reported by Postgres, flattened for display.
 type QueryError struct {
 	SQLState string

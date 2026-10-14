@@ -59,7 +59,7 @@ app.orders: table
 app.customer_order_totals.order_count: bigint
 ```
 
-When there are more matches, a last line names the limit that cut them: `(truncated: limit=50)`, or `max_rows` when it caps `limit`. Only what the connection's role can read shows up. Matches over 10 KB are written to a spill file, one per row, like a large `pg_query` result, and the summary names that limit instead: `truncated=true (limit=500)`.
+When there are more matches, a last line names the limit that cut them: `(truncated: limit=50)`, or `max_rows` when it caps `limit`. Only what the connection's role can read shows up. Matches over 10 KB are written to a spill file, one per row, like a large `pg_query` result, and the summary names that limit instead: `truncated=true (limit=500)`. A function's arguments are never cut, so the matches are read with 16 MiB in place of a smaller [`max_bytes`](configuration.md#defaults), past which the call fails.
 
 ## Query
 
@@ -227,7 +227,7 @@ note	text	100	7
 (2 rows)
 ```
 
-Both read as the connection's role: `pg_stats` shows only the columns the role can `SELECT`, and `pg_profile` says so when that leaves none; the sample is subject to privileges and row-level security. Relations the guard denies, such as `pg_authid`, are refused, since their statistics hold their values. Unlike `pg_query`, it does not cut values at 200 characters: five `uuid`s among the most common values alone take more. Output over 10 KB is written to a file, as `pg_query`'s is.
+Both read as the connection's role: `pg_stats` shows only the columns the role can `SELECT`, and `pg_profile` says so when that leaves none; the sample is subject to privileges and row-level security. Relations the guard denies, such as `pg_authid`, are refused, since their statistics hold their values. Unlike `pg_query`, it does not cut values at 200 characters: five `uuid`s among the most common values alone take more. Output over 10 KB is written to a file, as `pg_query`'s is, and the statistics are read with 16 MiB in place of a smaller [`max_bytes`](configuration.md#defaults).
 
 ## Compare a schema across connections
 

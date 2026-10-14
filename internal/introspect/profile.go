@@ -100,7 +100,7 @@ func Profile(ctx context.Context, q engine.Querier, schema, name, column string)
 		Readable int
 		Columns  []ColumnProfile
 	}
-	err := queryJSON(ctx, q, &found, profileSQL, schema, name, column, ProfileColumns)
+	err := queryWholeJSON(ctx, q, &found, profileSQL, schema, name, column, ProfileColumns)
 	if errors.Is(err, errNoRows) {
 		return nil, fmt.Errorf("relation %q.%q does not exist or is not a table or materialized view", schema, name)
 	}
