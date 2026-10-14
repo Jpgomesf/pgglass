@@ -68,14 +68,7 @@ var shared = &harness{start: startServer}
 // Main runs the package's tests, then terminates the shared container.
 func Main(m *testing.M) {
 	shared.managed = true
-	code := m.Run()
-	if err := shared.terminate(); err != nil {
-		fmt.Fprintf(os.Stderr, "testdb: terminate container: %v\n", err)
-		if code == 0 {
-			code = 1
-		}
-	}
-	os.Exit(code)
+	os.Exit(shared.exit(m.Run()))
 }
 
 // DSN returns a URI that connects as role to database on the shared server,
@@ -166,6 +159,16 @@ func (h *harness) get(t testing.TB) *server {
 		t.Fatalf("testdb: start Postgres container (is Docker running?): %v", h.err)
 	}
 	return h.srv
+}
+
+func (h *harness) exit(code int) int {
+	if err := h.terminate(); err != nil {
+		fmt.Fprintf(os.Stderr, "testdb: terminate container: %v\n", err)
+		if code == 0 {
+			return 1
+		}
+	}
+	return code
 }
 
 func (h *harness) terminate() error {
