@@ -25,6 +25,8 @@ import (
 
 var warmParser = guard.Warm
 
+const closeTimeout = 2 * time.Second
+
 func serve(ctx context.Context, opts options, stdin io.Reader, stdout, stderr io.Writer) int {
 	logger := slog.New(slog.NewJSONHandler(stderr, nil))
 	if err := serveTools(ctx, opts, stdin, stdout, stderr, logger); err != nil {
@@ -52,7 +54,7 @@ func serveTools(ctx context.Context, opts options, stdin io.Reader, stdout, stde
 		return err
 	}
 	eng := engine.New(&cfg)
-	defer eng.Close()
+	defer closeEngine(eng)
 	go warmParser()
 	server := tools.NewServer(tools.New(cfg, eng, store, stderr), buildVersion())
 	if addr != "" {
@@ -63,6 +65,18 @@ func serveTools(ctx context.Context, opts options, stdin io.Reader, stdout, stde
 		return nil
 	}
 	return err
+}
+
+func closeEngine(eng *engine.Manager) {
+	closed := make(chan struct{})
+	go func() {
+		eng.Close()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+	case <-time.After(closeTimeout):
+	}
 }
 
 type nopWriteCloser struct{ io.Writer }
