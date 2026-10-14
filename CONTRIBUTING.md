@@ -122,6 +122,8 @@ No changes to `resolver.go`, `main.go`, or any other source files should be need
 - Tests live alongside source files (`foo.go` → `foo_test.go`)
 - Each credential source is a single self-contained file
 
+[How it's built](docs/architecture.md) describes each package, follows one tool call through them, and lists how pgglass is tested.
+
 ## Code Guidelines
 
 - **Keep it simple** — prefer the straightforward solution over the clever one

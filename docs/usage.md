@@ -63,7 +63,7 @@ When there are more matches, a last line names the limit that cut them: `(trunca
 
 ## Query
 
-`pg_query` runs one `SELECT`, `EXPLAIN [ANALYZE] SELECT` or `SHOW`. Anything else is rejected before it reaches the database (see the [safety model](../README.md#safety-model)).
+`pg_query` runs one `SELECT`, `EXPLAIN [ANALYZE] SELECT` or `SHOW`. Anything else is rejected before it reaches the database (see the [safety model](safety-model.md)).
 
 | Argument | Description |
 |----------|-------------|
@@ -99,6 +99,8 @@ A value, a column or type name, or an error can hold bytes that are not UTF-8: a
 Inline, cells longer than 200 characters are cut, with a note of how much was dropped: `…[+1234 chars]`.
 
 ### Large results
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="assets/diagrams/large-results-dark.png"><img alt="A result that fits in 10 KB is returned inline; a larger one is written to a private CSV spill file and the tool returns a summary with the file's path, or the rows that fit when the file cannot be written." src="assets/diagrams/large-results.png" width="830"></picture>
 
 When the output would exceed 10 KB, the full result is written as CSV to a new file and the tool returns a summary instead:
 

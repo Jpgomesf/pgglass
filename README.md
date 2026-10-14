@@ -1,12 +1,72 @@
-# pgglass
+<h1 align="center">pgglass</h1>
 
-**Production behind glass: look at everything, touch nothing.**
+<p align="center"><strong>Production behind glass: look at everything, touch nothing.</strong></p>
 
-pgglass is an [MCP](https://modelcontextprotocol.io) server that gives AI agents read-only access to PostgreSQL databases, built to be pointed at production: the server, not the model, holds the line.
+<p align="center">An <a href="https://modelcontextprotocol.io">MCP</a> server that gives AI agents read-only access to PostgreSQL, built to be pointed at production: the server, not the model, holds the line.</p>
+
+<p align="center">
+  <a href="https://github.com/Jpgomesf/pgglass/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Jpgomesf/pgglass/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/Jpgomesf/pgglass/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Jpgomesf/pgglass"></a>
+  <a href="https://pkg.go.dev/github.com/jpgomesf/pgglass"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/jpgomesf/pgglass.svg"></a>
+  <a href="https://goreportcard.com/report/github.com/jpgomesf/pgglass"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/jpgomesf/pgglass"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <img alt="PostgreSQL 15–18" src="https://img.shields.io/badge/PostgreSQL-15%E2%80%9318-336791?logo=postgresql&logoColor=white">
+</p>
+
+<p align="center">
+  <a href="#quickstart">Quickstart</a> ·
+  <a href="#tools">Tools</a> ·
+  <a href="#many-databases-one-call">Many databases</a> ·
+  <a href="#how-it-compares">How it compares</a> ·
+  <a href="#safety-model">Safety model</a> ·
+  <a href="#install">Install</a> ·
+  <a href="#documentation">Docs</a>
+</p>
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/safety-layers-dark.png"><img alt="An agent's untrusted SQL passes the Postgres parser, the role check and a READ ONLY transaction that is always rolled back before it reaches the database role; results are bounded and every call is audited." src="docs/assets/diagrams/safety-layers.png" width="830"></picture>
 
 - **Read-only, enforced by the server.** Every statement the agent sends is parsed with the Postgres parser and must be one `SELECT`, `EXPLAIN` of one or `SHOW`. It runs in a `READ ONLY` transaction that is always rolled back, under a statement timeout, and each connection's role is audited on first use. See the [safety model](#safety-model).
 - **Many databases, one call.** `pg_query` runs a statement on up to 10 connections in parallel and merges their rows under a `connection` column. `pg_diff_schema` lists what differs in a schema between two connections, such as production and staging.
-- **Frugal with tokens.** Output is compact text, TSV by default. Plans, column statistics and server health come back as a few summary lines, not raw dumps. A query result past 10 KB is written to a private CSV file and summarized, so the agent reads or greps the file instead of the rows. The eight tool definitions fit in 6 KB of JSON. The [token benchmark](docs/benchmark.md) puts numbers on this, and fails CI when they grow.
+- **Frugal with tokens.** The eight tool definitions take 5,484 bytes of `tools/list`, and a session that loads them and asks ten typical questions an estimated 2,550 tokens. Output is compact text, TSV by default, and plans, column statistics and server health come back as a few summary lines, not raw dumps. A result past 10 KB is written to a private CSV file and summarized, so the agent reads or greps the file instead of the rows: `SELECT * FROM events ORDER BY id` on a 20,000-row table comes back in 963 bytes, with its first 1,000 rows (`max_rows`) in the file. The [token benchmark](docs/benchmark.md) measures this, and fails CI when a response grows more than 10%.
+
+## Quickstart
+
+On macOS or Linux:
+
+1. Install the latest release in `~/.local/bin`, once its SHA-256 matches the release's checksums:
+
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/Jpgomesf/pgglass/main/install.sh | sh
+   ```
+
+2. Create `~/.config/pgglass/config.json`, with a role that can only read:
+
+   ```json
+   {
+     "connections": {
+       "my-db": {
+         "source": "direct",
+         "dsn": "postgres://readonly_user:password@localhost:5432/mydb"
+       }
+     }
+   }
+   ```
+
+3. Add it to Claude Code:
+
+   ```bash
+   claude mcp add --transport stdio --scope user pgglass -- ~/.local/bin/pgglass
+   ```
+
+4. Check the config and the connection's role:
+
+   ```bash
+   ~/.local/bin/pgglass doctor
+   ```
+
+   It prints a line per connection, such as `ok my-db: role readonly_user: no findings`, and exits 1 if one fails.
+
+Then ask your agent about the database, such as "which tables in my-db are the largest?". [Install](#install) has the release archive, Docker and source builds; [Configure](#configure) has the other credential sources.
 
 ## Tools
 
@@ -24,6 +84,63 @@ pgglass is an [MCP](https://modelcontextprotocol.io) server that gives AI agents
 Calls run in parallel, across connections and on the same one. The server and each tool have a display title, and on connecting the server gives the agent short instructions on using the tools well. It serves over stdio, or over Streamable HTTP with `--http`, speaks MCP revisions 2024-11-05 to 2026-07-28 and settles on the newest the client speaks too. See the [usage guide](docs/usage.md).
 
 Tables are also MCP resources, `pgglass://<connection>/<schema>/<table>`, read through the same role check, limits and audit log as the tools: in Claude Code, `@`-mention one to add it to a prompt as `pg_schema` describes it. The server lists the tables of the connections the agent has used, so listing them opens no other connection, and the listing keeps to 10 KB. See [resources](docs/usage.md#mention-tables-as-resources).
+
+## Many databases, one call
+
+<picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/diagrams/fan-out-dark.png"><img alt="One pg_query call runs the same statement on several connections in parallel; their rows come back merged under a connection column, with a line for each connection that failed." src="docs/assets/diagrams/fan-out.png" width="830"></picture>
+
+In place of `connection`, `pg_query` takes `connections`, up to 10 names, and runs the statement on each in parallel:
+
+```json
+{"connections": ["staging-app", "prod-app"], "sql": "SELECT count(*) FROM orders"}
+```
+
+```
+connection	count
+staging-app	1204
+prod-app	98311
+(2 rows)
+```
+
+- The statement is checked once. Each connection then gets what a call on it alone would: the role check, its `search_path`, the limits and one audit line.
+- A connection that fails adds a line with its error after the rows; the call fails only when every connection does.
+- To compare structure rather than rows, `pg_diff_schema` lists what differs in one schema between two connections.
+
+See [Fan-out](docs/usage.md#fan-out) and [Compare a schema across connections](docs/usage.md#compare-a-schema-across-connections).
+
+## How it compares
+
+Other Postgres MCP servers, as their own READMEs and docs describe them at the version named, read on 2026-10-14. The `tools/list` sizes were measured on 2026-10-13, each server in its published version against the same fixture ([method](docs/benchmark.md#other-servers)).
+
+| | pgglass 1.0.0 | [Postgres MCP Pro](https://github.com/crystaldba/postgres-mcp/blob/v0.3.0/README.md) 0.3.0 | [DBHub](https://github.com/bytebase/dbhub/blob/v1.5.0/README.md) 1.5.0 | [MCP Toolbox](https://github.com/googleapis/mcp-toolbox/blob/v1.14.0/README.md) 1.14.0 | [Reference server](https://www.npmjs.com/package/@modelcontextprotocol/server-postgres/v/0.6.2) 0.6.2, deprecated |
+|---|---|---|---|---|---|
+| Databases | PostgreSQL | PostgreSQL | PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, SQLite | PostgreSQL, AlloyDB, BigQuery, MySQL and many more | PostgreSQL |
+| Read-only | Always: each statement parsed with the Postgres parser and run in a `READ ONLY` transaction that is rolled back; the role audited on first use | With `--access-mode=restricted`: read-only transactions under a time limit, and SQL parsed with pglast so that only read-only statements pass | With [`readonly = true`](https://dbhub.ai/tools/execute-sql) on a tool ([default `false`](https://dbhub.ai/config/toml)): a keyword allow-list, then a `READ ONLY` transaction | [Read-only mode](https://mcp-toolbox.dev/documentation/configuration/security/read-only/) on Cloud SQL, AlloyDB and BigQuery sources; the `postgres` source has no such setting | Every query in a `READ ONLY` transaction that is rolled back |
+| Databases per server | Several; one `pg_query` call runs on up to 10 | One, `DATABASE_URI` | Several, as `[[sources]]` in `dbhub.toml` | Several, as `sources` in `tools.yaml` | One, given as its argument |
+| Tools, `tools/list` bytes | 8, 5,484 | 9, 5,289 | 2, 1,479 | 29, 20,693 (prebuilt `postgres`) | 1, 131 |
+
+Each of them does more than this table shows, such as Postgres MCP Pro's index tuning, DBHub's web workbench and MCP Toolbox's custom tools: follow the links. The [token benchmark](docs/benchmark.md) also measures the size of pgglass's responses, which `tools/list` says nothing of.
+
+## Safety model
+
+The calling agent is treated as untrusted: instructions can reach it through the data it reads (prompt injection). These layers hold whatever SQL it sends. [The safety model](docs/safety-model.md) has each in full.
+
+1. [**The database role is the real boundary.**](docs/safety-model.md#role-boundary) The server never gives the agent more than the role it connects as: connect as a role that can read only what the agent should see.
+2. [**The role is checked.**](docs/safety-model.md#role-check) On a connection's first use, the server audits what its role can do beyond reading, and `role_check: strict` refuses one with a critical finding.
+3. [**SQL is parsed, not pattern-matched.**](docs/safety-model.md#sql-parsing) `pg_query` accepts one `SELECT`, `EXPLAIN` of one or `SHOW`, checked with the Postgres parser, and rejects a denylist of functions and catalogs.
+4. [**Every statement runs read-only and is rolled back.**](docs/safety-model.md#read-only-transaction) Each runs alone in a `READ ONLY` transaction that is always rolled back, with `statement_timeout` and `lock_timeout` set.
+5. [**Results are bounded.**](docs/safety-model.md#bounded-results) Rows past `max_rows` or `max_bytes` are not kept, and a result past 10 KB is written to a private CSV file and summarized.
+6. [**Calls are audited.**](docs/safety-model.md#audit-log) Each call writes one JSON line to stderr; SQL text, parameters and values are never logged.
+7. [**HTTP stays on this machine unless told otherwise.**](docs/safety-model.md#http) `--http` listens on loopback by default, any other address needs a bearer token, and requests from web pages on other origins are refused.
+8. [**A connection can ask first.**](docs/safety-model.md#confirmation) With `confirm` set, the user sees the statement and its `params` through the client, and it runs only if they accept.
+
+[What these layers do not cover](docs/safety-model.md#what-these-layers-do-not-cover), in short:
+
+- The parser knows names, not what is behind them, and the denylist holds only known functions: a function the role may execute can call `dblink` or another escape internally, and a view over a denied catalog reads it.
+- Whatever the role can `SELECT`, the agent can read and repeat, including what Postgres shows the role about the server, such as settings and other sessions' SQL.
+- A superuser connection has no role boundary: use `role_check: strict`, or a role that is not a superuser.
+- A query may use the database's CPU and I/O, and hold locks that delay DDL, until `statement_timeout` ends it.
+- `--http` serves plain HTTP: to reach it from elsewhere, put a proxy that terminates TLS in front of it, and set the token.
 
 ## Install
 
@@ -59,12 +176,18 @@ docker run --rm -i --user "$(id -u):$(id -g)" \
   ghcr.io/jpgomesf/pgglass --config /etc/pgglass/config.json
 ```
 
+<details>
+<summary>MCP clients, credentials and spill files in the container</summary>
+
 - Give your MCP client that command, as in `claude mcp add pgglass -- docker run --rm -i ...`, and pin a version with a tag such as `:1.0.0`.
 - `--user` runs the server as you, so it can read a `config.json` only you can read.
 - Credentials resolve inside the container: pass the variables that `env` sources read with `-e`, and keep `.env` files in the mounted directory.
 - A result past 10 KB is written to a file inside the container, out of the agent's reach. To share these files, run `mkdir -p ~/.cache/pgglass` and add `-v "$HOME/.cache/pgglass:$HOME/.cache/pgglass" -e XDG_CACHE_HOME="$HOME/.cache"`: the directory has the same path on both sides, so the agent can open the path the server reports.
 
-To serve Streamable HTTP instead:
+</details>
+
+<details>
+<summary>Serve Streamable HTTP from the container</summary>
 
 ```bash
 export PGGLASS_HTTP_TOKEN="$(openssl rand -hex 32)"
@@ -74,6 +197,8 @@ docker run --rm -p 127.0.0.1:8411:8411 -e PGGLASS_HTTP_TOKEN --user "$(id -u):$(
 ```
 
 In the container the server has to listen on every interface, which requires the token; publishing the port on `127.0.0.1` keeps it on this machine. Clients connect to `http://127.0.0.1:8411/mcp` with the header `Authorization: Bearer $PGGLASS_HTTP_TOKEN`.
+
+</details>
 
 ### From source
 
@@ -130,74 +255,7 @@ claude mcp add --transport http --scope user pgglass http://127.0.0.1:8411/mcp
 
 `--scope user` adds the server to every project; leave it out for the current project alone, or use `--scope project` to share it in the project's `.mcp.json`. Other MCP clients take the same command or URL. To serve beyond this machine, with a bearer token, see [Streamable HTTP](docs/configuration.md#streamable-http).
 
-## Upgrading from mcp-postgres
-
-pgglass was called mcp-postgres. The tools are the same, and it reads the same `config.json`.
-
-- mcp-postgres read the `config.json` next to its binary, else the one in its working directory; pgglass reads neither. Move that file, and any `.env` file its connections read, to `~/.config/pgglass/` (or `$XDG_CONFIG_HOME/pgglass/`), or pass the file's path with `--config`.
-- A relative `dotenv_path`, and the default `.env`, still resolve against the server's working directory, which the MCP client picks, not against the directory of `config.json`: set `dotenv_path` to the moved `.env`'s absolute path.
-- [Install](#install) pgglass, then rename the server in your MCP client and point it at the new binary. In Claude Code, run `claude mcp remove mcp-postgres` and [add pgglass](#add-to-claude-code), or rename the `mcp-postgres` entry under `mcpServers` in `~/.claude.json` or `.mcp.json` to `pgglass` and update its `command`.
-- Rename the permission rules in your Claude Code settings that name the server: `mcp__mcp-postgres` becomes `mcp__pgglass`, and `mcp__mcp-postgres__pg_query` becomes `mcp__pgglass__pg_query`.
-- Spill files now go to `pgglass` under the user cache directory, so the old `mcp-postgres` directory there can be deleted.
-
-## Safety model
-
-The calling agent is treated as untrusted: instructions can reach it through the data it reads (prompt injection). These layers hold whatever SQL it sends.
-
-1. **The database role is the real boundary.** The server never gives the agent more than the role it connects as, so connect as a role that can read only what the agent should see. Row-level security applies as usual.
-2. **The role is checked.** On a connection's first use, the server audits what its role can do beyond reading, and its session user too when the connection sets another role, since `RESET ROLE` returns to it. [Role check](docs/configuration.md#role-check) lists the findings.
-   - A finding that reaches outside the read-only transaction is critical: superuser, directly or through a superuser role; membership in `pg_execute_server_program` or `pg_write_server_files`; `EXECUTE` on a function that acts outside the transaction, such as `dblink*`, or writes in place, such as pg_surgery's `heap_force_*`. The rest are warnings: the read-only transaction refuses table writes, for one.
-   - With `role_check: strict`, a connection with a critical finding is refused.
-   - With `warn` (the default), the findings come with the first response on the connection, and `pg_list_connections` always shows them. Over `--http`, where clients share the server, that first response goes to whichever client calls first.
-   - The report holds until the server restarts: if a connection's DSN comes to name another user, database or host, its new database connections fail until then.
-3. **SQL is parsed, not pattern-matched.** `pg_query` parses each statement with the Postgres parser (libpg_query).
-   - It accepts exactly one `SELECT` (with `VALUES`, `TABLE` and set operations), `EXPLAIN [ANALYZE]` of one, or `SHOW`. `pg_explain` accepts the `SELECT` alone, and checks the `EXPLAIN` it wraps around it too.
-   - Everything else is rejected: DML, DDL, `SET`, `COPY`, `DO`, `CALL`, `MERGE`, `PREPARE`, `LOCK`, transaction control, data-modifying `WITH`, `SELECT INTO` and `FOR UPDATE`/`FOR SHARE`.
-   - Calls to a denylist of known functions are rejected too, anywhere in the statement and however spelled (`(x).f` included): functions that reach outside the transaction, write in place, take a transaction id or seed `random()` where neither `READ ONLY` nor the rollback reaches, run SQL passed as text or read a relation passed by name. Among them:
-     - `dblink*`, `pg_background*` and `lo_*`
-     - server-file functions such as `pg_read_file`, and pg_logicalinspect's `pg_get_logical_snapshot_*`
-     - functions that signal other backends, such as `pg_terminate_backend`, and `pg_log_*`: `pg_log_backend_memory_contexts` signals another backend, `pg_log_standby_snapshot` writes WAL
-     - pg_surgery's `heap_force_*`, `pg_truncate_visibility_map`, and BRIN and GIN index maintenance (`brin_summarize_new_values`, `brin_summarize_range`, `brin_desummarize_range`, `gin_clean_pending_list`)
-     - pg_prewarm's `autoprewarm_*` (`autoprewarm_dump_now` writes a server file) and `pg_prewarm`, which reads a relation into shared buffers, evicting the pages other sessions use
-     - pg_buffercache's `pg_buffercache_evict*`, which evict those pages, writing out the dirty ones
-     - `txid_current`, `pg_current_xact_id` and the catalog writers, which take a transaction id too (`pg_import_system_collations`, `pg_restore_*`, `pg_clear_*`)
-     - `set_config`, `setseed`, `nextval`/`setval`, advisory locks, replication-slot and backup functions, and statistics resets
-     - pgsql-http's request functions (`http`, `http_get`, `http_post`, ...) and any function in the `net` (pg_net), `aws_s3` and `aws_lambda` schemas
-     - `query_to_xml`, `table_to_xml` and others
-   - References to the catalogs that disclose server configuration files or credentials are rejected too: `pg_hba_file_rules`, `pg_ident_file_mappings`, `pg_file_settings`, `pg_authid`, `pg_shadow`, the user-mapping catalogs and views, and `pg_subscription`.
-   - The parser sees only the names a statement spells, so a `schema` argument or `default_schema` naming `net`, `aws_s3` or `aws_lambda` is refused as the `search_path` too.
-   - With neither, the query runs under the session's own `search_path`, which the server does not check (`"$user", public` by default; a setting of the role, the database or the DSN can change it): if it names one of those schemas, their functions can be called unqualified.
-   - The other tools send only SQL the server writes, with the agent's names as bound parameters or, in `pg_profile`'s sample, as quoted identifiers. `pg_profile` refuses the catalogs above, whose statistics hold their values.
-4. **Every statement runs read-only and is rolled back.**
-   - Each one runs alone, over the extended protocol, in a `READ ONLY` transaction that is always rolled back, with `statement_timeout` and `lock_timeout` set for that transaction only.
-   - Neither the `READ ONLY` transaction nor the rollback stops a C function that writes in place, such as `pg_log_standby_snapshot`'s WAL record, pg_surgery's `heap_force_kill` or `brin_summarize_new_values`, nor one that takes a transaction id for good, such as `txid_current`, or changes session state past the rollback, such as `setseed`'s seed for `random()`: the parser denies those by name.
-   - Sessions start with `default_transaction_read_only=on`, which no DSN can turn off, and `client_encoding=UTF8`. Behind PgBouncer, listing the former in `ignore_startup_parameters` drops it, and the `READ ONLY` transaction alone remains (see [PgBouncer](docs/configuration.md#pgbouncer)).
-   - `standard_conforming_strings` is forced on, so Postgres reads the SQL exactly as the parser did.
-5. **Results are bounded.**
-   - Rows past `max_rows` or `max_bytes` are not kept, and the rest of the query is cancelled on the server. A single server message larger than `max_bytes` plus 1 MiB is refused unread (see [Defaults](docs/configuration.md#defaults)).
-   - A result whose output would exceed 10 KB is written to a CSV file only you can read (mode 0600), and summarized (see [Large results](docs/usage.md#large-results)).
-   - No tool result, resource read or resource listing exceeds 10 KB, errors and the role check's findings included: the findings take at most half, and an error too long for the rest is cut in the middle. The one exception is the [confirmation](docs/usage.md#confirmation) question a client on revision 2026-07-28 gets as the result of the call: it shows the user, not the agent, the whole statement and its params, however long.
-   - Protocol errors keep to 10 KB too, except those the MCP SDK returns before pgglass sees the request, which only a client that does not follow the protocol gets (see [Errors](docs/usage.md#errors)).
-   - `pg_schema` reads at most 500 schemas or relations per listing from the catalog, and cuts long comments and definitions as it reads them (see [Explore the schema](docs/usage.md#explore-the-schema)).
-   - `pg_diff_schema` reads each side's schema as one catalog value, which `max_bytes` bounds too: a larger schema fails, naming its side, until `max_bytes` is raised.
-   - `pg_explain` reads the plan, which grows with each partition a query scans and which it only summarizes, with 16 MiB in place of a smaller `max_bytes`; so do `pg_search` and `pg_profile` for their matches and column statistics, which they do not cut.
-6. **Calls are audited.** Each tool call and resource read writes one JSON line to stderr, one per connection when `pg_query` fans out or the resources are listed: tool, connection (`left,right` for `pg_diff_schema`), SQL hash and length, duration, rows, outcome and SQLSTATE.
-   - SQL text, parameters and values are never logged.
-   - A call to a tool the server does not have writes one too, with the name it gave cut to 63 bytes.
-   - A call that asks the user to [confirm](docs/usage.md#confirmation) writes its line once answered. When the client fails to ask, nothing runs: before revision 2026-07-28 the call writes a single `error` line, with no connection or SQL hash even for a fan-out; from it, as when the client never calls back with the answer, no line is written.
-7. **HTTP stays on this machine unless told otherwise.**
-   - `--http` listens on loopback by default, where any local process can call it.
-   - Any other address needs a bearer token, `PGGLASS_HTTP_TOKEN`, that every request must then carry; set it on loopback too on a machine others use.
-   - A request from a web page on another origin, or to a loopback address under another host name (DNS rebinding), is refused, so a site open in a browser cannot call the tools.
-8. **A connection can ask first.** With `confirm` set, `pg_query`, and `pg_explain` with `analyze`, show the user the statement, its `params` and the `search_path` it runs under through the client, and run only if they accept; a client that cannot ask is refused (see [Confirmation](docs/usage.md#confirmation)).
-
-What these layers do not cover:
-
-- The parser knows names, not what is behind them, and the denylist holds only known functions: an extension can add another way out. A function the role may execute that calls `dblink` or another escape internally, typically `SECURITY DEFINER`, acts outside the transaction, and a view over a denied catalog reads it. Grant `EXECUTE` and `SELECT` with that in mind; the role check flags only the functions [it lists](docs/configuration.md#role-check).
-- Reading is the point: whatever the role can `SELECT`, the agent can read and repeat. That includes what Postgres shows the role about the server: superusers and members of `pg_read_all_settings` read every setting, `primary_conninfo` and `archive_command` included (`SHOW`, `current_setting`, `pg_settings`); superusers and members of `pg_read_all_stats` read other sessions' SQL (`pg_stat_activity`, `pg_stat_statements`); superusers read large objects (`pg_largeobject`).
-- A superuser connection has no role boundary. The role check flags it as critical, so `strict` refuses it; under `warn`, the parser and the read-only transaction are all that stand between the agent and the server's files and programs, and against functions that write in place, such as pg_surgery's, the parser's denylist alone. The denied catalogs are not the only place secrets show either: column statistics in `pg_stats` can hold password verifiers. Use `strict`, or a role that is not a superuser.
-- A query may use the database's CPU and I/O, and hold `ACCESS SHARE` locks that delay DDL, until `statement_timeout` ends it.
-- `--http` serves plain HTTP. To reach it from elsewhere, put a proxy that terminates TLS in front of it, and set `PGGLASS_HTTP_TOKEN` even when pgglass listens on loopback behind the proxy, whose requests it cannot tell from local ones.
+Upgrading from mcp-postgres? [Upgrading](docs/upgrading.md) lists what to move and rename.
 
 ## Documentation
 
@@ -205,9 +263,12 @@ What these layers do not cover:
 |-----|-------------|
 | [Usage Guide](docs/usage.md) | Tools, arguments, formats, large results, errors |
 | [Configuration](docs/configuration.md) | Credential sources, connection options, defaults, PgBouncer, command line, doctor, Streamable HTTP |
-| [Extending](docs/extending.md) | How to add custom credential sources (Vault, GCP, etc.) |
-| [Contributing](CONTRIBUTING.md) | Branch strategy, commit conventions, development workflow |
+| [Safety model](docs/safety-model.md) | The safety model in full: each layer, and what the layers do not cover |
+| [How it's built](docs/architecture.md) | The packages, the path of one tool call through them, and how pgglass is tested |
 | [Token benchmark](docs/benchmark.md) | What pgglass puts in an agent's context, measured, and how other servers' tool lists compare |
+| [Extending](docs/extending.md) | How to add custom credential sources (Vault, GCP, etc.) |
+| [Upgrading](docs/upgrading.md) | Moving to pgglass from its earlier name: config location, client entry, permission rules, spill files |
+| [Contributing](CONTRIBUTING.md) | Branch strategy, commit conventions, development workflow |
 | [Releasing](docs/releasing.md) | What a release publishes, cutting one, the MCP Registry, platforms |
 
 ## License
