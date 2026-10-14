@@ -134,7 +134,10 @@ func TestConfirmRefusesClientsWithoutElicitation(t *testing.T) {
 	}
 }
 
-// A client that fails to ask ends the call itself: nothing runs or is audited.
+// A client that fails to ask ends the call itself, and nothing runs. Before
+// revision 2026-07-28 the server asks during the call, which then fails and
+// writes an error line; from it, the client never calls back with an answer,
+// so the call writes none.
 func TestConfirmRunsNothingWhenTheClientFailsToAsk(t *testing.T) {
 	cfg := newConfig(config.RoleCheckWarn, map[string]config.Connection{"prod": confirmed(unusedDSN)})
 	for _, version := range mcp.SupportedProtocolVersions() {
@@ -147,8 +150,16 @@ func TestConfirmRunsNothingWhenTheClientFailsToAsk(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "no user at the keyboard") {
 			t.Errorf("%s: result %+v, error %v; want the client's error", version, res, err)
 		}
-		if lines := s.auditLines(t); len(lines) != 0 {
-			t.Errorf("%s: audit lines %+v", version, lines)
+		var want []auditLine
+		if version < "2026-07-28" {
+			want = []auditLine{{Msg: "tool call", Tool: "pg_query", Outcome: "error"}}
+		}
+		lines := s.auditLines(t)
+		for i := range lines {
+			lines[i].DurationMS = nil
+		}
+		if !slices.Equal(lines, want) {
+			t.Errorf("%s: audit lines %+v, want %+v", version, lines, want)
 		}
 	}
 }

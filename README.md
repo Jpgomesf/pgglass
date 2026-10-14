@@ -183,7 +183,8 @@ The calling agent is treated as untrusted: instructions can reach it through the
    - `pg_explain` reads the plan, which grows with each partition a query scans and which it only summarizes, with 16 MiB in place of a smaller `max_bytes`.
 6. **Calls are audited.** Each tool call and resource read writes one JSON line to stderr, one per connection when `pg_query` fans out or the resources are listed: tool, connection (`left,right` for `pg_diff_schema`), SQL hash and length, duration, rows, outcome and SQLSTATE.
    - SQL text, parameters and values are never logged.
-   - A call that asks the user to [confirm](docs/usage.md#confirmation) writes its line once answered: when the client fails to ask, or never calls back with the answer, nothing runs and no line is written.
+   - A call to a tool the server does not have writes one too, with the name it gave cut to 63 bytes.
+   - A call that asks the user to [confirm](docs/usage.md#confirmation) writes its line once answered, or once the client fails to ask: when a client on revision 2026-07-28 never calls back with the answer, nothing runs and no line is written.
 7. **HTTP stays on this machine unless told otherwise.**
    - `--http` listens on loopback by default, where any local process can call it.
    - Any other address needs a bearer token, `PGGLASS_HTTP_TOKEN`, that every request must then carry; set it on loopback too on a machine others use.

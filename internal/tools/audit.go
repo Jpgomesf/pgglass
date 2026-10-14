@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -11,8 +12,10 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/jpgomesf/pgglass/internal/config"
 	"github.com/jpgomesf/pgglass/internal/engine"
 	"github.com/jpgomesf/pgglass/internal/guard"
+	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
 const (
@@ -50,6 +53,17 @@ func (h *Handlers) audit(c *call, err error) {
 		slog.String("outcome", outcome),
 		slog.String("sqlstate", sqlState),
 	)
+}
+
+func (h *Handlers) auditCallErrors(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		start := time.Now()
+		res, err := next(ctx, method, req)
+		if toolCall, ok := req.(*mcp.CallToolRequest); ok && err != nil {
+			h.audit(&call{tool: spill.CutMiddle(toolCall.Params.Name, config.MaxNameBytes), start: start}, err)
+		}
+		return res, err
+	}
 }
 
 func sqlHash(sql string) string {
