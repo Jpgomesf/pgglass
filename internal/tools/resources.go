@@ -139,9 +139,12 @@ func (h *Handlers) withTableResources(next mcp.MethodHandler) mcp.MethodHandler 
 func (h *Handlers) withinInlineLimit(next mcp.MethodHandler) mcp.MethodHandler {
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		res, err := next(ctx, method, req)
-		var wire *jsonrpc.Error
-		if !errors.As(err, &wire) {
+		wire, ok := errors.AsType[*jsonrpc.Error](err)
+		if !ok {
 			return res, err
+		}
+		if wire != err {
+			wire = &jsonrpc.Error{Code: wire.Code, Message: err.Error()}
 		}
 		if read, ok := req.(*mcp.ReadResourceRequest); ok && len(wire.Data) > 0 {
 			wire.Data = uriData(read.Params.URI, h.spill.InlineMaxBytes-len(wire.Message))
@@ -149,7 +152,7 @@ func (h *Handlers) withinInlineLimit(next mcp.MethodHandler) mcp.MethodHandler {
 		if room := h.spill.InlineMaxBytes - len(wire.Data); len(wire.Message) > room {
 			wire.Message = spill.CutMiddle(wire.Message, room)
 		}
-		return res, err
+		return res, wire
 	}
 }
 
