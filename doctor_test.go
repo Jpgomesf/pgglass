@@ -49,8 +49,10 @@ func TestVerdict(t *testing.T) {
 }
 
 func TestSummarizeListsEachCheckThenCountsTheFailures(t *testing.T) {
-	readonly := true
-	cfg := config.Config{Defaults: config.Defaults{RoleCheck: "strict", Readonly: &readonly}}
+	cfg, err := config.Parse([]byte(`{"defaults": {"role_check": "strict", "readonly": true}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
 	report, failed := summarize("/etc/pgglass.json", cfg, []check{
 		{name: "a", report: preflight.Report{Role: "reader"}},
 		{name: "b", err: errors.New("connect: refused")},

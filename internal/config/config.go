@@ -198,7 +198,6 @@ func Parse(data []byte) (Config, error) {
 	return cfg, nil
 }
 
-// checkNames reports every connection name longer than MaxNameBytes.
 func checkNames(conns map[string]Connection) error {
 	var errs []error
 	for _, name := range slices.Sorted(maps.Keys(conns)) {
