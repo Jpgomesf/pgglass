@@ -1,6 +1,7 @@
 package tools_test
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -91,17 +93,53 @@ func (s *session) readTableFails(t *testing.T, uri string) jsonrpc.Error {
 	return *wire
 }
 
-func TestResourcesListTheTablesOfEveryConnectionByName(t *testing.T) {
+// resources/list opens no connection: it names the tables of the connections
+// that tool calls and resource reads have used, by connection name.
+func TestResourcesListTheTablesOfTheConnectionsInUseByName(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
+	if got := s.tableResources(t); len(got) != 0 || len(s.auditLines(t)) != 0 {
+		t.Errorf("resources/list before any call = %v, audit log:\n%s\nwant no resources and no connection opened", got, s.audit)
+	}
+	s.ok(t, "pg_query", args("super", "SELECT 1 AS one"))
+	if got, want := s.tableResources(t), appResources("super"); !reflect.DeepEqual(got, want) {
+		t.Errorf("resources/list after a call on super:\n%v\nwant\n%v", got, want)
+	}
+	s.readTable(t, "pgglass://clean/app/orders")
+	s.ok(t, "pg_schema", map[string]any{"connection": "leaky"})
 	want := slices.Concat(appResources("clean"), appResources("leaky"), appResources("super"))
 	if got := s.tableResources(t); !reflect.DeepEqual(got, want) {
-		t.Errorf("resources/list:\n%v\nwant\n%v", got, want)
+		t.Errorf("resources/list after calls on every connection:\n%v\nwant\n%v", got, want)
 	}
-	for _, conn := range []string{"leaky", "super"} {
-		if got := s.ok(t, "pg_query", args(conn, "SELECT 1 AS one")); !strings.HasPrefix(got, "role check: role ") ||
-			!strings.HasSuffix(got, "\n\none\n1\n(1 row)") {
-			t.Errorf("first pg_query on %s after resources/list:\n%s\nwant the role check's findings first", conn, got)
+}
+
+// When a call first uses a connection, the server tells the client that the
+// resource list changed, on every protocol version, so that it lists the
+// connection's tables.
+func TestTheResourceListChangesWhenACallFirstUsesAConnection(t *testing.T) {
+	t.Parallel()
+	cfg := newConfig(config.RoleCheckOff, map[string]config.Connection{"clean": appConns(t)["clean"]})
+	for _, version := range []string{mcp.SupportedProtocolVersions()[0], "2025-11-25", "2024-11-05"} {
+		changed := make(chan struct{}, 1)
+		s := connectClient(t, cfg, t.TempDir(), version, &mcp.ClientOptions{
+			ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {
+				select {
+				case changed <- struct{}{}:
+				default:
+				}
+			},
+		})
+		if got := s.tableResources(t); len(got) != 0 {
+			t.Errorf("%s: resources/list before any call = %v", version, got)
+		}
+		s.ok(t, "pg_query", args("clean", "SELECT 1 AS one"))
+		select {
+		case <-changed:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%s: no notifications/resources/list_changed within 10s of the first call on clean", version)
+		}
+		if got, want := s.tableResources(t), appResources("clean"); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: resources/list after the notification:\n%v\nwant\n%v", version, got, want)
 		}
 	}
 }
@@ -117,12 +155,12 @@ func TestResourceListingKeepsTheFirst200RelationsOfEachConnection(t *testing.T) 
 		CREATE TABLE c.past_the_cap (id int);`)
 	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{"db": direct(testdb.DSN(t, testdb.Superuser, name))}))
 
+	if got := sizes.ReplaceAllString(s.readTable(t, "pgglass://db/c/past_the_cap"), "SIZE"); got != "c.past_the_cap: table, SIZE\n  id integer" {
+		t.Errorf("a table past the cap, through the template:\n%s", got)
+	}
 	names := resourceNames(s.tableResources(t))
 	if len(names) != 200 || names[0] != "db: a.t001" || names[149] != "db: a.t150" || names[150] != "db: b.t001" || names[199] != "db: b.t050" {
 		t.Errorf("%d resources: %v", len(names), names)
-	}
-	if got := sizes.ReplaceAllString(s.readTable(t, "pgglass://db/c/past_the_cap"), "SIZE"); got != "c.past_the_cap: table, SIZE\n  id integer" {
-		t.Errorf("a table past the cap, through the template:\n%s", got)
 	}
 }
 
@@ -167,6 +205,7 @@ func TestTableResourcesEscapeNamesThatNeedIt(t *testing.T) {
 		CREATE VIEW "Odd Schema"."café" AS SELECT 1 AS one;`)
 	cfg := newConfig(config.RoleCheckOff, map[string]config.Connection{"my db": direct(testdb.DSN(t, testdb.Superuser, name))})
 	s, other := connect(t, cfg), connect(t, cfg)
+	s.ok(t, "pg_schema", map[string]any{"connection": "my db"})
 
 	want := []resourceView{
 		{URI: "pgglass://my%20db/Odd%20Schema/a%2Fb%20c%3F%23%25", Name: "my db: Odd Schema.a/b c?#%", Description: "table", MIMEType: "text/plain"},
@@ -183,10 +222,12 @@ func TestTableResourcesEscapeNamesThatNeedIt(t *testing.T) {
 	}
 }
 
+// Whether the server or the SDK finds that a URI names no table, the read is
+// resource not found, and writes its audit line.
 func TestReadingAMissingTableIsResourceNotFound(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckOff, appConns(t)))
-	for _, uri := range []string{
+	uris := []string{
 		"pgglass://nope/app/orders",
 		"pgglass://clean/nope/orders",
 		"pgglass://clean/app/nope",
@@ -197,7 +238,9 @@ func TestReadingAMissingTableIsResourceNotFound(t *testing.T) {
 		"pgglass://clean/app/orders/columns",
 		"pgglass://clean/app/%zz",
 		"postgres://clean/app/orders",
-	} {
+		"PGGLASS://clean/app/orders",
+	}
+	for _, uri := range uris {
 		wire := s.readTableFails(t, uri)
 		var data struct {
 			URI string `json:"uri"`
@@ -206,14 +249,20 @@ func TestReadingAMissingTableIsResourceNotFound(t *testing.T) {
 			t.Errorf("resources/read %s = %d %q %s, want resource not found", uri, wire.Code, wire.Message, wire.Data)
 		}
 	}
+	lines := s.auditLines(t)
+	for _, line := range lines {
+		if line.Tool != "resource" || (line.Outcome != "error" && line.Outcome != "db_error") {
+			t.Errorf("audit line %+v, want a failed resource read", line)
+		}
+	}
+	if len(lines) != len(uris) {
+		t.Errorf("%d audit lines for %d reads:\n%s", len(lines), len(uris), s.audit)
+	}
 }
 
 func TestRoleCheckStrictKeepsRefusedConnectionsOutOfTableResources(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckStrict, appConns(t)))
-	if got, want := s.tableResources(t), appResources("clean"); !reflect.DeepEqual(got, want) {
-		t.Errorf("resources/list under role_check strict:\n%v\nwant\n%v", got, want)
-	}
 	for _, conn := range []string{"leaky", "super"} {
 		wire := s.readTableFails(t, "pgglass://"+conn+"/app/orders")
 		prefix := fmt.Sprintf("connection %q refused (role_check strict): its role can do more than read.\n", conn)
@@ -223,6 +272,9 @@ func TestRoleCheckStrictKeepsRefusedConnectionsOutOfTableResources(t *testing.T)
 	}
 	if got := s.readTable(t, "pgglass://clean/app/orders"); !strings.HasPrefix(got, "app.orders: table, ") {
 		t.Errorf("resources/read on ro_clean:\n%s", got)
+	}
+	if got, want := s.tableResources(t), appResources("clean"); !reflect.DeepEqual(got, want) {
+		t.Errorf("resources/list under role_check strict:\n%v\nwant\n%v", got, want)
 	}
 	outcomes := map[string]string{}
 	for _, line := range s.auditLines(t) {
@@ -277,6 +329,8 @@ func TestResourceListingSkipsAConnectionThatFails(t *testing.T) {
 		"clean": appConns(t)["clean"],
 		"down":  direct(unusedDSN),
 	}))
+	s.ok(t, "pg_query", args("clean", "SELECT 1 AS one"))
+	s.fails(t, "pg_query", args("down", "SELECT 1 AS one"))
 	if got, want := s.tableResources(t), appResources("clean"); !reflect.DeepEqual(got, want) {
 		t.Errorf("resources/list with a connection down:\n%v\nwant\n%v", got, want)
 	}
@@ -284,7 +338,9 @@ func TestResourceListingSkipsAConnectionThatFails(t *testing.T) {
 	for _, line := range s.auditLines(t) {
 		outcomes[line.Tool+" "+line.Connection] = line.Outcome
 	}
-	if want := map[string]string{"resource_list clean": "ok", "resource_list down": "db_error"}; !reflect.DeepEqual(outcomes, want) {
+	if want := map[string]string{
+		"pg_query clean": "ok", "pg_query down": "db_error", "resource_list clean": "ok", "resource_list down": "db_error",
+	}; !reflect.DeepEqual(outcomes, want) {
 		t.Errorf("audit outcomes = %v, want %v", outcomes, want)
 	}
 }
@@ -294,6 +350,7 @@ func TestResourceListIsCached(t *testing.T) {
 	const name = "tools_resources_cache"
 	testdb.CreateDatabase(t, name, "CREATE TABLE before_listing (id int)")
 	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{"db": direct(testdb.DSN(t, testdb.Superuser, name))}))
+	s.ok(t, "pg_schema", map[string]any{"connection": "db"})
 	want := []string{"db: public.before_listing"}
 	if got := resourceNames(s.tableResources(t)); !slices.Equal(got, want) {
 		t.Fatalf("first listing: %v", got)
@@ -314,14 +371,14 @@ func TestTableResourcesWorkOnEveryProtocolVersion(t *testing.T) {
 	cfg := newConfig(config.RoleCheckOff, map[string]config.Connection{"clean": appConns(t)["clean"]})
 	for _, version := range mcp.SupportedProtocolVersions() {
 		s := connectAt(t, cfg, t.TempDir(), version)
-		if got, want := s.tableResources(t), appResources("clean"); !reflect.DeepEqual(got, want) {
-			t.Errorf("%s: resources/list:\n%v", version, got)
-		}
 		if res, err := s.ListResourceTemplates(t.Context(), nil); err != nil || len(res.ResourceTemplates) != 1 {
 			t.Errorf("%s: resources/templates/list = %+v, %v", version, res, err)
 		}
 		if got := s.readTable(t, "pgglass://clean/app/orders"); !strings.HasPrefix(got, "app.orders: table, ") {
 			t.Errorf("%s: resources/read:\n%s", version, got)
+		}
+		if got, want := s.tableResources(t), appResources("clean"); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: resources/list:\n%v", version, got)
 		}
 	}
 }
@@ -329,16 +386,17 @@ func TestTableResourcesWorkOnEveryProtocolVersion(t *testing.T) {
 func TestTableResourcesWriteAuditLinesWithoutSQL(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{"clean": appConns(t)["clean"]}))
-	s.tableResources(t)
 	s.readTable(t, "pgglass://clean/app/orders")
+	s.tableResources(t)
 	s.readTableFails(t, "pgglass://clean/app/nope")
 	s.readTableFails(t, "pgglass://nope/app/orders")
 	s.readTableFails(t, "pgglass://clean/app/orders/columns")
 
 	want := []auditLine{
-		{Msg: "tool call", Tool: "resource_list", Connection: "clean", Rows: 7, Outcome: "ok"},
 		{Msg: "tool call", Tool: "resource", Connection: "clean", Outcome: "ok"},
+		{Msg: "tool call", Tool: "resource_list", Connection: "clean", Rows: 7, Outcome: "ok"},
 		{Msg: "tool call", Tool: "resource", Connection: "clean", Outcome: "db_error"},
+		{Msg: "tool call", Tool: "resource", Outcome: "error"},
 		{Msg: "tool call", Tool: "resource", Outcome: "error"},
 	}
 	lines := s.auditLines(t)

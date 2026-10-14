@@ -3,9 +3,10 @@
 // and the table resources, pgglass://<connection>/<schema>/<table>.
 //
 // Every tool failure is a tool result with IsError set, never a protocol
-// error; a resource read fails with a JSON-RPC error. Every call writes one
-// JSON audit line, or one per connection when pg_query fans out or the
-// resources are listed, that holds no SQL text, parameter or value.
+// error; a resource read fails with a JSON-RPC error. Every tool call and
+// resource read writes one JSON audit line, or one per connection when
+// pg_query fans out or the resources are listed, that holds no SQL text,
+// parameter or value; a call that asks the user writes it once answered.
 package tools
 
 import (
@@ -57,8 +58,10 @@ func New(cfg config.Config, eng *engine.Manager, store *spill.Store, auditLog io
 
 // NewServer returns an MCP server, named pgglass, that exposes the tools
 // and table resources of h and tells clients how to use the tools well.
-// Served over HTTP, it keeps no sessions, so only a client on revision
-// 2026-07-28 or later can confirm a statement.
+// It lists the tables of the connections that calls have used, and tells
+// clients when a call first uses one. Served over HTTP, it keeps no
+// sessions, so only a client on revision 2026-07-28 or later can confirm a
+// statement.
 func NewServer(h *Handlers, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:        "pgglass",
@@ -66,7 +69,10 @@ func NewServer(h *Handlers, version string) *mcp.Server {
 		Description: "Read-only PostgreSQL for AI agents across many databases, enforced by the server",
 		Version:     version,
 		WebsiteURL:  "https://github.com/Jpgomesf/pgglass",
-	}, &mcp.ServerOptions{Instructions: instructions})
+	}, &mcp.ServerOptions{
+		Instructions: instructions,
+		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}, Resources: &mcp.ResourceCapabilities{ListChanged: true}},
+	})
 	s.AddTool(listConnectionsTool, h.handle("pg_list_connections", h.listConnections))
 	s.AddTool(queryTool, h.handle("pg_query", h.query))
 	s.AddTool(schemaTool, h.handle("pg_schema", h.schema))
@@ -76,7 +82,8 @@ func NewServer(h *Handlers, version string) *mcp.Server {
 	s.AddTool(explainTool, h.handle("pg_explain", h.explain))
 	s.AddTool(healthTool, h.handle("pg_health", h.health))
 	s.AddResourceTemplate(tableTemplate, h.readTable)
-	s.AddReceivingMiddleware(h.withTableResources, h.withinInlineLimit)
+	s.AddReceivingMiddleware(h.withTableResources, h.withinInlineLimit, h.auditReads)
+	h.checks.onFirstUse = func() { s.AddResourceTemplate(tableTemplate, h.readTable) }
 	return s
 }
 

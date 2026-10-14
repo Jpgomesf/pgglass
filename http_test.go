@@ -365,7 +365,7 @@ func TestHTTPShutdownEndsListenStreams(t *testing.T) {
 	t.Setenv(authEnv, "")
 	srv := startHTTP(t, writeConfig(t, connections(map[string]any{})))
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "test"}, &mcp.ClientOptions{
-		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) {},
+		ResourceListChangedHandler: func(context.Context, *mcp.ResourceListChangedRequest) {},
 	})
 	session, err := client.Connect(t.Context(), &mcp.StreamableClientTransport{Endpoint: srv.url}, nil)
 	if err != nil {
@@ -395,6 +395,61 @@ func TestHTTPRefusesToListenBeyondLoopbackWithoutAToken(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Errorf("refusing took %s", elapsed)
+	}
+}
+
+func TestListenNetwork(t *testing.T) {
+	for addr, want := range map[string]string{
+		"0.0.0.0:8411":           "tcp4",
+		"127.0.0.1:8411":         "tcp4",
+		"192.168.1.20:8411":      "tcp4",
+		"[::ffff:0.0.0.0]:8411":  "tcp4",
+		"[::]:8411":              "tcp",
+		"[::1]:8411":             "tcp",
+		"[fe80::1%lo0]:8411":     "tcp",
+		"localhost:8411":         "tcp",
+		"db-tools.internal:8411": "tcp",
+	} {
+		if got := listenNetwork(addr); got != want {
+			t.Errorf("listenNetwork(%q) = %s, want %s", addr, got, want)
+		}
+	}
+}
+
+// --http with an IPv4 address listens on IPv4 alone: 0.0.0.0 is every IPv4
+// address of the machine, not every IPv6 address as well.
+func TestHTTPListensOnIPv4AloneForTheIPv4Wildcard(t *testing.T) {
+	isolateHome(t)
+	t.Setenv(authEnv, testToken)
+	logs := &lockedBuffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, []string{"--config", writeConfig(t, connections(map[string]any{})), "--http", "0.0.0.0:0"}, strings.NewReader(""), io.Discard, logs)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	url := awaitURL(logs)
+	if url == "" {
+		t.Fatalf("not listening after 10s\nstderr:\n%s", logs)
+	}
+	_, port, err := net.SplitHostPort(strings.TrimSuffix(strings.TrimPrefix(url, "http://"), mcpPath))
+	if err != nil {
+		t.Fatalf("listening URL %q: %v", url, err)
+	}
+	if want := "http://0.0.0.0:" + port + mcpPath; url != want {
+		t.Errorf("listening on %s, want %s", url, want)
+	}
+	if conn, err := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", port), 2*time.Second); err != nil {
+		t.Errorf("IPv4 connection refused: %v", err)
+	} else {
+		_ = conn.Close()
+	}
+	if conn, err := net.DialTimeout("tcp6", net.JoinHostPort("::1", port), 2*time.Second); err == nil {
+		_ = conn.Close()
+		t.Errorf("--http 0.0.0.0:%s also accepts IPv6 connections, on [::1]:%s", port, port)
 	}
 }
 

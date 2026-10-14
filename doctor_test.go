@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -163,6 +164,35 @@ func TestDoctorWarnsAboutTheDeprecatedReadonlyKey(t *testing.T) {
 		"warn config: readonly is deprecated and ignored: the server is always read-only\n0 failed, 0 passed\n"
 	if code != 0 || out != want {
 		t.Errorf("doctor = %d, %q; want 0 and\n%s", code, out, want)
+	}
+}
+
+// A relative dotenv_path, and the default .env, resolve against the working
+// directory, not against the directory of the config file.
+func TestDoctorReadsRelativeDotenvPathsInTheWorkingDirectory(t *testing.T) {
+	path := writeConfig(t, connections(map[string]any{
+		"default": map[string]any{"source": "dotenv", "dsn_env_var": "DATABASE_URL"},
+		"named":   map[string]any{"source": "dotenv", "dotenv_path": "secrets.env", "dsn_env_var": "DATABASE_URL"},
+	}))
+	dsn := []byte("DATABASE_URL=postgres://ro_clean@" + refusedAddr(t) + "/app?sslmode=disable\n")
+	for _, name := range []string{".env", "secrets.env"} {
+		if err := os.WriteFile(filepath.Join(filepath.Dir(path), name), dsn, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Chdir(t.TempDir())
+	_, out, _ := runCommand(t, "doctor", "--config", path)
+	for conn, file := range map[string]string{"default": ".env", "named": "secrets.env"} {
+		if want := fmt.Sprintf("FAIL %s: credentials: connection %q (dotenv): open %s: no such file or directory\n", conn, conn, file); !strings.Contains(out, want) {
+			t.Errorf("doctor in another directory than the config's:\n%s\nwant %q", out, want)
+		}
+	}
+	t.Chdir(filepath.Dir(path))
+	_, out, _ = runCommand(t, "doctor", "--config", path)
+	for _, conn := range []string{"default", "named"} {
+		if !strings.Contains(out, "FAIL "+conn+": connect: ") {
+			t.Errorf("doctor in the config's directory:\n%s\nwant %s to read its DSN and fail to connect", out, conn)
+		}
 	}
 }
 

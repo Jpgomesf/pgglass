@@ -233,7 +233,7 @@ func TestCheckParams(t *testing.T) {
 
 func fakeChecks(mode string, results ...func() (preflight.Report, error)) (*roleChecks, *atomic.Int32) {
 	var calls atomic.Int32
-	rc := &roleChecks{mode: mode, conns: map[string]*roleCheck{}}
+	rc := &roleChecks{mode: mode, onFirstUse: func() {}, conns: map[string]*roleCheck{}, used: map[string]bool{}}
 	rc.audit = func(context.Context, string) (preflight.Report, error) {
 		n := int(calls.Add(1)) - 1
 		return results[min(n, len(results)-1)]()

@@ -17,7 +17,10 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-func TestMain(m *testing.M) { testdb.Main(m) }
+func TestMain(m *testing.M) {
+	guard.Warm()
+	testdb.Main(m)
+}
 
 type recorder struct{ got engine.Query }
 

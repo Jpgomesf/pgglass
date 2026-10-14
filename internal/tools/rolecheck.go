@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"fmt"
+	"maps"
+	"slices"
 	"sync"
 
 	"github.com/jpgomesf/pgglass/internal/config"
@@ -11,11 +13,13 @@ import (
 )
 
 type roleChecks struct {
-	mode  string
-	audit func(ctx context.Context, conn string) (preflight.Report, error)
+	mode       string
+	audit      func(ctx context.Context, conn string) (preflight.Report, error)
+	onFirstUse func()
 
 	mu    sync.Mutex
 	conns map[string]*roleCheck
+	used  map[string]bool
 }
 
 func newRoleChecks(mode string, eng *engine.Manager) *roleChecks {
@@ -24,7 +28,9 @@ func newRoleChecks(mode string, eng *engine.Manager) *roleChecks {
 		audit: func(ctx context.Context, conn string) (preflight.Report, error) {
 			return preflight.Audit(ctx, eng.Querier(conn))
 		},
-		conns: make(map[string]*roleCheck),
+		onFirstUse: func() {},
+		conns:      make(map[string]*roleCheck),
+		used:       make(map[string]bool),
 	}
 }
 
@@ -55,7 +61,24 @@ func (e *roleCheckError) Error() string { return roleCheckFailed + e.err.Error()
 func (e *roleCheckError) Unwrap() error { return e.err }
 
 func (rc *roleChecks) gate(ctx context.Context, conn string) (notice string, err error) {
+	rc.use(conn)
 	return rc.pass(ctx, conn, true)
+}
+
+func (rc *roleChecks) use(conn string) {
+	rc.mu.Lock()
+	first := !rc.used[conn]
+	rc.used[conn] = true
+	rc.mu.Unlock()
+	if first {
+		rc.onFirstUse()
+	}
+}
+
+func (rc *roleChecks) inUse() []string {
+	rc.mu.Lock()
+	defer rc.mu.Unlock()
+	return slices.Sorted(maps.Keys(rc.used))
 }
 
 func (rc *roleChecks) admit(ctx context.Context, conn string) error {

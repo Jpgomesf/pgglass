@@ -31,7 +31,7 @@ Connections (2):
 
 A connection's role is audited on its first use (see [role check](configuration.md#role-check)); from then on `pg_list_connections` shows the report. Past 10 KB, the list is written to a spill file, one line per row, like a large `pg_query` result. `confirm` marks a connection that asks the user before a statement runs on it (see [Confirmation](#confirmation)).
 
-The findings also start the first response on the connection, which keeps to 10 KB with them: they take at most half of it, as many lines as fit and then a line that points to `pg_list_connections`, and the rest of the response fits what they leave.
+The findings also start the first response on the connection, which keeps to 10 KB with them: they take at most half of it, as many lines as fit and then a line that points to `pg_list_connections`, and the rest of the response fits what they leave. Over [`--http`](configuration.md#streamable-http), clients share one server, so only the client that gets that first response sees them there; `pg_list_connections` shows them to every client.
 
 ## Explore the schema
 
@@ -176,7 +176,7 @@ search_path on prod-app: "app"
 - A fan-out asks once, naming the connections in `connections` that set `confirm`, except those whose `search_path` is refused: they fail as they would alone. Declined, the statement runs on none of them.
 - The client must support form elicitation. Without it, the call is refused before anything runs: `pg_query on prod-app requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation`.
 - From protocol revision 2026-07-28 the question comes back as the result of the call, and the client calls again with the answer; before it, the server asks the client during the call, which it can only do over stdio and for a client that declared form elicitation when it connected, whatever a call's `_meta` claims: over [`--http`](configuration.md#streamable-http), an older client is refused as one without form elicitation is. An answer holds only for the question it answers: a call that brings it back with another statement, other `params`, other connections or another `search_path` asks again.
-- The call writes its audit line once answered, `declined` when the user declines or cancels. A client that fails to ask ends the call with its own error: nothing runs, and no audit line is written.
+- The call writes its audit line once answered, `declined` when the user declines or cancels. A client that fails to ask ends the call with its own error, and one on revision 2026-07-28 may never call back with the answer: either way nothing runs, and no audit line is written.
 - The other tools do not ask: they run only SQL the server writes.
 
 ## Profile a table
@@ -265,7 +265,8 @@ replication	not a replica
 
 Every table, view, materialized view and foreign table is also an MCP resource, `pgglass://<connection>/<schema>/<table>`, each name percent-encoded as in `pgglass://my%20db/app/caf%C3%A9`. In Claude Code, type `@` and pick one, such as `@pgglass:pgglass://prod-app/app/orders`, to add the relation to the prompt as `pg_schema` describes it, in `text/plain`.
 
-- `resources/list` names, for each connection, the first 200 relations its role can read, by schema and then name: `prod-app: app.orders`, described by its kind, `table`. It checks the role of every connection and reads its catalog, all at once, so a client that lists resources when it connects opens every connection then. A connection that fails, or that `role_check: strict` refuses, is left out. Each connection's list is cached for 5 minutes.
+- `resources/list` names, for each connection a tool call or resource read has used since the server started, the first 200 relations its role can read, by schema and then name: `prod-app: app.orders`, described by its kind, `table`. So a listing opens no connection the agent has not used, and before the first call it names nothing. A connection that fails, or that `role_check: strict` refuses, is left out. Each connection's list is cached for 5 minutes.
+- When a call first uses a connection, the server sends `notifications/resources/list_changed`, so a client that listens for it lists the resources again. Over [`--http`](configuration.md#streamable-http), only a client on revision 2026-07-28 or later, which listens on a stream it keeps open, receives it.
 - The resource template `pgglass://{connection}/{schema}/{table}` reads any relation, listed or not.
 - A read goes through the role check and keeps to 10 KB, as `pg_schema` does: when it is the first response on a connection, the role check's findings start it. A listing cannot show them, so it leaves them to the next response.
 - An unknown connection, or a schema or relation that does not exist or that the role cannot read, is a resource-not-found error (code `-32602`, with the URI in its data, cut in the middle where it would take the error past 10 KB). A connection that `role_check: strict` refuses, or a database error, is an internal error (`-32603`) whose message is the error a tool would return.
@@ -299,7 +300,7 @@ The one exception is an error the MCP SDK returns before pgglass sees the reques
 
 ## Audit log
 
-Each tool call writes one JSON line to stderr, or one per connection for a [fan-out](#fan-out):
+Each tool call writes one JSON line to stderr, or one per connection for a [fan-out](#fan-out), once the user answers the [confirmation](#confirmation) it may ask for:
 
 ```json
 {"time":"2026-10-12T14:59:12.2-03:00","level":"INFO","msg":"tool call","tool":"pg_query","connection":"prod-app","sql_sha256":"46880a16e933","sql_len":30,"duration_ms":41,"rows":1,"truncated":false,"outcome":"ok","sqlstate":""}
@@ -307,7 +308,7 @@ Each tool call writes one JSON line to stderr, or one per connection for a [fan-
 
 `connection` names both connections of a `pg_diff_schema` call, `prod,staging`. `sql_sha256` is the first 12 hex digits of the statement's SHA-256, so repeated statements can be matched without logging them; it is empty, and `sql_len` 0, for tools that take no SQL. `outcome` is `ok`, `guard_reject`, `db_error` (with `sqlstate` when Postgres raised it), `preflight_block`, `error` (for example, invalid arguments) or `declined` (the user declined or cancelled a [confirmation](#confirmation)). SQL text, parameters and values are never logged.
 
-[Resources](#mention-tables-as-resources) are audited too: each read writes a line whose `tool` is `resource`, and each listing one line per connection whose `tool` is `resource_list`, with the relations it listed as `rows`.
+[Resources](#mention-tables-as-resources) are audited too: each read writes a line whose `tool` is `resource`, whether or not its URI names a table, and each listing one line per connection it lists, whose `tool` is `resource_list`, with the relations it listed as `rows`.
 
 ## Parallel calls
 

@@ -37,6 +37,12 @@ func violation(format string, args ...any) error {
 	return &Violation{Reason: fmt.Sprintf(format, args...)}
 }
 
+// Warm compiles the parser, as the first Check would: it takes a second or
+// more.
+func Warm() {
+	_ = Check("SELECT 1")
+}
+
 // Check returns nil if sql is one read-only SELECT, EXPLAIN of one, or SHOW
 // that touches no denied relation or function, and a *Violation otherwise.
 func Check(sql string) error {

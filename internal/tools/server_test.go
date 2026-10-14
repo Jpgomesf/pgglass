@@ -17,12 +17,16 @@ import (
 
 	"github.com/jpgomesf/pgglass/internal/config"
 	"github.com/jpgomesf/pgglass/internal/engine"
+	"github.com/jpgomesf/pgglass/internal/guard"
 	"github.com/jpgomesf/pgglass/internal/spill"
 	"github.com/jpgomesf/pgglass/internal/testdb"
 	"github.com/jpgomesf/pgglass/internal/tools"
 )
 
-func TestMain(m *testing.M) { testdb.Main(m) }
+func TestMain(m *testing.M) {
+	guard.Warm()
+	testdb.Main(m)
+}
 
 type lockedBuffer struct {
 	mu  sync.Mutex
@@ -274,6 +278,19 @@ func TestServerIdentifiesAsPgglass(t *testing.T) {
 		s := connectAt(t, newConfig(config.RoleCheckWarn, nil), t.TempDir(), version)
 		if info := s.InitializeResult().ServerInfo; info == nil || !reflect.DeepEqual(*info, want) {
 			t.Errorf("%s: server info = %+v, want %+v", version, info, want)
+		}
+	}
+}
+
+// The server advertises what it does: tools, whose list never changes, and
+// resources, whose list grows as calls use connections. It sends no log
+// messages.
+func TestServerAdvertisesWhatItDoes(t *testing.T) {
+	const want = `{"resources":{"listChanged":true},"tools":{}}`
+	for _, version := range []string{mcp.SupportedProtocolVersions()[0], "2025-11-25"} {
+		s := connectAt(t, newConfig(config.RoleCheckWarn, nil), t.TempDir(), version)
+		if got, err := json.Marshal(s.InitializeResult().Capabilities); err != nil || string(got) != want {
+			t.Errorf("%s: capabilities = %s, %v; want %s", version, got, err, want)
 		}
 	}
 }

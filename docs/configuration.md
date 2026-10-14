@@ -1,6 +1,6 @@
 # Configuration
 
-pgglass reads `~/.config/pgglass/config.json`, or the file `--config` names (see [Command line](#command-line)). `pgglass doctor` checks it (see [Doctor](#doctor)).
+pgglass reads `$XDG_CONFIG_HOME/pgglass/config.json` when `XDG_CONFIG_HOME` is set, else `~/.config/pgglass/config.json`, or the file `--config` names (see [Command line](#command-line)). `pgglass doctor` checks it (see [Doctor](#doctor)).
 
 ## Connection Structure
 
@@ -41,7 +41,7 @@ Read DSN from an environment variable at runtime.
 
 ### Dotenv File
 
-Read DSN from a `.env` file. Supports `KEY=VALUE`, quoted values, and comments.
+Read DSN from a `.env` file. Supports `KEY=VALUE`, quoted values, and comments. A relative `dotenv_path`, and `.env` when it is unset, resolve against the server's working directory, which the MCP client picks, not against the directory of `config.json`: give an absolute path to be sure.
 
 ```json
 {
@@ -242,7 +242,7 @@ pgglass --version                      print the version
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--config FILE` | `~/.config/pgglass/config.json` | The config file. Without `HOME`, it must be given |
+| `--config FILE` | `$XDG_CONFIG_HOME/pgglass/config.json`, else `~/.config/pgglass/config.json` | The config file. `XDG_CONFIG_HOME` counts only as an absolute path, as the XDG Base Directory Specification asks. Without it or `HOME`, `--config` must be given |
 | `--http ADDR` | — | Serve [Streamable HTTP](#streamable-http) at `http://ADDR/mcp` instead of stdio. A missing host is `127.0.0.1` and a missing port `8411`, so `--http :8411` serves `http://127.0.0.1:8411/mcp` |
 | `--version` | — | Print the version: the release's, else the module version Go records in the build, else `dev` |
 
@@ -271,7 +271,7 @@ A connection fails when its credentials do not resolve in time or parse, its ser
 {"time":"2026-10-13T19:30:24.07-03:00","level":"INFO","msg":"listening","url":"http://127.0.0.1:8411/mcp","token_required":false}
 ```
 
-- It listens on loopback unless `ADDR` names another host. Any other host, such as `0.0.0.0:8411`, needs `PGGLASS_HTTP_TOKEN`: pgglass refuses to start without it. Once it is set, on loopback too, every request must carry `Authorization: Bearer <token>`, or gets 401 with the challenge `WWW-Authenticate: Bearer realm="pgglass"`, and `error="invalid_token"` when it carried another token. The token is compared in constant time and never logged.
+- It listens on loopback unless `ADDR` names another host: `0.0.0.0:8411` listens on every IPv4 address, and `[::]:8411` on every IPv6 address and, on most systems, every IPv4 one too. Any host but loopback needs `PGGLASS_HTTP_TOKEN`: pgglass refuses to start without it. Once it is set, on loopback too, every request must carry `Authorization: Bearer <token>`, or gets 401 with the challenge `WWW-Authenticate: Bearer realm="pgglass"`, and `error="invalid_token"` when it carried another token. The token is compared in constant time and never logged.
 - Without a token, any process on the machine, whichever user runs it, can call the tools: on a machine others use, set one.
 - A request whose `Origin` header names anything but a loopback origin gets 403, as does a request to a loopback address whose `Host` names another host, which is how DNS rebinding reaches a local server. Clients other than browsers send no `Origin`.
 - It keeps no sessions: each request stands alone, so it speaks the newest MCP revision, 2026-07-28, and a restart breaks no client's session. A client on that revision that drops a request cancels its query at once. With no session to reach an older client through, the server cannot ask it for a [confirmation](usage.md#confirmation), and its cancellations do not reach the call, which runs until it ends or times out.

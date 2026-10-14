@@ -15,10 +15,14 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/jpgomesf/pgglass/internal/guard"
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-func TestMain(m *testing.M) { testdb.Main(m) }
+func TestMain(m *testing.M) {
+	guard.Warm()
+	testdb.Main(m)
+}
 
 type lockedBuffer struct {
 	mu  sync.Mutex
@@ -63,6 +67,7 @@ func isolateHome(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	t.Setenv("XDG_CONFIG_HOME", "")
 	return home
 }
 
@@ -132,7 +137,7 @@ func TestHelpPrintsTheUsage(t *testing.T) {
 			t.Errorf("%s = %d, %q, %q; want 0 and the usage", flag, code, out, errOut)
 		}
 	}
-	for _, want := range []string{"--config FILE", "~/.config/pgglass/config.json", "--http ADDR", "PGGLASS_HTTP_TOKEN", "doctor", "--version"} {
+	for _, want := range []string{"--config FILE", "$XDG_CONFIG_HOME/pgglass/config.json", "~/.config/pgglass/config.json", "--http ADDR", "PGGLASS_HTTP_TOKEN", "doctor", "--version"} {
 		if !strings.Contains(usage, want) {
 			t.Errorf("usage does not mention %s", want)
 		}
@@ -204,6 +209,36 @@ func TestConfigDefaultsToTheUserConfigDirectory(t *testing.T) {
 		if code, _, errOut := runCommand(t, args...); code != 1 || !strings.Contains(errOut, "no config file: pass --config FILE") {
 			t.Errorf("%v without HOME = %d, %q; want 1 and a request for --config", args, code, errOut)
 		}
+	}
+}
+
+// XDG_CONFIG_HOME, when it is an absolute path, moves the default config file
+// to $XDG_CONFIG_HOME/pgglass/config.json; a relative one is ignored, as the
+// XDG Base Directory Specification asks.
+func TestConfigDefaultsToXDGConfigHome(t *testing.T) {
+	home := isolateHome(t)
+	xdg := filepath.Join(t.TempDir(), "xdg")
+	path := filepath.Join(xdg, "pgglass", "config.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	if code, out, errOut := runCommand(t, "doctor"); code != 0 || !strings.HasPrefix(out, "config "+path+" ") {
+		t.Errorf("doctor with XDG_CONFIG_HOME = %d, %q, %q; want 0 and %s", code, out, errOut, path)
+	}
+	t.Setenv("HOME", "")
+	if code, out, errOut := runCommand(t, "doctor"); code != 0 || !strings.HasPrefix(out, "config "+path+" ") {
+		t.Errorf("doctor with XDG_CONFIG_HOME and without HOME = %d, %q, %q; want 0 and %s", code, out, errOut, path)
+	}
+
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "relative")
+	fallback := filepath.Join(home, ".config", "pgglass", "config.json")
+	if code, _, errOut := runCommand(t, "doctor"); code != 1 || !strings.Contains(errOut, "read config: open "+fallback) {
+		t.Errorf("doctor with a relative XDG_CONFIG_HOME = %d, %q; want 1 and %s", code, errOut, fallback)
 	}
 }
 
@@ -285,6 +320,41 @@ func TestStdioStopsWhenTheContextEnds(t *testing.T) {
 	cancel()
 	if code := exitCode(t, done, logs); code != 0 || logs.String() != "" {
 		t.Errorf("run = %d, stderr %q after the context ended; want 0 and no log", code, logs)
+	}
+}
+
+// The server compiles the SQL parser in the background as it starts, over
+// stdio and over HTTP, so that the first statement need not wait for it.
+func TestServeWarmsTheParserAtStart(t *testing.T) {
+	warm := warmParser
+	t.Cleanup(func() { warmParser = warm })
+	warmed := make(chan struct{}, 1)
+	warmParser = func() { warmed <- struct{}{} }
+	isolateHome(t)
+	t.Setenv(authEnv, "")
+	path := writeConfig(t, connections(map[string]any{}))
+	awaitWarm := func(transport string) {
+		t.Helper()
+		select {
+		case <-warmed:
+		case <-time.After(10 * time.Second):
+			t.Errorf("serving over %s did not warm the parser within 10s", transport)
+		}
+	}
+
+	startHTTP(t, path)
+	awaitWarm("HTTP")
+
+	inR, inW := io.Pipe()
+	defer func() { _ = inW.Close() }()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan int, 1)
+	logs := &lockedBuffer{}
+	go func() { done <- run(ctx, []string{"--config", path}, inR, io.Discard, logs) }()
+	awaitWarm("stdio")
+	cancel()
+	if code := exitCode(t, done, logs); code != 0 {
+		t.Errorf("run = %d over stdio, want 0\nstderr:\n%s", code, logs)
 	}
 }
 
