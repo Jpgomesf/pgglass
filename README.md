@@ -176,7 +176,7 @@ The calling agent is treated as untrusted: instructions can reach it through the
 5. **Results are bounded.**
    - Rows past `max_rows` or `max_bytes` are not kept, and the rest of the query is cancelled on the server. A single server message larger than `max_bytes` plus 1 MiB is refused unread (see [Defaults](docs/configuration.md#defaults)).
    - A result whose output would exceed 10 KB is written to a CSV file only you can read (mode 0600), and summarized (see [Large results](docs/usage.md#large-results)).
-   - No tool result or resource read exceeds 10 KB, errors and the role check's findings included: the findings take at most half, and an error too long for the rest is cut in the middle.
+   - No tool result or resource read exceeds 10 KB, errors and the role check's findings included: the findings take at most half, and an error too long for the rest is cut in the middle. The one exception is the [confirmation](docs/usage.md#confirmation) question a client on revision 2026-07-28 gets as the result of the call: it shows the user, not the agent, the whole statement and its params, however long.
    - Protocol errors keep to 10 KB too, except those the MCP SDK returns before pgglass sees the request, which only a client that does not follow the protocol gets (see [Errors](docs/usage.md#errors)).
    - `pg_schema` reads at most 500 schemas or relations per listing from the catalog, and cuts long comments and definitions as it reads them (see [Explore the schema](docs/usage.md#explore-the-schema)).
    - `pg_diff_schema` reads each side's schema as one catalog value, which `max_bytes` bounds too: a larger schema fails, naming its side, until `max_bytes` is raised.
