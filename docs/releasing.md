@@ -13,6 +13,8 @@ A pre-release tag, such as `v1.1.0-rc.1`, publishes a GitHub pre-release and the
 
 The release job is the only one with write permissions: `contents` to create the release, `packages` to push the image and its attestation, `id-token` to sign the attestations with Sigstore, and `attestations` to store them.
 
+Every action the workflows use is pinned to a commit SHA, GoReleaser to an exact version and the image's base to a digest, so a moved tag cannot change what a release runs. [Dependabot](../.github/dependabot.yml) proposes updates to them and to the Go modules each week, for versions out at least 7 days.
+
 ## Before the first release
 
 1. Rename the repository to `Jpgomesf/pgglass`: `install.sh`, `server.json`, the image labels and the commands below use that name.
