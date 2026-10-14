@@ -55,8 +55,16 @@ func isLoopback(host string) bool {
 	return err == nil && ip.IsLoopback()
 }
 
+func listenNetwork(addr string) string {
+	host, _, _ := net.SplitHostPort(addr)
+	if ip, err := netip.ParseAddr(host); err == nil && ip.Unmap().Is4() {
+		return "tcp4"
+	}
+	return "tcp"
+}
+
 func serveHTTP(ctx context.Context, server *mcp.Server, addr, token string, logger *slog.Logger) error {
-	ln, err := net.Listen("tcp", addr)
+	ln, err := net.Listen(listenNetwork(addr), addr)
 	if err != nil {
 		return err
 	}
