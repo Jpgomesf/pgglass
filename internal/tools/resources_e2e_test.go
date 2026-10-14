@@ -222,10 +222,12 @@ func TestTableResourcesEscapeNamesThatNeedIt(t *testing.T) {
 	}
 }
 
+// Whether the server or the SDK finds that a URI names no table, the read is
+// resource not found, and writes its audit line.
 func TestReadingAMissingTableIsResourceNotFound(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckOff, appConns(t)))
-	for _, uri := range []string{
+	uris := []string{
 		"pgglass://nope/app/orders",
 		"pgglass://clean/nope/orders",
 		"pgglass://clean/app/nope",
@@ -236,7 +238,9 @@ func TestReadingAMissingTableIsResourceNotFound(t *testing.T) {
 		"pgglass://clean/app/orders/columns",
 		"pgglass://clean/app/%zz",
 		"postgres://clean/app/orders",
-	} {
+		"PGGLASS://clean/app/orders",
+	}
+	for _, uri := range uris {
 		wire := s.readTableFails(t, uri)
 		var data struct {
 			URI string `json:"uri"`
@@ -244,6 +248,15 @@ func TestReadingAMissingTableIsResourceNotFound(t *testing.T) {
 		if wire.Code != jsonrpc.CodeInvalidParams || wire.Message != "Resource not found" || json.Unmarshal(wire.Data, &data) != nil || data.URI != uri {
 			t.Errorf("resources/read %s = %d %q %s, want resource not found", uri, wire.Code, wire.Message, wire.Data)
 		}
+	}
+	lines := s.auditLines(t)
+	for _, line := range lines {
+		if line.Tool != "resource" || (line.Outcome != "error" && line.Outcome != "db_error") {
+			t.Errorf("audit line %+v, want a failed resource read", line)
+		}
+	}
+	if len(lines) != len(uris) {
+		t.Errorf("%d audit lines for %d reads:\n%s", len(lines), len(uris), s.audit)
 	}
 }
 
@@ -383,6 +396,7 @@ func TestTableResourcesWriteAuditLinesWithoutSQL(t *testing.T) {
 		{Msg: "tool call", Tool: "resource", Connection: "clean", Outcome: "ok"},
 		{Msg: "tool call", Tool: "resource_list", Connection: "clean", Rows: 7, Outcome: "ok"},
 		{Msg: "tool call", Tool: "resource", Connection: "clean", Outcome: "db_error"},
+		{Msg: "tool call", Tool: "resource", Outcome: "error"},
 		{Msg: "tool call", Tool: "resource", Outcome: "error"},
 	}
 	lines := s.auditLines(t)

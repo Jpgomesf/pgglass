@@ -3,9 +3,10 @@
 // and the table resources, pgglass://<connection>/<schema>/<table>.
 //
 // Every tool failure is a tool result with IsError set, never a protocol
-// error; a resource read fails with a JSON-RPC error. Every call writes one
-// JSON audit line, or one per connection when pg_query fans out or the
-// resources are listed, that holds no SQL text, parameter or value.
+// error; a resource read fails with a JSON-RPC error. Every tool call and
+// resource read writes one JSON audit line, or one per connection when
+// pg_query fans out or the resources are listed, that holds no SQL text,
+// parameter or value; a call that asks the user writes it once answered.
 package tools
 
 import (
@@ -83,7 +84,7 @@ func NewServer(h *Handlers, version string) *mcp.Server {
 	s.AddTool(explainTool, h.handle("pg_explain", h.explain))
 	s.AddTool(healthTool, h.handle("pg_health", h.health))
 	s.AddResourceTemplate(tableTemplate, h.readTable)
-	s.AddReceivingMiddleware(h.withTableResources, h.withinInlineLimit)
+	s.AddReceivingMiddleware(h.withTableResources, h.withinInlineLimit, h.auditReads)
 	h.checks.onFirstUse = func() { s.AddResourceTemplate(tableTemplate, h.readTable) }
 	return s
 }

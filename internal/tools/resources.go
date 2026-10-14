@@ -71,13 +71,31 @@ func postgresName(s string) bool {
 	return s != "" && len(s) <= config.MaxNameBytes && utf8.ValidString(s) && !strings.ContainsRune(s, 0)
 }
 
+type readCall struct{}
+
+func (h *Handlers) auditReads(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		read, ok := req.(*mcp.ReadResourceRequest)
+		if !ok {
+			return next(ctx, method, req)
+		}
+		c := &call{tool: "resource", start: time.Now()}
+		res, err := next(context.WithValue(ctx, readCall{}, c), method, req)
+		h.audit(c, err)
+		var wire *jsonrpc.Error
+		if err != nil && !errors.As(err, &wire) {
+			err = h.resourceError(read.Params.URI, err, c)
+		}
+		return res, err
+	}
+}
+
 func (h *Handlers) readTable(ctx context.Context, req *mcp.ReadResourceRequest) (*mcp.ReadResourceResult, error) {
 	uri := req.Params.URI
-	c := &call{tool: "resource", start: time.Now()}
+	c := ctx.Value(readCall{}).(*call)
 	text, err := h.describeTable(ctx, uri, c)
-	h.audit(c, err)
 	if err != nil {
-		return nil, h.resourceError(uri, err, c)
+		return nil, err
 	}
 	return &mcp.ReadResourceResult{Contents: []*mcp.ResourceContents{{URI: uri, MIMEType: tableMIMEType, Text: c.notice + text}}}, nil
 }

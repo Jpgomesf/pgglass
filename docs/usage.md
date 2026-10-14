@@ -176,7 +176,7 @@ search_path on prod-app: "app"
 - A fan-out asks once, naming the connections in `connections` that set `confirm`, except those whose `search_path` is refused: they fail as they would alone. Declined, the statement runs on none of them.
 - The client must support form elicitation. Without it, the call is refused before anything runs: `pg_query on prod-app requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation`.
 - From protocol revision 2026-07-28 the question comes back as the result of the call, and the client calls again with the answer; before it, the server asks the client during the call, which it can only do over stdio and for a client that declared form elicitation when it connected, whatever a call's `_meta` claims: over [`--http`](configuration.md#streamable-http), an older client is refused as one without form elicitation is. An answer holds only for the question it answers: a call that brings it back with another statement, other `params`, other connections or another `search_path` asks again.
-- The call writes its audit line once answered, `declined` when the user declines or cancels. A client that fails to ask ends the call with its own error: nothing runs, and no audit line is written.
+- The call writes its audit line once answered, `declined` when the user declines or cancels. A client that fails to ask ends the call with its own error, and one on revision 2026-07-28 may never call back with the answer: either way nothing runs, and no audit line is written.
 - The other tools do not ask: they run only SQL the server writes.
 
 ## Profile a table
@@ -294,7 +294,7 @@ An error, with the role check's findings that may start it, keeps to the 10 KB o
 
 ## Audit log
 
-Each tool call writes one JSON line to stderr, or one per connection for a [fan-out](#fan-out):
+Each tool call writes one JSON line to stderr, or one per connection for a [fan-out](#fan-out), once the user answers the [confirmation](#confirmation) it may ask for:
 
 ```json
 {"time":"2026-10-12T14:59:12.2-03:00","level":"INFO","msg":"tool call","tool":"pg_query","connection":"prod-app","sql_sha256":"46880a16e933","sql_len":30,"duration_ms":41,"rows":1,"truncated":false,"outcome":"ok","sqlstate":""}
@@ -302,7 +302,7 @@ Each tool call writes one JSON line to stderr, or one per connection for a [fan-
 
 `connection` names both connections of a `pg_diff_schema` call, `prod,staging`. `sql_sha256` is the first 12 hex digits of the statement's SHA-256, so repeated statements can be matched without logging them; it is empty, and `sql_len` 0, for tools that take no SQL. `outcome` is `ok`, `guard_reject`, `db_error` (with `sqlstate` when Postgres raised it), `preflight_block`, `error` (for example, invalid arguments) or `declined` (the user declined or cancelled a [confirmation](#confirmation)). SQL text, parameters and values are never logged.
 
-[Resources](#mention-tables-as-resources) are audited too: each read writes a line whose `tool` is `resource`, and each listing one line per connection it lists, whose `tool` is `resource_list`, with the relations it listed as `rows`.
+[Resources](#mention-tables-as-resources) are audited too: each read writes a line whose `tool` is `resource`, whether or not its URI names a table, and each listing one line per connection it lists, whose `tool` is `resource_list`, with the relations it listed as `rows`.
 
 ## Parallel calls
 
