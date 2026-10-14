@@ -27,7 +27,8 @@ func summary(res *result.Result, path string, inlineSize, limit int) (string, er
 	b.WriteString("Use Read or Grep on the file instead of re-running the query.")
 	out := b.String()
 	if len(out) > limit {
-		return "Full result: " + path + "\n" + footer(res), nil
+		line := "Full result: " + path + "\n"
+		return line + fit(footer(res), limit-len(line)), nil
 	}
 
 	const gap = "\n\n"

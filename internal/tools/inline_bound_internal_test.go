@@ -1,55 +1,18 @@
 package tools
 
 import (
-	"regexp"
 	"strconv"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/jpgomesf/pgglass/internal/engine"
 	"github.com/jpgomesf/pgglass/internal/render"
 	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
-var cutCount = regexp.MustCompile(`…\[(\d+) bytes cut\]…`)
-
 func quotingError(n int) error {
 	return &dbError{&engine.QueryError{SQLState: "22P02", Hint: "Cast it to text first.",
 		Message: `invalid input syntax for type integer: "` + strings.Repeat("y", n) + `"`}}
-}
-
-// An error longer than its limit keeps its start and its end, where the
-// SQLSTATE and the hint are, and the note counts the bytes dropped.
-func TestCutMiddle(t *testing.T) {
-	if got := cutMiddle("ERROR: short", 12); got != "ERROR: short" {
-		t.Errorf("text that fits was cut: %q", got)
-	}
-	long := errorText(quotingError(20000))
-	for _, limit := range []int{len(long) - 1, 1000, 200} {
-		got := cutMiddle(long, limit)
-		m := cutCount.FindStringSubmatch(got)
-		if len(got) > limit || m == nil || !strings.HasPrefix(got, `ERROR: invalid input syntax for type integer: "yyy`) ||
-			!strings.HasSuffix(got, `yyy" (SQLSTATE 22P02)`+"\nHINT: Cast it to text first.") {
-			t.Errorf("cut to %d: %d bytes:\n%s", limit, len(got), got)
-			continue
-		}
-		if n, _ := strconv.Atoi(m[1]); len(got)-len(m[0])+n != len(long) {
-			t.Errorf("cut to %d: dropped %d bytes, the note says %d", limit, len(long)-len(got)+len(m[0]), n)
-		}
-	}
-	accents := strings.Repeat("é", 1000)
-	for limit := 100; limit < 108; limit++ {
-		got := cutMiddle(accents, limit)
-		m := cutCount.FindStringSubmatch(got)
-		if len(got) > limit || !utf8.ValidString(got) || m == nil {
-			t.Errorf("cut of 2-byte characters to %d bytes: %d bytes, valid UTF-8 %t:\n%s", limit, len(got), utf8.ValidString(got), got)
-			continue
-		}
-		if n, _ := strconv.Atoi(m[1]); len(got)-len(m[0])+n != len(accents) {
-			t.Errorf("cut to %d: dropped %d bytes, the note says %d", limit, len(accents)-len(got)+len(m[0]), n)
-		}
-	}
 }
 
 func tenReports() string {

@@ -13,6 +13,7 @@ import (
 	"github.com/jpgomesf/pgglass/internal/engine"
 	"github.com/jpgomesf/pgglass/internal/render"
 	"github.com/jpgomesf/pgglass/internal/result"
+	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
 const maxFanout = 10
@@ -133,14 +134,14 @@ func (h *Handlers) fanoutText(results []fanoutResult, format render.Format, room
 	if err != nil {
 		return "", err
 	}
-	return text + lines, nil
+	return text + spill.CutMiddle(lines, room-len(text)), nil
 }
 
 func failureLines(failed []fanoutResult, room int) string {
 	lines := make([]string, len(failed))
 	for i, r := range failed {
 		line := r.conn + ": " + strings.ReplaceAll(errorText(r.err), "\n", "\n  ")
-		lines[i] = cutMiddle(line, room/len(failed)-1)
+		lines[i] = spill.CutMiddle(line, room/len(failed)-1)
 	}
 	return strings.Join(lines, "\n")
 }

@@ -42,3 +42,28 @@ func TestSummaryNamesTheFileWithinItsLimit(t *testing.T) {
 		}
 	}
 }
+
+// Naming the file and counting the rows keeps to the limit too whenever the
+// path fits, cutting the count's note in the middle: under a Linux cache path
+// of 2,000 bytes, a fan-out merged from 9 connections cut by max_rows, next to
+// a failure line and the role check's findings, has about 2,500 bytes for it.
+func TestSummaryFallbackKeepsToTheLimit(t *testing.T) {
+	res := &result.Result{Columns: []result.Column{{Name: "connection"}, {Name: "id"}}}
+	for range 9000 {
+		res.Rows = append(res.Rows, []*string{nil, nil})
+	}
+	var cut []string
+	for range 9 {
+		cut = append(cut, strings.Repeat("w", 63)+" max_rows=1000")
+	}
+	res.Truncated, res.TruncatedReason = true, strings.Join(cut, ", ")
+	path := "/" + strings.Repeat("d", 2000) + "/spill-pg_query-wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww-20261014T000000Z-1234567890.csv"
+	const limit = 2500
+
+	out, err := summary(res, path, 500_000, limit)
+	line := "Full result: " + path + "\n"
+	if err != nil || len(out) > limit || !strings.HasPrefix(out, line+"(9000 rows; truncated: www") ||
+		!strings.Contains(out, " bytes cut]…") || !strings.HasSuffix(out, "w max_rows=1000)") {
+		t.Errorf("summary = %v, %d bytes for a limit of %d:\n%.120s...%s", err, len(out), limit, out, out[max(0, len(out)-200):])
+	}
+}

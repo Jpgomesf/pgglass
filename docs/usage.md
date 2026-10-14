@@ -110,7 +110,7 @@ First 5 rows:
 ...
 ```
 
-After the file, the summary lists the first 20 columns and previews the first 5 rows, as many of each as fit in 10 KB, and cuts preview cells at 64 characters.
+After the file, the summary lists the first 20 columns and previews the first 5 rows, as many of each as fit in 10 KB, and cuts preview cells at 64 characters. If the file cannot be written, the rows that fit come back instead, then a note that says why, its error cut in the middle to keep the note within half of the 10 KB: `(42 of 1000 rows shown; could not write the spill file: …)`.
 
 Spill files live in `pgglass` under your user cache directory (`~/Library/Caches` on macOS, `$XDG_CACHE_HOME` or `~/.cache` on Linux), readable only by you (mode 0600). Without one (`HOME` unset), they live in `pgglass-<uid>` in the temp directory, which the server creates: it must be a directory, not a symlink, that you own with mode 0700, or the server does not start. Spill files older than `spill_ttl_hours` are removed at startup, then at most once an hour as tools return results, whichever server instance wrote them.
 
@@ -130,7 +130,7 @@ prod-app	98311
 - The statement is checked once. Each connection then gets what a call on it alone would: the role check, its `search_path` (`schema`, or its own `default_schema`), the limits and one audit line.
 - Rows come in the order of `connections`, after a first column, `connection`. The footer names each connection a limit cut, `(1500 rows; truncated: prod-app max_rows=1000)`, and a result over 10 KB spills to one CSV file.
 - When the connections return different columns, by name or type, each gets its own section under its name, and the sections, names included, share the 10 KB: a section past its share spills to a CSV file of its own. When its share is too small for the summary, the section only names the file and counts the rows, `Full result: <path>` then `(100 rows)`. Sections that still take more than their room, as long connection names and a long spill directory path can make them, each spill to a CSV file of their own, those that fit their share too, so that every connection's rows are whole in a file; if the sections, which then only name their files, still take more than the room, they go to one more file, a line each, whose summary takes their place.
-- A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The lines share half of the 10 KB and the rows take the rest: a line longer than its share is cut in the middle, as a long [error](#errors) is. The call fails only when every connection does, and the lines then share all of it.
+- A connection that fails adds a line after the rows, with its error as a call on it alone would show it, such as `prod-app: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)`. The lines share half of the 10 KB and the rows take the rest: a line longer than its share is cut in the middle, as a long [error](#errors) is. When the rows' summary takes more, as a spill directory path thousands of bytes long can make it, the lines are cut in the middle to what it leaves. The call fails only when every connection does, and the lines then share all of it.
 
 ## Explain a query
 

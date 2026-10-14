@@ -3,6 +3,7 @@ package tools
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -157,6 +158,32 @@ func TestFanoutText(t *testing.T) {
 	_, err = h.fanoutText([]fanoutResult{{conn: "b", err: &dbError{queryErr}}, {conn: "d", err: rejected}}, render.TSV, 1000)
 	if err == nil || errorText(err) != failedLines {
 		t.Errorf("all failed = %v, want an error showing\n%s", err, failedLines)
+	}
+}
+
+// The failure lines take at most half the room and the rows the rest, but the
+// rows' summary names its file whole: when a long spill directory makes that
+// take more than the rest, the failure lines are cut to what it leaves.
+func TestFanoutFailuresLeaveTheRowsTheirFile(t *testing.T) {
+	dir := t.TempDir()
+	for len(dir) < 700 {
+		dir = filepath.Join(dir, strings.Repeat("d", 100))
+	}
+	h := &Handlers{spill: &spill.Store{Dir: dir, InlineMaxBytes: config.InlineMaxBytes}}
+	values := make([]string, 200)
+	for i := range values {
+		values[i] = strconv.Itoa(i)
+	}
+	a, b := fanoutOK("a", fanoutIDColumn, values...), fanoutOK("b", fanoutIDColumn, values...)
+	a.res.Truncated, a.res.TruncatedReason = true, "max_rows=200"
+	const room = 1500
+	got, err := h.fanoutText([]fanoutResult{a, b, {conn: "c", err: quotingError(5000)}}, render.TSV, room)
+	m := regexp.MustCompile(`^Full result: (\S+)\n\(400 rows; truncated: a max_rows=200\)\n\nc: ERROR: invalid input syntax for type integer: "y+…\[\d+ bytes cut\]…`).FindStringSubmatch(got)
+	if err != nil || len(got) > room || m == nil {
+		t.Fatalf("a long spill path and a failure = %v, %d bytes for a room of %d:\n%s", err, len(got), room, got)
+	}
+	if records := readRecords(t, m[1]); len(records) != 401 {
+		t.Errorf("the file holds %d records, want a header and 400 rows", len(records))
 	}
 }
 
