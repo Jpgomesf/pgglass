@@ -145,6 +145,9 @@ func (s *Store) write(tool, conn string, res *result.Result) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if !utf8.ValidString(dir) {
+		return "", errors.New("the spill directory's path is not UTF-8, so the client could not open the file")
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", err
 	}

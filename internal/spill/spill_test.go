@@ -746,6 +746,26 @@ func TestOutputNamesTheFileByAbsolutePath(t *testing.T) {
 	}
 }
 
+// JSON carries each byte that is not UTF-8 as U+FFFD, so a client would get a
+// path that names no file: under a directory whose path is not UTF-8, as HOME
+// or XDG_CACHE_HOME can make it, no file is written, and the rows that fit
+// come back with a note that does not quote the path.
+func TestOutputWritesNoFileUnderAPathThatIsNotUTF8(t *testing.T) {
+	store := newStore(t)
+	store.Dir = filepath.Join(t.TempDir(), "caf\xe9", "pgglass")
+	out, err := store.OutputWithin("pg_query", "prod", numbered(1000), render.TSV, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const note = "could not write the spill file: the spill directory's path is not UTF-8, so the client could not open the file)"
+	if len(out) > 1000 || !utf8.ValidString(out) || !strings.HasSuffix(out, note) {
+		t.Errorf("output of %d bytes, limit 1000, want the rows that fit and the note %q:\n%q", len(out), note, out)
+	}
+	if _, err := os.Stat(filepath.Dir(store.Dir)); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the directory that is not UTF-8: %v, want it never created", err)
+	}
+}
+
 func TestCleanupReportsAnUnreadableDir(t *testing.T) {
 	store := newStore(t)
 	store.Dir = filepath.Join(t.TempDir(), "file")
