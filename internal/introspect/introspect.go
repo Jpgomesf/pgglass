@@ -7,10 +7,11 @@
 // shadow the catalog functions the queries call. Each query returns one JSON
 // value that decodes straight into the types below.
 //
-// The queries cut what a description cannot show, so that value keeps far
-// within max_bytes: a comment to its first 200 characters, a view's query to
-// 2000, any other expression to 10,000, longer than a line of a 10 KB
-// description, and an enum to its first 2500 labels.
+// The queries cut what a description cannot show, so that no one comment or
+// definition, however long, takes that value past max_bytes: a comment to its
+// first 200 characters, a view's query to 2000, any other expression to
+// 10,000, longer than a line of a 10 KB description, and an enum to its first
+// 2500 labels.
 //
 // Only what the current role can read is described: schemas it has USAGE on,
 // relations it can SELECT at least one column of, columns it can SELECT and

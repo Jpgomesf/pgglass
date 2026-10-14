@@ -28,8 +28,8 @@ CREATE VIEW past_view AS SELECT '` + strings.Repeat("i", 1_979) + `'::text AS c;
 // cut to its first 2000 characters, with a note of how many it has, as Render
 // showed it; every other expression cut to its first 10,000, longer than any
 // line of a 10 KB description, with a note of how many it drops; and the
-// first 2500 labels of an enum, more than such a line holds. However long its
-// definitions, a relation's description keeps far within max_bytes.
+// first 2500 labels of an enum, more than such a line holds. However long one
+// definition is, it cannot take a relation's description past max_bytes.
 func TestLongDefinitionsAreCut(t *testing.T) {
 	const name = "introspect_long_definitions"
 	testdb.CreateDatabase(t, name, longDefinitionsSQL)
