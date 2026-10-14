@@ -187,6 +187,8 @@ func TestFlags(t *testing.T) {
 		{"nested loop over 10k planned outer rows", `{"Node Type": "Nested Loop", "Plans": [
 			{"Node Type": "Seq Scan", "Parent Relationship": "Outer", "Plan Rows": 10000},
 			{"Node Type": "Index Scan", "Parent Relationship": "Inner", "Plan Rows": 10001}]}`, false, nil},
+		{"nested loop without an outer side", `{"Node Type": "Nested Loop", "Plans": [
+			{"Node Type": "Seq Scan", "Parent Relationship": "Inner", "Plan Rows": 20000, "Actual Rows": 20000, "Actual Loops": 1}]}`, true, nil},
 	} {
 		if got := parseNode(t, tc.node).flags(tc.analyzed, sizes); !slices.Equal(got, tc.want) {
 			t.Errorf("%s: flags = %q, want %q", tc.name, got, tc.want)
