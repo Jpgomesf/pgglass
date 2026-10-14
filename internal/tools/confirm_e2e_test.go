@@ -421,3 +421,16 @@ func TestConfirmShowsTheSearchPathOfEachConnection(t *testing.T) {
 		t.Errorf("a fan-out on a refused search_path alone = %q, asked %q; want %q, unasked", got, u.questions(), want)
 	}
 }
+
+// The client gets the statement with its terminal escapes and invisible
+// formatting characters shown as escapes.
+func TestConfirmShowsTheClientInvisibleCharactersAsEscapes(t *testing.T) {
+	cfg := newConfig(config.RoleCheckOff, map[string]config.Connection{"prod": confirmed(unusedDSN)})
+	s, u := connectUser(t, cfg, "", "decline")
+	if got := s.fails(t, "pg_query", args("prod", "SELECT 1 -- \x1b[8m\u202e")); got != "declined by the user" {
+		t.Errorf("pg_query = %q, want it declined", got)
+	}
+	if got, want := u.questions(), []string{"Allow pg_query to run this statement on prod?\n\nSELECT 1 -- \\x1b[8m\\u202e"}; !slices.Equal(got, want) {
+		t.Errorf("questions\n%q\nwant\n%q", got, want)
+	}
+}

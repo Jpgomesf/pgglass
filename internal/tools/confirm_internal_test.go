@@ -193,3 +193,20 @@ func TestDeclinedCallsAreAuditedAsDeclined(t *testing.T) {
 		t.Errorf("errorText = %q", got)
 	}
 }
+
+// A statement can hide terminal escapes and invisible formatting characters,
+// such as bidi controls, in its comments and string literals. The question
+// shows each as an escape, other than newline and tab, so the user reads the
+// statement that runs; the key binds the statement itself.
+func TestConfirmShowsInvisibleCharactersAsEscapes(t *testing.T) {
+	const sql = "SELECT 1\t-- \x1b[2K\r\u202eDROP TABLE x\u2066\u200b\u2028\u0085\U000e0041\x00\nFROM t"
+	const shown = "SELECT 1\t-- \\x1b[2K\\r\\u202eDROP TABLE x\\u2066\\u200b\\u2028\\u0085\\U000e0041\\x00\nFROM t"
+	ask := askFor(t, confirmHandlers(), on("prod"), sql)
+	if want := "Allow pg_query to run this statement on prod?\n\n" + shown; ask.question.Message != want {
+		t.Errorf("question\n%q\nwant\n%q", ask.question.Message, want)
+	}
+	if same := askFor(t, confirmHandlers(), on("prod"), shown); same.question.Message != ask.question.Message || same.key == ask.key {
+		t.Errorf("the statement as shown: question %q, key %q; want the same question under another key than %q",
+			same.question.Message, same.key, ask.key)
+	}
+}

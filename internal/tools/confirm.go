@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -73,7 +75,7 @@ func (h *Handlers) confirm(c *call, what string, targets []target, sql string, p
 	answer, ok := c.answers[key]
 	if !ok {
 		form := map[string]any{"type": "object", "properties": map[string]any{}}
-		return &confirmRequest{key: key, question: &mcp.ElicitParams{Mode: "form", Message: message, RequestedSchema: form}}
+		return &confirmRequest{key: key, question: &mcp.ElicitParams{Mode: "form", Message: visible(message), RequestedSchema: form}}
 	}
 	if r, ok := answer.(*mcp.ElicitResult); ok && r.Action == "accept" {
 		return nil
@@ -102,6 +104,19 @@ func question(what string, asked []target, sql string, params []any) (string, er
 		return text, nil
 	}
 	return text + "\n\n" + strings.Join(notes, "\n"), nil
+}
+
+func visible(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r != '\n' && r != '\t' && (unicode.IsControl(r) || unicode.In(r, unicode.Cf, unicode.Zl, unicode.Zp)) {
+			quoted := strconv.QuoteRuneToASCII(r)
+			b.WriteString(quoted[1 : len(quoted)-1])
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 func connNames(targets []target) string {
