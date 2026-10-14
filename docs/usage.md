@@ -291,6 +291,12 @@ A failed call returns a result with `isError` set and the reason as text:
 
 An error, with the role check's findings that may start it, keeps to the 10 KB of a response. A Postgres error can quote a value whole, and an unknown connection's lists every configured name: one longer than that is cut in the middle, keeping its start and its end, where the SQLSTATE, position, detail and hint are, as in `ERROR: invalid input syntax for type integer: "yyyy…[10088 bytes cut]…yyyy" (SQLSTATE 22P02)`. A call to a tool the server does not have is a protocol error instead, `unknown tool "…"` (code `-32602`), whose name is cut the same way.
 
+The one exception is an error the MCP SDK returns before pgglass sees the request, which only a client that does not follow the protocol gets, and which quotes the request whole:
+
+- params that do not decode, such as a tool `name` or a resource `uri` that is not a string: `handling 'tools/call': invalid params: unmarshaling "…"` (code `-32602`)
+- an unknown method: `method not found: "…"` (code `-32601`); over `--http`, `JSON RPC not handled: "…" unsupported`, with status 400, or 404 from revision 2026-07-28
+- over `--http`, a request header the SDK refuses, such as `Forbidden: invalid Host header "…"`
+
 ## Audit log
 
 Each tool call writes one JSON line to stderr, or one per connection for a [fan-out](#fan-out):
