@@ -136,30 +136,33 @@ func TestConfirmRefusesClientsWithoutElicitation(t *testing.T) {
 
 // A client that fails to ask ends the call itself, and nothing runs. Before
 // revision 2026-07-28 the server asks during the call, which then fails and
-// writes an error line; from it, the client never calls back with an answer,
-// so the call writes none.
+// writes a single error line, with no connection or SQL hash even for a
+// fan-out; from it, the client never calls back with an answer, so the call
+// writes none.
 func TestConfirmRunsNothingWhenTheClientFailsToAsk(t *testing.T) {
-	cfg := newConfig(config.RoleCheckWarn, map[string]config.Connection{"prod": confirmed(unusedDSN)})
+	cfg := newConfig(config.RoleCheckWarn, map[string]config.Connection{"prod": confirmed(unusedDSN), "prod2": confirmed(unusedDSN)})
 	for _, version := range mcp.SupportedProtocolVersions() {
-		s := connectClient(t, cfg, t.TempDir(), version, &mcp.ClientOptions{
-			ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
-				return nil, errors.New("no user at the keyboard")
-			},
-		})
-		res, err := s.CallTool(t.Context(), &mcp.CallToolParams{Name: "pg_query", Arguments: args("prod", "SELECT 1")})
-		if err == nil || !strings.Contains(err.Error(), "no user at the keyboard") {
-			t.Errorf("%s: result %+v, error %v; want the client's error", version, res, err)
-		}
-		var want []auditLine
-		if version < "2026-07-28" {
-			want = []auditLine{{Msg: "tool call", Tool: "pg_query", Outcome: "error"}}
-		}
-		lines := s.auditLines(t)
-		for i := range lines {
-			lines[i].DurationMS = nil
-		}
-		if !slices.Equal(lines, want) {
-			t.Errorf("%s: audit lines %+v, want %+v", version, lines, want)
+		for _, a := range []map[string]any{args("prod", "SELECT 1"), fanoutArgs([]string{"prod", "prod2"}, "SELECT 1")} {
+			s := connectClient(t, cfg, t.TempDir(), version, &mcp.ClientOptions{
+				ElicitationHandler: func(context.Context, *mcp.ElicitRequest) (*mcp.ElicitResult, error) {
+					return nil, errors.New("no user at the keyboard")
+				},
+			})
+			res, err := s.CallTool(t.Context(), &mcp.CallToolParams{Name: "pg_query", Arguments: a})
+			if err == nil || !strings.Contains(err.Error(), "no user at the keyboard") {
+				t.Errorf("%s %v: result %+v, error %v; want the client's error", version, a, res, err)
+			}
+			var want []auditLine
+			if version < "2026-07-28" {
+				want = []auditLine{{Msg: "tool call", Tool: "pg_query", Outcome: "error"}}
+			}
+			lines := s.auditLines(t)
+			for i := range lines {
+				lines[i].DurationMS = nil
+			}
+			if !slices.Equal(lines, want) {
+				t.Errorf("%s %v: audit lines %+v, want %+v", version, a, lines, want)
+			}
 		}
 	}
 }

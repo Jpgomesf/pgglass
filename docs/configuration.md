@@ -1,6 +1,6 @@
 # Configuration
 
-pgglass reads `$XDG_CONFIG_HOME/pgglass/config.json` when `XDG_CONFIG_HOME` is set, else `~/.config/pgglass/config.json`, or the file `--config` names (see [Command line](#command-line)). `pgglass doctor` checks it (see [Doctor](#doctor)).
+pgglass reads `$XDG_CONFIG_HOME/pgglass/config.json` when `XDG_CONFIG_HOME` is set to an absolute path, else `~/.config/pgglass/config.json`, or the file `--config` names (see [Command line](#command-line)). `pgglass doctor` checks it (see [Doctor](#doctor)).
 
 ## Connection Structure
 

@@ -85,7 +85,7 @@ Or clone the repository and run `make build`.
 
 ## Configure
 
-Create `~/.config/pgglass/config.json` (`$XDG_CONFIG_HOME/pgglass/config.json` when `XDG_CONFIG_HOME` is set), or pass another file with `--config`:
+Create `~/.config/pgglass/config.json` (`$XDG_CONFIG_HOME/pgglass/config.json` when `XDG_CONFIG_HOME` is set to an absolute path), or pass another file with `--config`:
 
 ```json
 {
@@ -184,7 +184,7 @@ The calling agent is treated as untrusted: instructions can reach it through the
 6. **Calls are audited.** Each tool call and resource read writes one JSON line to stderr, one per connection when `pg_query` fans out or the resources are listed: tool, connection (`left,right` for `pg_diff_schema`), SQL hash and length, duration, rows, outcome and SQLSTATE.
    - SQL text, parameters and values are never logged.
    - A call to a tool the server does not have writes one too, with the name it gave cut to 63 bytes.
-   - A call that asks the user to [confirm](docs/usage.md#confirmation) writes its line once answered, or once the client fails to ask: when a client on revision 2026-07-28 never calls back with the answer, nothing runs and no line is written.
+   - A call that asks the user to [confirm](docs/usage.md#confirmation) writes its line once answered. When the client fails to ask, nothing runs: before revision 2026-07-28 the call writes a single `error` line, with no connection or SQL hash even for a fan-out; from it, as when the client never calls back with the answer, no line is written.
 7. **HTTP stays on this machine unless told otherwise.**
    - `--http` listens on loopback by default, where any local process can call it.
    - Any other address needs a bearer token, `PGGLASS_HTTP_TOKEN`, that every request must then carry; set it on loopback too on a machine others use.
