@@ -226,3 +226,17 @@ func TestHTTPShutdownCancelsCallsThatOutlastIt(t *testing.T) {
 		t.Errorf("the call that outlasted the shutdown = %q, want it cancelled", got)
 	}
 }
+
+// The read timeout bounds reading a request, not serving it: a call may run
+// for longer.
+func TestHTTPACallMayOutlastTheReadTimeout(t *testing.T) {
+	srv := startApp(t, direct(testdb.DSN(t, testdb.RoleClean, testdb.DBApp)))
+	session, err := connectHTTP(t, srv.url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := fmt.Sprintf("SELECT 1 AS one FROM pg_sleep(%d)", int((readTimeout + 2*time.Second).Seconds()))
+	if got := query(session, sql); got != "one\n1\n(1 row)" {
+		t.Errorf("pg_query = %q", got)
+	}
+}

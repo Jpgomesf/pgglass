@@ -18,13 +18,14 @@ import (
 )
 
 const (
-	authEnv           = "PGGLASS_HTTP_TOKEN"
-	defaultHTTPHost   = "127.0.0.1"
-	defaultHTTPPort   = "8411"
-	mcpPath           = "/mcp"
-	listenMethod      = "subscriptions/listen"
-	readHeaderTimeout = 10 * time.Second
-	shutdownTimeout   = 10 * time.Second
+	authEnv         = "PGGLASS_HTTP_TOKEN"
+	defaultHTTPHost = "127.0.0.1"
+	defaultHTTPPort = "8411"
+	mcpPath         = "/mcp"
+	listenMethod    = "subscriptions/listen"
+	readTimeout     = 10 * time.Second
+	idleTimeout     = 60 * time.Second
+	shutdownTimeout = 10 * time.Second
 )
 
 func httpAddress(value, token string) (string, error) {
@@ -73,7 +74,9 @@ func serveHTTP(ctx context.Context, server *mcp.Server, addr, token string, logg
 	server.AddReceivingMiddleware(endCalls(ctx, stopped))
 	srv := &http.Server{
 		Handler:                      httpHandler(server, token),
-		ReadHeaderTimeout:            readHeaderTimeout,
+		ReadHeaderTimeout:            readTimeout,
+		ReadTimeout:                  readTimeout,
+		IdleTimeout:                  idleTimeout,
 		DisableGeneralOptionsHandler: true,
 	}
 	logger.Info("listening", slog.String("url", "http://"+ln.Addr().String()+mcpPath), slog.Bool("token_required", token != ""))
@@ -138,12 +141,14 @@ func requireToken(token string, next http.Handler) http.Handler {
 
 func unauthorized(w http.ResponseWriter, challenge, reason string) {
 	w.Header().Set("WWW-Authenticate", challenge)
+	w.Header().Set("Connection", "close")
 	http.Error(w, reason, http.StatusUnauthorized)
 }
 
 func loopbackOrigins(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if origin := r.Header.Get("Origin"); origin != "" && !loopbackOrigin(origin) {
+			w.Header().Set("Connection", "close")
 			http.Error(w, "Forbidden: only loopback origins may call this server", http.StatusForbidden)
 			return
 		}
