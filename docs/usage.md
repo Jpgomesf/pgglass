@@ -31,7 +31,7 @@ Connections (2):
 
 A connection's role is audited on its first use (see [role check](configuration.md#role-check)); from then on `pg_list_connections` shows the report. Past 10 KB, the list is written to a spill file, one line per row, like a large `pg_query` result. `confirm` marks a connection that asks the user before a statement runs on it (see [Confirmation](#confirmation)).
 
-The findings also start the first response on the connection, which keeps to 10 KB with them: they take at most half of it, as many lines as fit and then a line that points to `pg_list_connections`, and the rest of the response fits what they leave.
+The findings also start the first response on the connection, which keeps to 10 KB with them: they take at most half of it, as many lines as fit and then a line that points to `pg_list_connections`, and the rest of the response fits what they leave. Over [`--http`](configuration.md#streamable-http), clients share one server, so only the client that gets that first response sees them there; `pg_list_connections` shows them to every client.
 
 ## Explore the schema
 

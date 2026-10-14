@@ -151,6 +151,31 @@ func TestHTTPRefusesOlderClientsThatClaimElicitation(t *testing.T) {
 	}
 }
 
+// Clients share one server over --http, so under role_check warn the role
+// check's findings start only the first response on the connection, whichever
+// client gets it; pg_list_connections shows them to every client.
+func TestHTTPShowsTheRoleCheckFindingsInTheFirstResponseAlone(t *testing.T) {
+	srv := startApp(t, direct(testdb.DSN(t, testdb.Superuser, testdb.DBApp)))
+	first, err := connectHTTP(t, srv.url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := connectHTTP(t, srv.url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const findings = "role check: role postgres: 1 finding(s)\n  critical superuser: bypasses every privilege check\n\n"
+	if got := query(first, "SELECT 1 AS one"); got != findings+"one\n1\n(1 row)" {
+		t.Errorf("the first client's first pg_query = %q, want the findings first", got)
+	}
+	if got := query(second, "SELECT 1 AS one"); got != "one\n1\n(1 row)" {
+		t.Errorf("the second client's first pg_query = %q, want no findings", got)
+	}
+	if got := listConnections(t, second); !strings.Contains(got, "critical superuser: bypasses every privilege check") {
+		t.Errorf("pg_list_connections for the second client = %q, want the findings", got)
+	}
+}
+
 // Over Streamable HTTP, tables are read and listed as resources, as over
 // stdio.
 func TestHTTPServesTheTableResources(t *testing.T) {
