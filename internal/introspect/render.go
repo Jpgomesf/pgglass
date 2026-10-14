@@ -6,8 +6,6 @@ import (
 	"strings"
 )
 
-const maxDefinition = 2000
-
 // Render returns one line per schema: name, relation count and comment.
 func (l SchemaList) Render() string {
 	if len(l) == 0 {
@@ -61,7 +59,7 @@ func (t TableDetail) Render() string {
 		lines = append(lines, "triggers: "+strings.Join(t.Triggers, ", "))
 	}
 	if t.Definition != "" {
-		lines = append(lines, "definition:", clip(strings.TrimRight(t.Definition, "\n"), maxDefinition))
+		lines = append(lines, "definition:", t.Definition)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -198,12 +196,4 @@ func quoteAll(values []string) string {
 
 func quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
-}
-
-func clip(s string, limit int) string {
-	r := []rune(s)
-	if len(r) <= limit {
-		return s
-	}
-	return fmt.Sprintf("%s\n-- truncated: %d of %d characters shown", string(r[:limit]), limit, len(r))
 }

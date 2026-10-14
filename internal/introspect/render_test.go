@@ -136,19 +136,16 @@ func TestRenderTableDetailOmitsEmptySections(t *testing.T) {
 	}, "app.keyed: table, ~3 rows\nconstraints:\n  keyed_pkey PRIMARY KEY (id)")
 }
 
+// A view's definition comes last, as the catalog query read it: cut there to
+// its first 2000 characters, with a note of how many it has.
 func TestRenderTableDetailDefinition(t *testing.T) {
 	view := introspect.TableDetail{
 		Relation:   introspect.Relation{Schema: "app", Name: "v", Kind: "view", Rows: -1},
 		Columns:    []introspect.Column{{Name: "a", Type: "integer"}},
-		Definition: " SELECT 1 AS a;\n",
+		Definition: " SELECT 1 AS a;",
 	}
 	wantRender(t, "view", view, "app.v: view\n  a integer\ndefinition:\n SELECT 1 AS a;")
 
-	view.Definition = strings.Repeat("é", 2500)
-	want := "app.v: view\n  a integer\ndefinition:\n" + strings.Repeat("é", 2000) +
-		"\n-- truncated: 2000 of 2500 characters shown"
-	wantRender(t, "long view", view, want)
-
-	view.Definition = strings.Repeat("é", 2000)
-	wantRender(t, "view at the cap", view, "app.v: view\n  a integer\ndefinition:\n"+strings.Repeat("é", 2000))
+	view.Definition = strings.Repeat("é", 2000) + "\n-- truncated: 2000 of 2500 characters shown"
+	wantRender(t, "long view", view, "app.v: view\n  a integer\ndefinition:\n"+view.Definition)
 }

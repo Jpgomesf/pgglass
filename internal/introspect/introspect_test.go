@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"github.com/jpgomesf/pgglass/internal/engine"
 	"github.com/jpgomesf/pgglass/internal/introspect"
@@ -462,13 +461,13 @@ definition:
 func TestTableRenderCapsViewDefinition(t *testing.T) {
 	loadLab(t)
 	d := describe(t, testdb.Querier(t, testdb.RoleClean, labDB), "lab", "wide")
-	if len(d.Columns) != 150 || !strings.Contains(d.Definition, "150 AS wide_column_150") {
-		t.Fatalf("wide: %d columns, definition %q", len(d.Columns), d.Definition)
+	whole := []rune(testdb.Value[string](t, testdb.Conn(t, testdb.Superuser, labDB), "SELECT pg_get_viewdef('lab.wide'::regclass, true)"))
+	if len(d.Columns) != 150 || !strings.HasSuffix(string(whole), "150 AS wide_column_150;") {
+		t.Fatalf("wide: %d columns, definition %q", len(d.Columns), string(whole))
 	}
-	out := d.Render()
-	note := fmt.Sprintf("\n-- truncated: 2000 of %d characters shown", utf8.RuneCountInString(d.Definition))
-	if !strings.HasSuffix(out, note) || strings.Contains(out, "AS wide_column_150") {
-		t.Errorf("Render() does not end with %q or shows the whole definition:\n%s", note, out)
+	want := fmt.Sprintf("%s\n-- truncated: 2000 of %d characters shown", string(whole[:2000]), len(whole))
+	if out := d.Render(); d.Definition != want || !strings.HasSuffix(out, "\ndefinition:\n"+want) {
+		t.Errorf("Render() does not end with the first 2000 characters of the definition and a note of %d:\n%s", len(whole), out)
 	}
 }
 
