@@ -115,9 +115,22 @@ func (h *Handlers) withTableResources(next mcp.MethodHandler) mcp.MethodHandler 
 		if list, ok := res.(*mcp.ListResourcesResult); ok && err == nil {
 			list.Resources = append(list.Resources, h.listTableResources(ctx)...)
 		}
+		return res, err
+	}
+}
+
+func (h *Handlers) withinInlineLimit(next mcp.MethodHandler) mcp.MethodHandler {
+	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+		res, err := next(ctx, method, req)
 		var wire *jsonrpc.Error
-		if read, ok := req.(*mcp.ReadResourceRequest); ok && errors.As(err, &wire) && len(wire.Data) > 0 {
+		if !errors.As(err, &wire) {
+			return res, err
+		}
+		if read, ok := req.(*mcp.ReadResourceRequest); ok && len(wire.Data) > 0 {
 			wire.Data = uriData(read.Params.URI, h.spill.InlineMaxBytes-len(wire.Message))
+		}
+		if room := h.spill.InlineMaxBytes - len(wire.Data); len(wire.Message) > room {
+			wire.Message = cutMiddle(wire.Message, room)
 		}
 		return res, err
 	}

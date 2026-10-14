@@ -285,7 +285,7 @@ A failed call returns a result with `isError` set and the reason as text:
 - invalid arguments, such as an unknown connection or argument name, or a name over 63 bytes
 - `declined by the user` when the user declines or cancels a [confirmation](#confirmation), and `pg_query on prod requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation` when the client cannot ask
 
-An error, with the role check's findings that may start it, keeps to the 10 KB of a response. A Postgres error can quote a value whole, and an unknown connection's lists every configured name: one longer than that is cut in the middle, keeping its start and its end, where the SQLSTATE, position, detail and hint are, as in `ERROR: invalid input syntax for type integer: "yyyy…[10088 bytes cut]…yyyy" (SQLSTATE 22P02)`.
+An error, with the role check's findings that may start it, keeps to the 10 KB of a response. A Postgres error can quote a value whole, and an unknown connection's lists every configured name: one longer than that is cut in the middle, keeping its start and its end, where the SQLSTATE, position, detail and hint are, as in `ERROR: invalid input syntax for type integer: "yyyy…[10088 bytes cut]…yyyy" (SQLSTATE 22P02)`. A call to a tool the server does not have is a protocol error instead, `unknown tool "…"` (code `-32602`), whose name is cut the same way.
 
 ## Audit log
 

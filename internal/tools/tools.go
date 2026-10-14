@@ -76,7 +76,7 @@ func NewServer(h *Handlers, version string) *mcp.Server {
 	s.AddTool(explainTool, h.handle("pg_explain", h.explain))
 	s.AddTool(healthTool, h.handle("pg_health", h.health))
 	s.AddResourceTemplate(tableTemplate, h.readTable)
-	s.AddReceivingMiddleware(h.withTableResources)
+	s.AddReceivingMiddleware(h.withTableResources, h.withinInlineLimit)
 	return s
 }
 
