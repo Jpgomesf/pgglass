@@ -130,10 +130,17 @@ func (h *Handlers) withTableResources(next mcp.MethodHandler) mcp.MethodHandler 
 	return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 		res, err := next(ctx, method, req)
 		if list, ok := res.(*mcp.ListResourcesResult); ok && err == nil {
-			list.Resources = append(list.Resources, h.listTableResources(ctx)...)
+			list.Resources = append(list.Resources, h.listTableResources(ctx, h.listRoom(*list))...)
 		}
 		return res, err
 	}
+}
+
+func (h *Handlers) listRoom(sent mcp.ListResourcesResult) int {
+	sent.Meta = mcp.Meta{mcp.MetaKeyServerInfo: h.serverInfo}
+	sent.ResultType = "complete"
+	data, _ := json.Marshal(&sent)
+	return h.spill.InlineMaxBytes - len(data)
 }
 
 func (h *Handlers) withinInlineLimit(next mcp.MethodHandler) mcp.MethodHandler {
@@ -166,7 +173,7 @@ func uriData(uri string, limit int) json.RawMessage {
 	return data
 }
 
-func (h *Handlers) listTableResources(ctx context.Context) []*mcp.Resource {
+func (h *Handlers) listTableResources(ctx context.Context, room int) []*mcp.Resource {
 	conns := h.checks.inUse()
 	lists := make([][]*mcp.Resource, len(conns))
 	var wg sync.WaitGroup
@@ -174,13 +181,23 @@ func (h *Handlers) listTableResources(ctx context.Context) []*mcp.Resource {
 		wg.Go(func() {
 			c := &call{tool: "resource_list", start: time.Now(), connection: conn}
 			resources, err := h.connectionResources(ctx, conn)
-			c.rows = len(resources)
+			lists[i] = firstWithin(resources, room/len(conns))
+			c.rows = len(lists[i])
 			h.audit(c, err)
-			lists[i] = resources
 		})
 	}
 	wg.Wait()
 	return slices.Concat(lists...)
+}
+
+func firstWithin(resources []*mcp.Resource, room int) []*mcp.Resource {
+	for i, r := range resources {
+		data, _ := json.Marshal(r)
+		if room -= len(data) + len(","); room < 0 {
+			return resources[:i]
+		}
+	}
+	return resources
 }
 
 func (h *Handlers) connectionResources(ctx context.Context, conn string) ([]*mcp.Resource, error) {

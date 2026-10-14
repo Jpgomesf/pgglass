@@ -35,13 +35,14 @@ import (
 // Handlers serves the tools for the connections of one config. It is safe
 // for concurrent use.
 type Handlers struct {
-	cfg     config.Config
-	engine  *engine.Manager
-	spill   *spill.Store
-	schemas *introspect.Cache
-	checks  *roleChecks
-	log     *slog.Logger
-	tables  *introspect.Cache
+	cfg        config.Config
+	engine     *engine.Manager
+	spill      *spill.Store
+	schemas    *introspect.Cache
+	checks     *roleChecks
+	log        *slog.Logger
+	tables     *introspect.Cache
+	serverInfo *mcp.Implementation
 }
 
 // New returns the Handlers for cfg, whose defaults must be filled in. They
@@ -60,18 +61,19 @@ func New(cfg config.Config, eng *engine.Manager, store *spill.Store, auditLog io
 
 // NewServer returns an MCP server, named pgglass, that exposes the tools
 // and table resources of h and tells clients how to use the tools well.
-// It lists the tables of the connections that calls have used, and tells
-// clients when a call first uses one. Served over HTTP, it keeps no
-// sessions, so only a client on revision 2026-07-28 or later can confirm a
-// statement.
+// It lists the first tables of the connections that calls have used, within
+// the inline limit, and tells clients when a call first uses one. Served
+// over HTTP, it keeps no sessions, so only a client on revision 2026-07-28
+// or later can confirm a statement.
 func NewServer(h *Handlers, version string) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{
+	h.serverInfo = &mcp.Implementation{
 		Name:        "pgglass",
 		Title:       "pgglass",
 		Description: "Read-only PostgreSQL for AI agents across many databases, enforced by the server",
 		Version:     version,
 		WebsiteURL:  "https://github.com/Jpgomesf/pgglass",
-	}, &mcp.ServerOptions{
+	}
+	s := mcp.NewServer(h.serverInfo, &mcp.ServerOptions{
 		Instructions: instructions,
 		Capabilities: &mcp.ServerCapabilities{Tools: &mcp.ToolCapabilities{}, Resources: &mcp.ResourceCapabilities{ListChanged: true}},
 	})

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/jpgomesf/pgglass/internal/config"
 	"github.com/jpgomesf/pgglass/internal/introspect"
@@ -123,6 +124,31 @@ func TestURIDataIsTheURIAsJSONWithinItsLimit(t *testing.T) {
 			if !strings.HasPrefix(got.URI, uri[:4]) || !strings.HasSuffix(got.URI, uri[len(uri)-4:]) {
 				t.Errorf("uriData of a %d-byte URI within %d = %.80q, want its start and end", len(uri), limit, got.URI)
 			}
+		}
+	}
+}
+
+func TestFirstWithinKeepsTheFirstResourcesThatFitTheirRoom(t *testing.T) {
+	resources := []*mcp.Resource{{Name: "a", URI: "pgglass://c/s/a"}, {Name: "bbbb", URI: "pgglass://c/s/bbbb"}, {Name: "c", URI: "pgglass://c/s/c"}}
+	cost := func(r *mcp.Resource) int {
+		data, err := json.Marshal(r)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(data) + len(",")
+	}
+	first, second := cost(resources[0]), cost(resources[1])
+	for _, tc := range []struct{ room, want int }{
+		{-1, 0},
+		{0, 0},
+		{first - 1, 0},
+		{first, 1},
+		{first + second - 1, 1},
+		{first + second, 2},
+		{1 << 20, 3},
+	} {
+		if got := firstWithin(resources, tc.room); len(got) != tc.want {
+			t.Errorf("firstWithin(room %d) = %d resources, want the first %d", tc.room, len(got), tc.want)
 		}
 	}
 }

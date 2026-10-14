@@ -144,24 +144,72 @@ func TestTheResourceListChangesWhenACallFirstUsesAConnection(t *testing.T) {
 	}
 }
 
-func TestResourceListingKeepsTheFirst200RelationsOfEachConnection(t *testing.T) {
+// resources/list names the first relations of each connection in use, by
+// schema and then name, as many as fit in an equal share of the inline limit;
+// the template reads the others, and each audit line counts what it listed.
+func TestResourceListingKeepsTheFirstRelationsOfEachConnectionThatFit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_resources_cap"
-	testdb.CreateDatabase(t, name, `CREATE SCHEMA a; CREATE SCHEMA b; CREATE SCHEMA c;
+	testdb.CreateDatabase(t, name, `CREATE SCHEMA a; CREATE SCHEMA b;
 		DO $$ BEGIN FOR i IN 1..150 LOOP
 			EXECUTE format('CREATE TABLE a.t%s (id int)', lpad(i::text, 3, '0'));
 			EXECUTE format('CREATE TABLE b.t%s (id int)', lpad(i::text, 3, '0'));
-		END LOOP; END $$;
-		CREATE TABLE c.past_the_cap (id int);`)
-	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{"db": direct(testdb.DSN(t, testdb.Superuser, name))}))
+		END LOOP; END $$;`)
+	dsn := testdb.DSN(t, testdb.Superuser, name)
+	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{"one": direct(dsn), "two": direct(dsn)}))
 
-	if got := sizes.ReplaceAllString(s.readTable(t, "pgglass://db/c/past_the_cap"), "SIZE"); got != "c.past_the_cap: table, SIZE\n  id integer" {
-		t.Errorf("a table past the cap, through the template:\n%s", got)
+	if got := sizes.ReplaceAllString(s.readTable(t, "pgglass://one/b/t150"), "SIZE"); got != "b.t150: table, SIZE\n  id integer" {
+		t.Errorf("a relation past the listing, through the template:\n%s", got)
 	}
-	names := resourceNames(s.tableResources(t))
-	if len(names) != 200 || names[0] != "db: a.t001" || names[149] != "db: a.t150" || names[150] != "db: b.t001" || names[199] != "db: b.t050" {
-		t.Errorf("%d resources: %v", len(names), names)
+	alone, size := s.listing(t)
+	next, err := json.Marshal(&mcp.Resource{Description: "table", MIMEType: "text/plain", Name: "one: a.t999", URI: "pgglass://one/a/t999"})
+	if err != nil {
+		t.Fatal(err)
 	}
+	if !slices.Equal(alone, firstTables("one", len(alone))) || size > config.InlineMaxBytes || size+len(",")+len(next) < config.InlineMaxBytes {
+		t.Errorf("resources/list of one connection, %d bytes of JSON: %d resources %v; want the first that fit in %d",
+			size, len(alone), alone, config.InlineMaxBytes)
+	}
+
+	s.ok(t, "pg_schema", map[string]any{"connection": "two"})
+	both, size := s.listing(t)
+	half := len(both) / 2
+	if !slices.Equal(both, slices.Concat(firstTables("one", half), firstTables("two", half))) || 2*half < len(alone)-1 || size > config.InlineMaxBytes {
+		t.Errorf("resources/list of two connections, %d bytes of JSON: %v; want the first %d or so of each", size, both, len(alone)/2)
+	}
+	rows := map[string][]int{}
+	for _, line := range s.auditLines(t) {
+		if line.Tool == "resource_list" {
+			rows[line.Connection] = append(rows[line.Connection], line.Rows)
+		}
+	}
+	if want := map[string][]int{"one": {len(alone), half}, "two": {half}}; !reflect.DeepEqual(rows, want) {
+		t.Errorf("resource_list audit rows = %v, want %v", rows, want)
+	}
+}
+
+func (s *session) listing(t *testing.T) (names []string, jsonBytes int) {
+	t.Helper()
+	res, err := s.ListResources(t.Context(), nil)
+	if err != nil {
+		t.Fatalf("resources/list: %v", err)
+	}
+	wire, err := json.Marshal(res)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range res.Resources {
+		names = append(names, r.Name)
+	}
+	return names, len(wire)
+}
+
+func firstTables(conn string, n int) []string {
+	var names []string
+	for i := range n {
+		names = append(names, fmt.Sprintf("%s: a.t%03d", conn, i+1))
+	}
+	return names
 }
 
 func TestResourceTemplateNamesAnyTable(t *testing.T) {

@@ -23,7 +23,7 @@ pgglass is an [MCP](https://modelcontextprotocol.io) server that gives AI agents
 
 Calls run in parallel, across connections and on the same one. The server and each tool have a display title, and on connecting the server gives the agent short instructions on using the tools well. It serves over stdio, or over Streamable HTTP with `--http`, speaks MCP revisions 2024-11-05 to 2026-07-28 and settles on the newest the client speaks too. See the [usage guide](docs/usage.md).
 
-Tables are also MCP resources, `pgglass://<connection>/<schema>/<table>`, read through the same role check, limits and audit log as the tools: in Claude Code, `@`-mention one to add it to a prompt as `pg_schema` describes it. The server lists the tables of the connections the agent has used, so listing them opens no other connection. See [resources](docs/usage.md#mention-tables-as-resources).
+Tables are also MCP resources, `pgglass://<connection>/<schema>/<table>`, read through the same role check, limits and audit log as the tools: in Claude Code, `@`-mention one to add it to a prompt as `pg_schema` describes it. The server lists the tables of the connections the agent has used, so listing them opens no other connection, and the listing keeps to 10 KB. See [resources](docs/usage.md#mention-tables-as-resources).
 
 ## Install
 
@@ -176,7 +176,7 @@ The calling agent is treated as untrusted: instructions can reach it through the
 5. **Results are bounded.**
    - Rows past `max_rows` or `max_bytes` are not kept, and the rest of the query is cancelled on the server. A single server message larger than `max_bytes` plus 1 MiB is refused unread (see [Defaults](docs/configuration.md#defaults)).
    - A result whose output would exceed 10 KB is written to a CSV file only you can read (mode 0600), and summarized (see [Large results](docs/usage.md#large-results)).
-   - No tool result or resource read exceeds 10 KB, errors and the role check's findings included: the findings take at most half, and an error too long for the rest is cut in the middle. The one exception is the [confirmation](docs/usage.md#confirmation) question a client on revision 2026-07-28 gets as the result of the call: it shows the user, not the agent, the whole statement and its params, however long.
+   - No tool result, resource read or resource listing exceeds 10 KB, errors and the role check's findings included: the findings take at most half, and an error too long for the rest is cut in the middle. The one exception is the [confirmation](docs/usage.md#confirmation) question a client on revision 2026-07-28 gets as the result of the call: it shows the user, not the agent, the whole statement and its params, however long.
    - Protocol errors keep to 10 KB too, except those the MCP SDK returns before pgglass sees the request, which only a client that does not follow the protocol gets (see [Errors](docs/usage.md#errors)).
    - `pg_schema` reads at most 500 schemas or relations per listing from the catalog, and cuts long comments and definitions as it reads them (see [Explore the schema](docs/usage.md#explore-the-schema)).
    - `pg_diff_schema` reads each side's schema as one catalog value, which `max_bytes` bounds too: a larger schema fails, naming its side, until `max_bytes` is raised.
