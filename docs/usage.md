@@ -78,7 +78,7 @@ id	status	total	placed_at
 
 The last line counts the rows, and says when a limit cut the result: `(1000 rows; truncated: max_rows=1000)`.
 
-A value or Postgres error can hold bytes that are not UTF-8: a session in a `SQL_ASCII` database can write any byte to the shared catalogs, such as a database comment, and `pg_stat_activity` shows other databases' queries in their own encoding. Each run of such bytes comes back as one U+FFFD, `�`, as JSON would carry it, in the spill file too.
+A value or Postgres error can hold bytes that are not UTF-8: a session in a `SQL_ASCII` database can write any byte to the shared catalogs, such as a database comment, and `pg_stat_activity` shows other databases' queries in their own encoding. Each run of such bytes comes back as one U+FFFD, `�`, in the spill file too, so that 10 KB holds as the client decodes a response.
 
 ### Formats
 
