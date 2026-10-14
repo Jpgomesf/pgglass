@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"strings"
 	"time"
 
-	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -106,20 +106,31 @@ func httpHandler(server *mcp.Server, token string) http.Handler {
 		&mcp.StreamableHTTPOptions{Stateless: true, PropagateRequestCancellation: true}))
 	var handler http.Handler = mux
 	if token != "" {
-		handler = auth.RequireBearerToken(tokenVerifier(token), &auth.RequireBearerTokenOptions{AllowMissingExpiration: true})(handler)
+		handler = requireToken(token, handler)
 	}
 	return loopbackOrigins(handler)
 }
 
-func tokenVerifier(token string) auth.TokenVerifier {
+func requireToken(token string, next http.Handler) http.Handler {
 	want := sha256.Sum256([]byte(token))
-	return func(_ context.Context, got string, _ *http.Request) (*auth.TokenInfo, error) {
-		sum := sha256.Sum256([]byte(got))
-		if subtle.ConstantTimeCompare(sum[:], want[:]) != 1 {
-			return nil, auth.ErrInvalidToken
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fields := strings.Fields(r.Header.Get("Authorization"))
+		if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+			unauthorized(w, `Bearer realm="pgglass"`, "no bearer token")
+			return
 		}
-		return &auth.TokenInfo{}, nil
-	}
+		got := sha256.Sum256([]byte(fields[1]))
+		if subtle.ConstantTimeCompare(got[:], want[:]) != 1 {
+			unauthorized(w, `Bearer realm="pgglass", error="invalid_token"`, "invalid token")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func unauthorized(w http.ResponseWriter, challenge, reason string) {
+	w.Header().Set("WWW-Authenticate", challenge)
+	http.Error(w, reason, http.StatusUnauthorized)
 }
 
 func loopbackOrigins(next http.Handler) http.Handler {

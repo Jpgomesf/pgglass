@@ -290,6 +290,42 @@ func TestHTTPRequiresTheBearerToken(t *testing.T) {
 	}
 }
 
+// A 401 carries the WWW-Authenticate challenge that RFC 9110 and RFC 6750
+// require, so a client learns that it must send a bearer token, and that the
+// one it sent is invalid. A request with the token gets none.
+func TestHTTPChallengesRequestsWithoutTheToken(t *testing.T) {
+	isolateHome(t)
+	t.Setenv(authEnv, testToken)
+	srv := startHTTP(t, writeConfig(t, connections(map[string]any{})))
+	for name, tc := range map[string]struct {
+		auth, challenge string
+		status          int
+	}{
+		"no token":    {"", `Bearer realm="pgglass"`, http.StatusUnauthorized},
+		"basic auth":  {"Basic " + testToken, `Bearer realm="pgglass"`, http.StatusUnauthorized},
+		"wrong token": {"Bearer " + testToken[1:], `Bearer realm="pgglass", error="invalid_token"`, http.StatusUnauthorized},
+		"the token":   {"bearer  " + testToken, "", http.StatusOK},
+	} {
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.url, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Accept", "application/json, text/event-stream")
+		if tc.auth != "" {
+			req.Header.Set("Authorization", tc.auth)
+		}
+		res, err := http.DefaultClient.Do(req) //nolint:gosec
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = res.Body.Close()
+		if challenge := res.Header.Values("WWW-Authenticate"); res.StatusCode != tc.status || strings.Join(challenge, "; ") != tc.challenge {
+			t.Errorf("%s: %d with WWW-Authenticate %q, want %d with %q", name, res.StatusCode, challenge, tc.status, tc.challenge)
+		}
+	}
+}
+
 // A page on another origin, or one rebinding its name to 127.0.0.1, gets 403:
 // requests with a foreign Origin or Host are refused.
 func TestHTTPRefusesForeignOriginsAndHosts(t *testing.T) {
