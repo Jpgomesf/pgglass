@@ -64,7 +64,7 @@ The baseline, `internal/bench/testdata/bench-baseline.json`, holds these sizes:
 
 ## The check
 
-`make bench` runs `internal/bench`. `TestTokenBudget` fails when a scenario takes more than 10% more bytes than in the baseline, or `tools/list` more than 6,000 bytes, and `TestDocsShowTheBaseline` when the table above differs from the baseline. CI runs it in a job of its own, and with every other test on each supported Postgres.
+`make bench` runs `internal/bench`. `TestTokenBudget` fails when a scenario takes more than 10% more bytes than in the baseline, or `tools/list` more than 6,000 bytes, and `TestDocsShowTheBaseline` when the table above differs from the baseline. CI runs it with every other test on each supported Postgres.
 
 When a change makes a response larger on purpose, or smaller, `make bench-baseline` measures again and rewrites the baseline and the table above: commit both.
 
