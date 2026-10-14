@@ -8,7 +8,6 @@
   <a href="https://github.com/Jpgomesf/pgglass/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Jpgomesf/pgglass/actions/workflows/ci.yml/badge.svg?branch=main"></a>
   <a href="https://github.com/Jpgomesf/pgglass/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Jpgomesf/pgglass"></a>
   <a href="https://pkg.go.dev/github.com/jpgomesf/pgglass"><img alt="Go Reference" src="https://pkg.go.dev/badge/github.com/jpgomesf/pgglass.svg"></a>
-  <a href="https://goreportcard.com/report/github.com/jpgomesf/pgglass"><img alt="Go Report Card" src="https://goreportcard.com/badge/github.com/jpgomesf/pgglass"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
   <img alt="PostgreSQL 15–18" src="https://img.shields.io/badge/PostgreSQL-15%E2%80%9318-336791?logo=postgresql&logoColor=white">
 </p>
