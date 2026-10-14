@@ -8,10 +8,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/config"
 )
 
-// An unknown connection's error lists every configured name and quotes the
-// name as given: with 400 connections it took 16 kB, and so did a name of
-// 20,000 characters. Now it is cut in the middle to the inline limit. These
-// fail before any query, so they need no database.
+// An unknown connection's error, listing every configured name and quoting the
+// one given, is cut in the middle to the inline limit.
 func TestUnknownConnectionErrorStaysWithinTheInlineLimit(t *testing.T) {
 	conns := map[string]config.Connection{}
 	for i := range 400 {

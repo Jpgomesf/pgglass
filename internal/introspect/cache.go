@@ -12,7 +12,7 @@ const DefaultCacheTTL = 5 * time.Minute
 // calls do not hit the catalogs. It is safe for concurrent use.
 type Cache struct {
 	ttl time.Duration
-	now func() time.Time // the clock; tests replace it
+	now func() time.Time
 
 	mu      sync.Mutex
 	entries map[string]cacheEntry
@@ -32,10 +32,8 @@ func NewCache(ttl time.Duration) *Cache {
 	return &Cache{ttl: ttl, now: time.Now, entries: make(map[string]cacheEntry)}
 }
 
-// Get returns the value cached under key, calling load and caching its
-// result when the entry is missing or expired. Errors are not cached. load
-// runs without the lock held, so a slow load does not block other keys;
-// concurrent misses on the same key may each call load.
+// Get returns the value cached under key, or what load returns, caching it
+// unless load fails; concurrent misses on a key may each call load.
 func (c *Cache) Get(key string, load func() (string, error)) (string, error) {
 	if v, ok := c.lookup(key); ok {
 		return v, nil
@@ -58,8 +56,6 @@ func (c *Cache) lookup(key string) (string, bool) {
 	return e.value, true
 }
 
-// store caches value under key and drops every expired entry, so keys that
-// are never asked for again do not pile up.
 func (c *Cache) store(key, value string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

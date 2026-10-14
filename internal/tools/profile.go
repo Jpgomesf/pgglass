@@ -18,8 +18,6 @@ type profileArgs struct {
 	Column     string `json:"column"`
 }
 
-// profile runs pg_profile: the values of a table's columns, from pg_stats or
-// from a sample, after a line that says which, inline or spilled to a file.
 func (h *Handlers) profile(ctx context.Context, raw json.RawMessage, c *call) (string, error) {
 	var args profileArgs
 	if err := decode(raw, &args); err != nil {
@@ -32,8 +30,6 @@ func (h *Handlers) profile(ctx context.Context, raw json.RawMessage, c *call) (s
 	if err != nil {
 		return "", err
 	}
-	// The statistics of a catalog the guard denies, such as pg_authid's, hold
-	// its values.
 	if err := guard.CheckRelation(table); err != nil {
 		return "", err
 	}
@@ -46,8 +42,6 @@ func (h *Handlers) profile(ctx context.Context, raw json.RawMessage, c *call) (s
 	}
 	c.rows = len(p.Columns)
 	summary := p.Summary()
-	// Whole: five uuids among the most common values alone take more than the
-	// 200 characters a query's inline cells are cut to.
 	out, err := h.spill.OutputWhole("pg_profile", args.Connection, p.Result(), render.Format(h.cfg.Defaults.Format),
 		h.room(c)-len(summary+"\n"))
 	if err != nil {
@@ -56,10 +50,6 @@ func (h *Handlers) profile(ctx context.Context, raw json.RawMessage, c *call) (s
 	return summary + "\n" + out, nil
 }
 
-// profileTarget returns the schema and name of the table a pg_profile call
-// names: table as schema.name, or name in schema, or in the connection's
-// default_schema. It refuses them, and column, when longer than Postgres
-// keeps a name.
 func (h *Handlers) profileTarget(args profileArgs) (schema, table string, err error) {
 	if args.Table == "" {
 		return "", "", errors.New("table must not be empty")

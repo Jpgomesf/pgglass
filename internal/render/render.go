@@ -40,13 +40,8 @@ const (
 	CSV      Format = "csv"
 )
 
-// Render renders the header and rows of res in format f, and nothing else:
-// no row counts or truncation notes. NULL renders distinctly from the empty
-// string. maxCell > 0 truncates longer cell values to maxCell characters
-// followed by "…[+N chars]", N being the number of characters dropped; 0
-// disables cell truncation. Every rendering ends with a line break. An
-// unknown format is an error, and so is a row whose length differs from the
-// number of columns.
+// Render renders only the header and rows of res in format f, NULL distinct
+// from "", cutting cells past maxCell characters when maxCell > 0.
 func Render(res *result.Result, f Format, maxCell int) (string, error) {
 	if err := checkShape(res); err != nil {
 		return "", err
@@ -65,7 +60,6 @@ func Render(res *result.Result, f Format, maxCell int) (string, error) {
 	}
 }
 
-// checkShape rejects a nil result and rows that do not match the columns.
 func checkShape(res *result.Result) error {
 	if res == nil {
 		return errors.New("render: nil result")
@@ -78,12 +72,11 @@ func checkShape(res *result.Result) error {
 	return nil
 }
 
-// lineFormat is a format with a header line followed by one line per row.
 type lineFormat struct {
-	open, sep, end string               // written before, between and after the cells of a line
-	rule           string               // when set, a line of rule cells follows the header
-	name           func(string) string  // encodes a column name
-	value          func(*string) string // encodes a cell value; nil is NULL
+	open, sep, end string
+	rule           string
+	name           func(string) string
+	value          func(*string) string
 }
 
 var (
@@ -135,8 +128,6 @@ func csvValue(v *string) string {
 	return csvQuote(*v)
 }
 
-// csvQuote quotes s when RFC 4180 requires it, and when s is empty so that it
-// reads back as the empty string rather than as NULL.
 func csvQuote(s string) string {
 	if s != "" && !strings.ContainsAny(s, ",\"\r\n") {
 		return s
@@ -155,7 +146,6 @@ func markdownValue(v *string) string {
 	}
 }
 
-// clip truncates a cell value; NULL stays NULL.
 func clip(v *string, limit int) *string {
 	if v == nil {
 		return nil
@@ -166,9 +156,6 @@ func clip(v *string, limit int) *string {
 	return v
 }
 
-// truncate cuts s to limit characters followed by "…[+N chars]", N being the
-// number of characters dropped, and reports whether it did. limit <= 0
-// never cuts.
 func truncate(s string, limit int) (string, bool) {
 	if limit <= 0 || len(s) <= limit {
 		return s, false

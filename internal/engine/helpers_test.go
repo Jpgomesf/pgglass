@@ -16,18 +16,13 @@ import (
 
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-// db is the connection name newManager configures.
 const db = "db"
 
-// newManager returns a Manager whose connection db resolves to dsn. It is
-// closed when t ends.
 func newManager(t *testing.T, d config.Defaults, dsn string) *engine.Manager {
 	t.Helper()
 	return managerFor(t, d, map[string]config.Connection{db: {Source: "direct", DSN: dsn}})
 }
 
-// managerFor returns a Manager for conns with d, its unset settings at their
-// defaults. It is closed when t ends.
 func managerFor(t *testing.T, d config.Defaults, conns map[string]config.Connection) *engine.Manager {
 	t.Helper()
 	m := engine.New(&config.Config{Defaults: d.WithDefaults(), Connections: conns})
@@ -35,8 +30,6 @@ func managerFor(t *testing.T, d config.Defaults, conns map[string]config.Connect
 	return m
 }
 
-// oneConn limits dsn's pool to one connection, so consecutive queries share
-// a session.
 func oneConn(dsn string) string { return dsn + "&pool_max_conns=1" }
 
 func mustQuery(t *testing.T, m *engine.Manager, q engine.Query) *result.Result {
@@ -48,7 +41,6 @@ func mustQuery(t *testing.T, m *engine.Manager, q engine.Query) *result.Result {
 	return res
 }
 
-// value returns the only value of the first row of a successful query.
 func value(t *testing.T, m *engine.Manager, sql string) string {
 	t.Helper()
 	res := mustQuery(t, m, engine.Query{SQL: sql})
@@ -73,7 +65,6 @@ func deref(s *string) string {
 	return *s
 }
 
-// eventually fails t unless cond holds within a few seconds.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()
 	for deadline := time.Now().Add(5 * time.Second); !cond(); {
@@ -84,10 +75,6 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// stub is the "stub" credential source. It resolves a connection's DSN
-// field, counts calls per connection name and, for names with a gate, waits
-// for the gate to open first. Tests use distinct connection names and call
-// reset first, so repeated runs (-count) start clean.
 var stub = &stubSource{calls: map[string]int{}, gates: map[string]chan struct{}{}}
 
 func init() { resolver.RegisterSource(stub) }
@@ -117,7 +104,6 @@ func (s *stubSource) Resolve(ctx context.Context, name string, conn config.Conne
 	return conn.DSN, nil
 }
 
-// reset forgets the calls and gate recorded for name and returns name.
 func (s *stubSource) reset(name string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -132,7 +118,6 @@ func (s *stubSource) callCount(name string) int {
 	return s.calls[name]
 }
 
-// hold makes Resolve for name wait until the returned function is called.
 func (s *stubSource) hold(name string) (release func()) {
 	gate := make(chan struct{})
 	s.mu.Lock()

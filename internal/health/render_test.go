@@ -27,7 +27,6 @@ func ptr[T any](v T) *T { return &v }
 func TestConnectionLines(t *testing.T) {
 	c := connections{Max: 100, Used: 9, States: []stateCount{{"idle", 5}, {"active", 2}, {"", 2}}}
 	equal(t, connectionLines(c, super), []string{"9 of max_connections 100: idle 5, active 2, no state 2"})
-	// Backends whose type the role may not see may not be client backends.
 	equal(t, connectionLines(c, clean),
 		[]string{"up to 9 of max_connections 100: idle 5, active 2; the type and state of 2 are not visible to role ro_clean"})
 	equal(t, connectionLines(connections{Max: 100, Used: 3, States: []stateCount{{"", 3}}}, clean),
@@ -39,7 +38,7 @@ func TestConnectionLines(t *testing.T) {
 func TestSessionLines(t *testing.T) {
 	blocked := list[session]{Total: 12, Items: []session{
 		{PID: 76, Database: "app", State: "active", Seconds: 65, Wait: "Lock:transactionid", App: "psql", BlockedBy: []int{75, 74}},
-		{PID: 80, Database: "app", App: `say "hi"`, BlockedBy: []int{76}}, // another role's session
+		{PID: 80, Database: "app", App: `say "hi"`, BlockedBy: []int{76}},
 	}}
 	equal(t, blockedLines(blocked, clean), []string{
 		`pid 76, database app, active for 1m5s, waiting on Lock:transactionid, application "psql", blocked by 75 74`,
@@ -48,8 +47,6 @@ func TestSessionLines(t *testing.T) {
 	})
 	equal(t, blockedLines(list[session]{}, clean), []string{"none"})
 
-	// A session idle in transaction is as old as its transaction; one whose
-	// transaction failed, as its last query.
 	long := list[session]{Total: 2, Items: []session{
 		{PID: 75, Database: "app", State: "idle in transaction", Seconds: 3700, Wait: "Client:ClientRead"},
 		{PID: 76, Database: "app", State: "idle in transaction (aborted)", Seconds: 65, Wait: "Client:ClientRead"},
@@ -66,9 +63,8 @@ func TestSessionLines(t *testing.T) {
 	equal(t, longRunningLines(list[session]{}, super), []string{"none"})
 }
 
-// A long-running session's age is its transaction's when the transaction
-// started before its query: the line then says the transaction is that old,
-// not its state, as it does for a session idle in transaction.
+// A long-running session whose transaction predates its query is as old as the
+// transaction, and its line says so, as for a session idle in transaction.
 func TestLongRunningLinesSayWhatTheirAgeMeasures(t *testing.T) {
 	got, err := decoded(longRunningLines)([]byte(`{"Total": 4, "Items": [
 		{"PID": 75, "Database": "app", "State": "active", "Seconds": 7200, "FromTransaction": true, "Wait": "Timeout:PgSleep"},
@@ -112,7 +108,6 @@ func TestStatisticsLines(t *testing.T) {
 		[]string{"replica: last transaction replayed 3s ago, 8192 bytes of received WAL not replayed yet"})
 }
 
-// fakeQuerier returns one value, or an error, and records the queries it ran.
 type fakeQuerier struct {
 	value     *string
 	truncated bool
@@ -155,7 +150,7 @@ func TestSectionRun(t *testing.T) {
 	boom := errors.New("dial tcp: connection refused")
 	for _, q := range []*fakeQuerier{
 		{err: boom},
-		{value: ptr(`{"Database": "app", "Hits": 1}`)}, // a key the SQL misspells
+		{value: ptr(`{"Database": "app", "Hits": 1}`)},
 		{value: ptr(`{}`), truncated: true},
 	} {
 		if got, err := s.run(context.Background(), q, clean); err == nil {

@@ -7,8 +7,8 @@ import "github.com/jackc/pgx/v5/pgtype"
 // Column describes one result column. Names may repeat (SELECT 1 AS a, 2 AS a).
 type Column struct {
 	Name     string
-	TypeOID  uint32 // pg_type.oid of the column type
-	TypeName string // pg_type.typname, e.g. "int4", "numeric", "_text", "order_status"
+	TypeOID  uint32
+	TypeName string
 }
 
 // Result is the outcome of one query.
@@ -38,7 +38,7 @@ func Text(names ...string) *Result {
 func (r *Result) AddRow(values ...string) {
 	row := make([]*string, len(values))
 	for i, v := range values {
-		row[i] = &v // v is a new variable in each iteration
+		row[i] = &v
 	}
 	r.Rows = append(r.Rows, row)
 }

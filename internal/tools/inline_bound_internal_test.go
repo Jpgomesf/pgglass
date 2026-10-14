@@ -12,11 +12,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
-// cutCount matches the note cutMiddle leaves and captures its count.
 var cutCount = regexp.MustCompile(`…\[(\d+) bytes cut\]…`)
 
-// quotingError is a Postgres error that quotes a value of n characters, as
-// a failed cast quotes its input.
 func quotingError(n int) error {
 	return &dbError{&engine.QueryError{SQLState: "22P02", Hint: "Cast it to text first.",
 		Message: `invalid input syntax for type integer: "` + strings.Repeat("y", n) + `"`}}
@@ -41,15 +38,12 @@ func TestCutMiddle(t *testing.T) {
 			t.Errorf("cut to %d: dropped %d bytes, the note says %d", limit, len(long)-len(got)+len(m[0]), n)
 		}
 	}
-	// A cut never splits a character.
 	accents := strings.Repeat("é", 1000)
 	if got := cutMiddle(accents, 101); len(got) > 101 || !utf8.ValidString(got) {
 		t.Errorf("cut of 2-byte characters to 101 bytes: %d bytes, valid UTF-8 %t", len(got), utf8.ValidString(got))
 	}
 }
 
-// tenReports is the notice of a fan-out to ten connections whose roles each
-// have a finding.
 func tenReports() string {
 	var b strings.Builder
 	for i := range 10 {
@@ -87,9 +81,8 @@ func TestRoom(t *testing.T) {
 	}
 }
 
-// The lines of the connections that failed share half of the room, each cut
-// in the middle to its share, and the rows take the rest. They came on top
-// of rows already fitted to the inline limit, whole, however long.
+// Failed connections' lines share half the room, each cut in the middle to its
+// share, and the rows take the rest.
 func TestFanoutTextFitsFailureLines(t *testing.T) {
 	h := &Handlers{spill: &spill.Store{Dir: t.TempDir(), InlineMaxBytes: 1000}}
 	var values []string
@@ -104,7 +97,6 @@ func TestFanoutTextFitsFailureLines(t *testing.T) {
 		t.Errorf("rows and a failure = %v, %d bytes:\n%s", err, len(got), got)
 	}
 
-	// When every connection failed, the lines share all of the room.
 	_, err = h.fanoutText([]fanoutResult{{conn: "a", err: quotingError(5000)}, {conn: "b", err: quotingError(5000)}}, render.TSV, 1000)
 	text := errorText(err)
 	if err == nil || len(text) > 1000 || !strings.HasPrefix(text, "a: ERROR: ") || !strings.Contains(text, "\nb: ERROR: ") ||

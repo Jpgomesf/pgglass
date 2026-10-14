@@ -91,10 +91,8 @@ func TestParseRejectsInvalidSettings(t *testing.T) {
 		{"negative max rows", `"max_rows": -1`, "defaults.max_rows must be positive, got -1"},
 		{"negative max bytes", `"max_bytes": -1024`, "defaults.max_bytes must be positive, got -1024"},
 		{"negative spill ttl", `"spill_ttl_hours": -24`, "defaults.spill_ttl_hours must be positive, got -24"},
-		// Postgres takes timeouts as an int of milliseconds.
 		{"statement timeout past int milliseconds", `"statement_timeout_seconds": 2147484`, "defaults.statement_timeout_seconds must be at most 2147483, got 2147484"},
 		{"lock timeout past int milliseconds", `"lock_timeout_seconds": 2147484`, "defaults.lock_timeout_seconds must be at most 2147483, got 2147484"},
-		// The spill TTL becomes a time.Duration.
 		{"spill ttl past a duration", `"spill_ttl_hours": 2562048`, "defaults.spill_ttl_hours must be at most 2562047, got 2562048"},
 		{"unknown format", `"format": "xml"`, `defaults.format must be one of tsv, json, markdown, got "xml"`},
 		{"csv is not a config format", `"format": "csv"`, `defaults.format must be one of tsv, json, markdown, got "csv"`},
@@ -129,7 +127,7 @@ func TestParseReportsEveryInvalidSetting(t *testing.T) {
 func TestParseRejectsMalformedJSON(t *testing.T) {
 	for _, doc := range []string{
 		`{"defaults": `,
-		`{"defaults": {}} {"connections": {}}`, // json.Unmarshal refused trailing data too
+		`{"defaults": {}} {"connections": {}}`,
 		`{"defaults": {}}}`,
 	} {
 		if _, err := Parse([]byte(doc)); err == nil || !strings.Contains(err.Error(), "parse config.json") {
@@ -153,8 +151,6 @@ func TestParseRejectsUnknownKeys(t *testing.T) {
 	}
 }
 
-// withConnections returns a config.json document whose connections have
-// the given names.
 func withConnections(t *testing.T, names ...string) []byte {
 	t.Helper()
 	conns := map[string]Connection{}
@@ -168,17 +164,15 @@ func withConnections(t *testing.T, names ...string) []byte {
 	return doc
 }
 
-// A connection name takes at most 63 bytes, as a Postgres name does: the
-// tools repeat it in their output, which must stay within the inline limit,
-// and a fanned-out pg_query's footer and pg_diff_schema's first line name
-// several. Longer names went through, and took those past the limit.
+// A connection name takes at most 63 bytes, as a Postgres name does, so the
+// tool output that repeats names stays within the inline limit.
 func TestParseRejectsConnectionNamesOver63Bytes(t *testing.T) {
 	ascii, accents := strings.Repeat("c", 63), strings.Repeat("é", 31)+"x"
 	if _, err := Parse(withConnections(t, ascii, accents)); err != nil {
 		t.Errorf("names of 63 bytes: %v", err)
 	}
 
-	ascii, accents = ascii+"x", strings.Repeat("é", 32) // 64 bytes each
+	ascii, accents = ascii+"x", strings.Repeat("é", 32)
 	_, err := Parse(withConnections(t, "db", accents, ascii))
 	want := "invalid config.json: " +
 		`connection name "` + ascii + `" is 64 bytes: connection names take at most 63, as Postgres names do` + "\n" +
@@ -188,10 +182,8 @@ func TestParseRejectsConnectionNamesOver63Bytes(t *testing.T) {
 	}
 }
 
-// A default_schema over 63 bytes started the server, and then failed every
-// call that used it, naming a schema argument the agent never passed:
-// Postgres would cut it to its first 63 bytes, which may name another schema.
-// The server now refuses to start with one.
+// The server refuses a default_schema over 63 bytes, which Postgres would cut
+// to its first 63, instead of failing every call that uses it.
 func TestParseRejectsDefaultSchemasOver63Bytes(t *testing.T) {
 	withSchema := func(schema string) []byte {
 		return []byte(`{"connections": {"db": {"source": "direct", "default_schema": "` + schema + `"}}}`)

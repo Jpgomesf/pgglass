@@ -12,9 +12,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/resolver"
 )
 
-// listConnections runs pg_list_connections: every connection, by name, with
-// its role check once that has run, inline or, past the inline limit,
-// spilled to a file, one line per row.
 func (h *Handlers) listConnections(_ context.Context, raw json.RawMessage, c *call) (string, error) {
 	if err := decode(raw, &struct{}{}); err != nil {
 		return "", err
@@ -34,7 +31,6 @@ func (h *Handlers) listConnections(_ context.Context, raw json.RawMessage, c *ca
 	return h.linesOutput("pg_list_connections", "", "line", lines, "", room)
 }
 
-// flags describes how a connection is configured.
 func flags(conn config.Connection) []string {
 	f := []string{conn.Source}
 	if conn.RequiresVPN {

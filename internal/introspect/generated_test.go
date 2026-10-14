@@ -17,10 +17,8 @@ BEGIN
 END $$;
 ANALYZE prices;`
 
-// From PostgreSQL 18, which has them, gross is a virtual generated column,
-// and a stored one before. A virtual one is described and compared as
-// VIRTUAL, and ANALYZE keeps no statistics on it: pg_profile shows none for
-// it among the others, and samples it alone.
+// From PostgreSQL 18, gross is a virtual generated column, shown as VIRTUAL;
+// ANALYZE keeps no statistics on it, so pg_profile samples it alone.
 func TestVirtualGeneratedColumns(t *testing.T) {
 	const name = "introspect_generated"
 	testdb.CreateDatabase(t, name, generatedSQL)

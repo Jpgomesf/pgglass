@@ -7,22 +7,14 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// prewarmDB creates database name with pg_prewarm, whose functions CREATE
-// EXTENSION leaves executable by PUBLIC, and a table t that ro_clean may
-// read, and returns a connection to it as ro_clean, a role with nothing else
-// to report.
 func prewarmDB(t *testing.T, name string) config.Connection {
 	t.Helper()
 	testdb.CreateDatabase(t, name, "CREATE EXTENSION pg_prewarm; CREATE TABLE t (v int); GRANT SELECT ON t TO "+testdb.RoleClean)
 	return direct(testdb.DSN(t, testdb.RoleClean, name))
 }
 
-// pg_prewarm's functions act past READ ONLY and the rollback:
-// autoprewarm_dump_now writes $PGDATA/autoprewarm.blocks, and pg_prewarm
-// reads a relation into shared buffers, evicting the pages other sessions
-// use. role_check warn admits ro_clean, which may execute both, so the guard
-// is what stops them: pg_query rejects each call before it reaches the
-// database.
+// pg_prewarm's functions act past READ ONLY and the rollback, so pg_query
+// rejects them before the database, though role_check warn admits ro_clean.
 func TestQueryRejectsPrewarmFunctions(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, map[string]config.Connection{

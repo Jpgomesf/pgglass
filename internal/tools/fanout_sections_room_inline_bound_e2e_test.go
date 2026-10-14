@@ -11,11 +11,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// sectionsRoomFixture lets ro_clean write twelve long-named tables, so its
-// role check reports a table_write warning of about 1.2 kB, and gives each
-// of the schemas s0 to s9 a relation t: in s0 a view whose cast fails
-// quoting a 20,000-character value, in s1 to s9 a table whose one column is
-// named after its schema, holding 100 rows of 100 characters.
 func sectionsRoomFixture() string {
 	var b strings.Builder
 	b.WriteString(writableTables() + "\n")
@@ -29,9 +24,6 @@ func sectionsRoomFixture() string {
 	return b.String()
 }
 
-// sectionsRoom creates database db from sectionsRoomFixture and connects to
-// it under role_check warn, as ro_clean, through a connection named names[i]
-// whose default_schema is s<i>.
 func sectionsRoom(t *testing.T, db string, names []string, spillDir string) *session {
 	t.Helper()
 	testdb.CreateDatabase(t, db, sectionsRoomFixture())
@@ -42,8 +34,6 @@ func sectionsRoom(t *testing.T, db string, names []string, spillDir string) *ses
 	return connectSpillingTo(t, newConfig(config.RoleCheckWarn, conns), spillDir)
 }
 
-// checkSpilledRows checks that the spill files at paths hold every row of
-// the tables of s1 to s9, by the name of their column.
 func checkSpilledRows(t *testing.T, s *session, paths []string) {
 	t.Helper()
 	rows := map[string]int{}
@@ -62,16 +52,8 @@ func checkSpilledRows(t *testing.T, s *session, paths []string) {
 	}
 }
 
-// A fanned-out pg_query whose columns differ gives each connection that
-// succeeded a section of its own, and the sections share what the role
-// check's notices and the failed connections' lines leave of the inline
-// limit. A section that spilled said what it does of its file in about 430
-// bytes however small its share, so under role_check warn ten connections
-// whose role has a table_write finding (the notices take their half), one
-// of them failing with an error that quotes a long value (its line takes
-// half of the rest) and nine sections that spill (shares of about 256 bytes)
-// returned 11,557 bytes. Now such a section only names its file and counts
-// its rows, and the result names every file.
+// Fan-out sections share what notices and failure lines leave of the inline
+// limit; a spilled section in a small share only names its file and row count.
 func TestFanoutSectionsAfterNoticesAndFailuresStayWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	var names []string
@@ -87,15 +69,11 @@ func TestFanoutSectionsAfterNoticesAndFailuresStayWithinTheInlineLimit(t *testin
 	if !strings.Contains(got, "\nwarehouse-0: ERROR: invalid input syntax for type integer: \"yyy") {
 		t.Errorf("no line for the error of warehouse-0:\n%s", got)
 	}
-	// Every row of warehouse-1 to warehouse-9 is in a spill file the result names.
 	checkSpilledRows(t, s, regexp.MustCompile(regexp.QuoteMeta(s.spillDir)+`/spill-[^\s]+\.csv`).FindAllString(got, -1))
 }
 
-// Under connection names of 63 bytes, the longest config.json takes, and a
-// spill directory of 600 bytes, even sections that only name their files take
-// more than what the notices and the failure line leave, about 7 kB of 3. The
-// sections then go to one more file, a line each, whose summary the result
-// returns in their place: every row is in a spill file that file names.
+// When even sections that only name their files overflow, under 63-byte names,
+// they go to one more file, a line each, whose summary the result returns.
 func TestFanoutSectionsUnderLongNamesGoToOneFile(t *testing.T) {
 	t.Parallel()
 	var names []string

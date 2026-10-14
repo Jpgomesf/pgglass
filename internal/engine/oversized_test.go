@@ -12,22 +12,17 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// One server message may hold max_bytes plus this many bytes (the engine's
-// rowByteHeadroom); pgx refuses a larger one after reading its 5-byte header.
 const headroom = 1 << 20
 
-// A field just past the per-message cap is never buffered, and the result is
-// truncated; pgx drops the connection, and the pool replaces it.
-//
-// Not parallel: it reads process-wide allocation counters, which a concurrent
-// test would inflate.
+// A field just past the per-message cap is never buffered: the result is
+// truncated, the connection replaced. Not parallel: it counts allocations.
 func TestFieldPastTheMessageCapIsNotBuffered(t *testing.T) {
 	const (
 		maxBytes  = 1 << 20
 		fieldSize = maxBytes + headroom + 1
 	)
 	m := cleanApp(t, config.Defaults{MaxBytes: maxBytes})
-	pid := value(t, m, "SELECT pg_backend_pid()") // opens the connection before measuring
+	pid := value(t, m, "SELECT pg_backend_pid()")
 
 	runtime.GC()
 	var before, after runtime.MemStats
@@ -97,7 +92,7 @@ func TestOversizedErrorIsAnError(t *testing.T) {
 		}
 	}
 	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT repeat('x', 30)::int"})
-	wantSQLState(t, err, "22P02") // the same error, small enough to read
+	wantSQLState(t, err, "22P02")
 }
 
 // With a small budget, the messages that are not rows still fit in the cap:
@@ -105,7 +100,7 @@ func TestOversizedErrorIsAnError(t *testing.T) {
 func TestSmallBudgetStillReadsDescriptionsAndErrors(t *testing.T) {
 	t.Parallel()
 	m := cleanApp(t, config.Defaults{MaxBytes: 100})
-	name := strings.Repeat("c", 62) // 63 characters with its digit, the longest name
+	name := strings.Repeat("c", 62)
 	res := mustQuery(t, m, engine.Query{SQL: fmt.Sprintf("SELECT 'a' AS %[1]s1, 'b' AS %[1]s2, 'c' AS %[1]s3", name)})
 	if len(res.Columns) != 3 || len(res.Rows) != 1 || res.Truncated {
 		t.Errorf("%d columns, %d rows, truncated %q; want 3 columns and 1 row", len(res.Columns), len(res.Rows), res.TruncatedReason)

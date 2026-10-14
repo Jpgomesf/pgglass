@@ -20,12 +20,8 @@ var update = flag.Bool("update", false, "rewrite the golden files in testdata")
 
 func str(v string) *string { return &v }
 
-// goldenMaxCell cuts the two wide cells of fixture and nothing else.
 const goldenMaxCell = 20
 
-// fixture holds what every format must keep apart or escape: NULL, the empty
-// string and the text NULL; tabs, newlines, pipes, quotes and backslashes;
-// unicode; duplicate column names; and cells wider than goldenMaxCell.
 func fixture() *result.Result {
 	return &result.Result{
 		Columns: []result.Column{
@@ -76,7 +72,6 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-// renderOne renders a one-column, one-row result.
 func renderOne(t *testing.T, f render.Format, col result.Column, v *string) string {
 	t.Helper()
 	out, err := render.Render(&result.Result{Columns: []result.Column{col}, Rows: [][]*string{{v}}}, f, 0)
@@ -182,9 +177,6 @@ func TestRenderErrors(t *testing.T) {
 	}
 }
 
-// The round-trip fuzz targets run their seeds under go test; run them with
-// -fuzz to search further.
-
 func fuzzSeeds(f *testing.F) {
 	for _, seed := range []string{"", "NULL", `\N`, `\`, "a\tb", "a\nb", "a\r\nb", "\r", `"`, `""`, ",", "|", `\|`, "é☕", "\xff\xfe"} {
 		f.Add(seed, "x", false)
@@ -192,8 +184,6 @@ func fuzzSeeds(f *testing.F) {
 	}
 }
 
-// twoCells is a result whose column names and single row are a and b, with
-// the first cell NULL when aNull is set.
 func twoCells(a, b string, aNull bool) *result.Result {
 	first := &a
 	if aNull {
@@ -243,9 +233,8 @@ func FuzzCSVRoundTrip(f *testing.F) {
 		}
 		first := a
 		if aNull {
-			first = "" // CSV readers cannot tell NULL from "": only the quoting differs
+			first = ""
 		}
-		// encoding/csv reads a CRLF inside a quoted field as LF.
 		lf := strings.NewReplacer("\r\n", "\n").Replace
 		want := [][]string{{lf(a), lf(b)}, {lf(first), lf(b)}}
 		if len(records) != 2 || !slices.Equal(records[0], want[0]) || !slices.Equal(records[1], want[1]) {
@@ -304,7 +293,6 @@ func FuzzJSONStaysValid(f *testing.F) {
 	})
 }
 
-// unescapeTSV reverses the COPY text escaping of one field.
 func unescapeTSV(field string) *string {
 	if field == `\N` {
 		return nil
@@ -331,7 +319,6 @@ func unescapeTSV(field string) *string {
 	return &s
 }
 
-// unescapedPipes counts the pipes in a markdown line that are not escaped.
 func unescapedPipes(line string) int {
 	n := 0
 	for i := 0; i < len(line); i++ {

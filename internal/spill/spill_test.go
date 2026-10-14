@@ -23,12 +23,10 @@ import (
 	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
-// t0 is the fake clock's time in tests that pin it.
 var t0 = time.Date(2026, 10, 12, 10, 15, 30, 0, time.UTC)
 
 func str(v string) *string { return &v }
 
-// people is a small result with a NULL and an empty string.
 func people() *result.Result {
 	return &result.Result{
 		Columns: []result.Column{
@@ -39,7 +37,6 @@ func people() *result.Result {
 	}
 }
 
-// numbered returns n rows of (id, label), with label NULL in every tenth row.
 func numbered(n int) *result.Result {
 	res := &result.Result{Columns: []result.Column{
 		{Name: "id", TypeOID: pgtype.Int4OID, TypeName: "int4"},
@@ -64,8 +61,6 @@ func newStore(t *testing.T) *spill.Store {
 	}
 }
 
-// inlineOf is what OutputWithin returns inline for res: the rendering with
-// cells cut at 200 characters and the given footer.
 func inlineOf(t *testing.T, res *result.Result, f render.Format, footer string) string {
 	t.Helper()
 	body, err := render.Render(res, f, 200)
@@ -75,7 +70,6 @@ func inlineOf(t *testing.T, res *result.Result, f render.Format, footer string) 
 	return body + footer
 }
 
-// spillPath returns the file path named in a summary.
 func spillPath(t *testing.T, out string) string {
 	t.Helper()
 	for _, line := range strings.Split(out, "\n") {
@@ -221,7 +215,7 @@ func TestOutputSummary(t *testing.T) {
 	res := &result.Result{
 		Columns: []result.Column{
 			{Name: "id", TypeOID: pgtype.Int8OID, TypeName: "int8"},
-			{Name: "status", TypeOID: 16385}, // a type the engine could not name
+			{Name: "status", TypeOID: 16385},
 			{Name: "placed", TypeOID: pgtype.TimestamptzOID, TypeName: "timestamptz"},
 			{Name: "note", TypeOID: pgtype.TextOID, TypeName: "text"},
 		},
@@ -285,7 +279,6 @@ func TestOutputSummary(t *testing.T) {
 // A summary lists at most 20 columns and previews only the rows that fit,
 // so a wide result still gets a summary within the inline limit.
 func TestOutputSummaryStaysWithinTheLimit(t *testing.T) {
-	// Each preview row is 20 cells of 64 four-byte characters: about 5.4 kB.
 	res := &result.Result{}
 	for i := range 100 {
 		res.Columns = append(res.Columns, result.Column{Name: "c" + strconv.Itoa(i), TypeOID: pgtype.TextOID, TypeName: "text"})
@@ -314,22 +307,17 @@ func TestOutputSummaryStaysWithinTheLimit(t *testing.T) {
 		return out
 	}
 
-	// One preview row fits in 10 kB, two do not.
 	_, preview, _ := strings.Cut(summary(10_000), "\n\nFirst 1 row:\n")
 	if !strings.HasPrefix(preview, "c0\tc1\t") || strings.Count(preview, "\n") != 1 {
 		t.Errorf("want a header and one row of preview, got:\n%s", preview)
 	}
-	// Not one fits in 3 kB.
 	if out := summary(3_000); strings.Contains(out, "First") {
 		t.Errorf("want no preview, got:\n%s", out)
 	}
 }
 
-// longName is the 53-character name of column i of longNamed.
 func longName(i int) string { return fmt.Sprintf("%s_%02d", strings.Repeat("c", 50), i) }
 
-// longNamed is a result of 50 rows of 20 text columns named longName(0) to
-// longName(19).
 func longNamed() *result.Result {
 	res := &result.Result{}
 	for i := range 20 {
@@ -345,9 +333,6 @@ func longNamed() *result.Result {
 	return res
 }
 
-// listedColumns returns the lines of the column list of a summary of
-// longNamed that lists only some of its columns, checking that their number
-// is the one its heading gives.
 func listedColumns(t *testing.T, out string) []string {
 	t.Helper()
 	m := regexp.MustCompile(`\n\nColumns \(first (\d+) of 20\):\ncolumn\ttype\n`).FindStringSubmatchIndex(out)
@@ -362,16 +347,14 @@ func listedColumns(t *testing.T, out string) []string {
 	return listed
 }
 
-// A summary lists only as many of the first 20 columns as fit in its limit,
-// so long column names cannot push it past the limit. The file holds every
-// column.
+// A summary lists only as many of the first 20 columns as fit in its limit; the
+// file holds every column.
 func TestOutputSummaryListsTheColumnsThatFit(t *testing.T) {
 	out, err := newStore(t).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
 	listed := listedColumns(t, out)
-	// One more column, 59 bytes and maybe a digit in the heading, would not fit.
 	if len(out) > 1000 || 1000-len(out) > 60 || len(listed) == 20 {
 		t.Errorf("limit 1000: %d bytes listing %d columns:\n%s", len(out), len(listed), out)
 	}
@@ -386,9 +369,8 @@ func TestOutputSummaryListsTheColumnsThatFit(t *testing.T) {
 	}
 }
 
-// In a limit too small for what a summary says of the file, about 400 bytes
-// with the path, the summary only names the file and counts the rows, as an
-// inline result ends. The file holds every column and row.
+// In a limit too small for a full summary, about 400 bytes, the summary only
+// names the file and counts the rows; the file holds them all.
 func TestOutputSummaryInASmallLimitOnlyNamesTheFile(t *testing.T) {
 	out, err := newStore(t).OutputWithin("pg_query", "prod", longNamed(), render.TSV, 300)
 	if err != nil {
@@ -404,8 +386,6 @@ func TestOutputSummaryInASmallLimitOnlyNamesTheFile(t *testing.T) {
 	}
 }
 
-// lines returns rows rows of one text column, line, each n characters long
-// and ending with its number.
 func lines(rows, n int) *result.Result {
 	res := result.Text("line")
 	for i := range rows {
@@ -414,8 +394,6 @@ func lines(rows, n int) *result.Result {
 	return res
 }
 
-// wholeOf renders res as it is returned inline, with the given footer, but
-// with no cell cut.
 func wholeOf(t *testing.T, res *result.Result, footer string) string {
 	t.Helper()
 	body, err := render.Render(res, render.TSV, 0)
@@ -426,8 +404,7 @@ func wholeOf(t *testing.T, res *result.Result, footer string) string {
 }
 
 // OutputWhole returns cells inline whole, and spills a result that only fits
-// with its cells cut, as lines a tool found too large to return inline: the
-// file holds them whole.
+// with its cells cut to a file that holds them whole.
 func TestOutputWholeKeepsCellsWhole(t *testing.T) {
 	store := newStore(t)
 	res := people()
@@ -436,7 +413,7 @@ func TestOutputWholeKeepsCellsWhole(t *testing.T) {
 		t.Errorf("OutputWhole = %v:\n%s\nwant the cell whole", err, out)
 	}
 
-	res = lines(20, 600) // 12 kB whole, under 5 kB cut
+	res = lines(20, 600)
 	if out, err := store.OutputWithin("pg_explain", "prod", res, render.TSV, 10_000); err != nil || strings.Contains(out, "Full result") {
 		t.Fatalf("OutputWithin = %v, want the lines inline, cut:\n%s", err, out)
 	}
@@ -456,20 +433,19 @@ func TestOutputWholeKeepsCellsWhole(t *testing.T) {
 		t.Errorf("spill file is not the full CSV rendering:\n%s", got)
 	}
 
-	store.Dir = "" // no file: as many leading lines as fit
+	store.Dir = ""
 	if out, err = store.OutputWhole("pg_explain", "prod", res, render.TSV, 10_000); err != nil ||
 		!strings.Contains(out, " of 20 rows shown; could not write the spill file: ") || len(out) > 10_000 {
 		t.Errorf("without a file = %v: %d bytes:\n%s", err, len(out), out)
 	}
 }
 
-// OutputWhole fits what it returns in the limit it is given: a tool lowers
-// it to leave room for what comes before its output, such as the role
-// check's findings.
+// OutputWhole fits its output in the limit it is given, which a tool lowers to
+// leave room for what comes first, such as the role check's findings.
 func TestOutputWholeUsesItsLimit(t *testing.T) {
 	store := newStore(t)
 	res := lines(10, 300)
-	whole := wholeOf(t, res, "(10 rows)") // 3 kB
+	whole := wholeOf(t, res, "(10 rows)")
 	if out, err := store.OutputWhole("pg_health", "prod", res, render.TSV, len(whole)); err != nil || out != whole {
 		t.Errorf("OutputWhole at its limit = %v:\n%s\nwant the lines inline", err, out)
 	}
@@ -482,7 +458,6 @@ func TestOutputWholeUsesItsLimit(t *testing.T) {
 	}
 }
 
-// readFile returns what the file at path holds.
 func readFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path) //nolint:gosec // a file the test's store wrote
@@ -595,7 +570,7 @@ func TestOutputFallsBackToCappedInlineWhenTheFileCannotBeWritten(t *testing.T) {
 		t.Run(string(f), func(t *testing.T) {
 			const limit = 600
 			store := newStore(t)
-			store.Dir = filepath.Join(file, "spill") // below a regular file: cannot be created
+			store.Dir = filepath.Join(file, "spill")
 			out, err := store.OutputWithin("pg_query", "prod", res, f, limit)
 			if err != nil {
 				t.Fatal(err)
@@ -610,8 +585,6 @@ func TestOutputFallsBackToCappedInlineWhenTheFileCannotBeWritten(t *testing.T) {
 			if f == render.JSON && !json.Valid([]byte(body)) {
 				t.Errorf("capped JSON is not valid: %s", body)
 			}
-			// One row more must not fit next to the longest note, which is
-			// what OutputWithin budgets for.
 			longest := strings.Replace(note, fmt.Sprintf("(%d of", shown), "(50 of", 1)
 			if len(inlineOf(t, firstRows(shown+1), f, ""))+len(longest) <= limit {
 				t.Errorf("%d rows shown, but %d fit", shown, shown+1)
@@ -620,8 +593,6 @@ func TestOutputFallsBackToCappedInlineWhenTheFileCannotBeWritten(t *testing.T) {
 	}
 }
 
-// splitCapped splits capped output of numbered(50) into the rendering, the
-// note after it and the number of rows the note says it shows.
 func splitCapped(t *testing.T, out string) (body, note string, shown int) {
 	t.Helper()
 	i := strings.LastIndex(out, "\n(")
@@ -654,14 +625,13 @@ func TestOutputFallbackStaysBoundedWhenNothingFits(t *testing.T) {
 	}
 }
 
-// When the spill file cannot be written, the rows that fit come back cut as
-// the call cuts them inline: OutputWithin at 200 characters, OutputWhole not
-// at all. OutputWhole cut them at 200 too, and lost the ends it keeps.
+// When no spill file can be written, the rows that fit come back as inline:
+// cells cut to 200 characters by OutputWithin, whole by OutputWhole.
 func TestOutputFallbackCutsCellsAsTheCallDoes(t *testing.T) {
 	const limit = 3000
-	res := lines(20, 600) // 12 kB whole, 4.3 kB cut
+	res := lines(20, 600)
 	store := newStore(t)
-	store.Dir = "" // no file
+	store.Dir = ""
 	for _, tc := range []struct {
 		name    string
 		output  func(tool, conn string, res *result.Result, f render.Format, limit int) (string, error)
@@ -703,7 +673,6 @@ func TestOutputRejectsAnUnknownFormat(t *testing.T) {
 	}
 }
 
-// touch creates name under dir with the given modification time.
 func touch(t *testing.T, dir, name string, mtime time.Time) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -717,8 +686,6 @@ func touch(t *testing.T, dir, name string, mtime time.Time) string {
 }
 
 func TestCleanupRemovesOnlyItsOwnStaleFiles(t *testing.T) {
-	// The clock runs two days ahead, so the directory and the symlink below,
-	// whose times the test cannot set, are stale too.
 	now := time.Now().Add(48 * time.Hour).Truncate(time.Second)
 	store := newStore(t)
 	store.Now = func() time.Time { return now }
@@ -730,7 +697,7 @@ func TestCleanupRemovesOnlyItsOwnStaleFiles(t *testing.T) {
 	touch(t, store.Dir, "spill-pg_schema-x-20261011T091530Z-9.csv", now.Add(-24*time.Hour-time.Second))
 	kept := []string{
 		touch(t, store.Dir, "spill-pg_query-prod-20261012T091530Z-456.csv", now.Add(-time.Hour)),
-		touch(t, store.Dir, "spill-pg_query-prod-20261011T101530Z-789.csv", now.Add(-24*time.Hour)), // exactly TTL old
+		touch(t, store.Dir, "spill-pg_query-prod-20261011T101530Z-789.csv", now.Add(-24*time.Hour)),
 		touch(t, store.Dir, "notes.csv", stale),
 		touch(t, store.Dir, "spill-notes.txt", stale),
 		touch(t, store.Dir, "spill-notes.csv", stale),
@@ -854,9 +821,7 @@ func TestOutputCleansUpAtMostOnceAnHour(t *testing.T) {
 	}
 }
 
-// OutputWithin returns inline, summarizes and caps against its limit. The
-// result takes about 1 kB inline, room enough for what a summary says of its
-// file.
+// OutputWithin returns inline, summarizes and caps against its own limit.
 func TestOutputWithinUsesItsOwnLimit(t *testing.T) {
 	inline := inlineOf(t, numbered(50), render.TSV, "(50 rows)")
 	store := newStore(t)
@@ -876,7 +841,7 @@ func TestOutputWithinUsesItsOwnLimit(t *testing.T) {
 		t.Errorf("one byte over the limit: want a spill file: %v", err)
 	}
 
-	store.Dir = "" // no file: as many rows as fit in the limit
+	store.Dir = ""
 	out, err = store.OutputWithin("pg_query", "prod", numbered(1000), render.TSV, 300)
 	if err != nil {
 		t.Fatal(err)

@@ -9,12 +9,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// pg_diff_schema, like pg_explain and pg_search, writes text it finds too
-// large to return inline to a spill file, one line per row. The spill store
-// cut each line to 200 characters and, since that fit, returned the lines
-// inline without writing a file: here 30 '~ index' lines of 350 characters,
-// each with two CREATE INDEX statements, lost their right-hand side. Now
-// they always go to the file, whole.
+// pg_diff_schema writes text too large to return inline to a spill file, one
+// whole line per row, as pg_explain and pg_search do.
 func TestDiffSchemaSpillsLongLinesWhole(t *testing.T) {
 	t.Parallel()
 	a, b := strings.Repeat("a", 60), strings.Repeat("b", 60)

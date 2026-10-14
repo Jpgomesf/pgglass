@@ -1,7 +1,7 @@
 package preflight_test
 
 import (
-	_ "embed" // fixture SQL
+	_ "embed"
 	"errors"
 	"strings"
 	"testing"
@@ -13,17 +13,15 @@ import (
 //go:embed testdata/escalation.sql
 var escalationSQL string
 
-// TestAuditEscalation audits, through the engine as the server does, roles
-// that reach past reading in ways testdata/fixture.sql does not cover. Each
-// has a critical finding, so role_check strict refuses it.
+// TestAuditEscalation audits roles reaching past reading in ways the fixture
+// does not cover; each gets a critical finding, which strict refuses.
 func TestAuditEscalation(t *testing.T) {
 	const database = "preflight_escalation"
 	testdb.CreateDatabase(t, database, escalationSQL)
 	tests := []struct {
-		name, login, role string // role: the current user once logged in as login
+		name, login, role string
 		want              []preflight.Finding
 	}{
-		// The role's search_path cannot hide a finding behind a look-alike catalog.
 		{"shadowed catalog", "pf_shadowed", "pf_shadowed", []preflight.Finding{
 			critical("role_membership", "member of pg_execute_server_program"),
 		}},
@@ -55,16 +53,13 @@ func TestAuditEscalation(t *testing.T) {
 	}
 }
 
-// sessionUser is the replies for a session user admin, other than the
-// current user app, after the current user's: a member of the superuser root
-// that can write one table.
 func sessionUser() []reply {
 	replies := append(clean(),
-		row("f", "f", "f", "f"),      // attributes
-		row(nil),                     // memberships
-		row("1", "root"),             // superusers
-		row("1", "INSERT on app.t"),  // table writes
-		row("0", nil), row("0", nil), // function grants
+		row("f", "f", "f", "f"),
+		row(nil),
+		row("1", "root"),
+		row("1", "INSERT on app.t"),
+		row("0", nil), row("0", nil),
 	)
 	replies[usersQuery] = row("app", "admin")
 	replies[warningFunctionsQuery] = row("1", "pg_catalog.pg_read_file")
@@ -106,7 +101,7 @@ func TestAuditSuperuserSessionUserStopsAtItsAttributes(t *testing.T) {
 func TestAuditFailsClosedOnTheSessionUser(t *testing.T) {
 	boom := errors.New("connection reset")
 	replies := sessionUser()
-	replies[len(clean())+tableWritesQuery-attributesQuery] = reply{err: boom} // the session user's
+	replies[len(clean())+tableWritesQuery-attributesQuery] = reply{err: boom}
 	report, err := preflight.Audit(t.Context(), &script{replies: replies})
 	if !errors.Is(err, boom) || !strings.Contains(err.Error(), "preflight: table writes: ") {
 		t.Errorf("error = %v, want one wrapping %v from the table writes", err, boom)

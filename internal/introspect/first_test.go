@@ -35,7 +35,7 @@ func TestFirstSchemasAndTables(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i := range relations {
-		relations[i].Size = "" // varies by version
+		relations[i].Size = ""
 	}
 	equal(t, "FirstTables(app, 2)", relations, introspect.RelationList{
 		{Schema: "app", Name: "audit_log", Kind: "table", Rows: 50},

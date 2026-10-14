@@ -14,8 +14,6 @@ import (
 
 var healthSections = []string{"connections", "long_running", "blocked", "cache_hit", "dead_tuples", "unused_indexes", "xid_wraparound", "replication"}
 
-// healthReport calls pg_health on conn and returns the notice its result
-// starts with, its rows, and the details of each section.
 func healthReport(t *testing.T, s *session, conn string) (notice string, rows int, sections map[string][]string) {
 	t.Helper()
 	text := s.ok(t, "pg_health", map[string]any{"connection": conn})
@@ -45,7 +43,7 @@ func healthReport(t *testing.T, s *session, conn string) (notice string, rows in
 
 func TestHealthOnTheAppFixture(t *testing.T) {
 	t.Parallel()
-	testdb.Conn(t, testdb.Superuser, testdb.DBApp) // a session whose state ro_clean may not see
+	testdb.Conn(t, testdb.Superuser, testdb.DBApp)
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
 
 	notice, superRows, super := healthReport(t, s, "super")
@@ -69,9 +67,6 @@ func TestHealthOnTheAppFixture(t *testing.T) {
 			t.Errorf("%s: replication = %q", role, got["replication"])
 		}
 	}
-	// Only the superuser sees every session in full. To ro_clean, the backends
-	// whose type it may not see make the count of client backends an upper
-	// bound.
 	if slices.ContainsFunc(super["connections"], isHidden) || slices.ContainsFunc(super["long_running"], isHidden) {
 		t.Errorf("the superuser sees every session, yet:\n%q\n%q", super["connections"], super["long_running"])
 	}
@@ -115,7 +110,6 @@ func TestHealthShowsBlockedSessions(t *testing.T) {
 	if !slices.ContainsFunc(super["blocked"], blocked.MatchString) {
 		t.Errorf("blocked = %q, want a line matching %s", super["blocked"], blocked)
 	}
-	// ro_clean finds the session, but not what it is doing.
 	_, _, clean := healthReport(t, s, "clean")
 	if want := fmt.Sprintf("pid %d, database %s, state not visible to role ro_clean, blocked by %d", waiter, name, holder); !slices.Contains(clean["blocked"], want) {
 		t.Errorf("blocked = %q, want it to contain %q", clean["blocked"], want)
@@ -134,8 +128,6 @@ func TestHealthRanksTablesByDeadRows(t *testing.T) {
 		DELETE FROM large WHERE id <= 10;
 		INSERT INTO tiny VALUES (1), (2), (3), (4);
 		DELETE FROM tiny WHERE id <= 3;`)
-	// The statistics reach other sessions some time after the statements
-	// that change them.
 	conn := testdb.Conn(t, testdb.Superuser, name)
 	for deadline := time.Now().Add(10 * time.Second); !testdb.Value[bool](t, conn, `SELECT
 		(SELECT n_dead_tup = 10 AND n_live_tup = 990 FROM pg_stat_user_tables WHERE relname = 'large') AND

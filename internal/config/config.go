@@ -22,7 +22,7 @@ const (
 
 	DefaultLockTimeoutSeconds = 5
 	DefaultMaxRows            = 1000
-	DefaultMaxBytes           = 1 << 20 // 1 MiB
+	DefaultMaxBytes           = 1 << 20
 	DefaultSpillTTLHours      = 24
 	DefaultFormat             = FormatTSV
 	DefaultRoleCheck          = RoleCheckWarn
@@ -33,18 +33,17 @@ const (
 	// MaxSpillTTLHours bounds spill_ttl_hours, which becomes a time.Duration.
 	MaxSpillTTLHours = int(math.MaxInt64 / int64(time.Hour))
 
-	// MaxNameBytes is the longest name Postgres keeps (NAMEDATALEN - 1): it
-	// cuts a longer one. Connection names take at most as many, since the
-	// tools repeat them in output that must stay within InlineMaxBytes.
+	// MaxNameBytes is the longest name Postgres keeps (NAMEDATALEN - 1), and
+	// the cap on connection names, which tool output repeats.
 	MaxNameBytes = 63
 )
 
 // Values of Defaults.RoleCheck: what to do when the connected role can do
 // more than read (see internal/preflight).
 const (
-	RoleCheckStrict = "strict" // refuse to query through the connection
-	RoleCheckWarn   = "warn"   // query, but warn in tool output
-	RoleCheckOff    = "off"    // skip the audit
+	RoleCheckStrict = "strict"
+	RoleCheckWarn   = "warn"
+	RoleCheckOff    = "off"
 )
 
 // Values of Defaults.Format: how query results are rendered.
@@ -66,9 +65,8 @@ type Config struct {
 	Connections map[string]Connection `json:"connections"`
 }
 
-// Defaults holds settings shared by all connections. A zero value means
-// "use the default": WithDefaults fills them in, and Load and Parse do so
-// before validating.
+// Defaults holds settings shared by all connections. Zero values mean the
+// default, which WithDefaults fills in, as Load and Parse do before validating.
 type Defaults struct {
 	// Deprecated: ignored. The server is always read-only.
 	Readonly *bool `json:"readonly,omitempty"`
@@ -178,9 +176,8 @@ func (cfg Config) UsesReadonly() bool {
 	return false
 }
 
-// Parse decodes a config.json document, fills unset defaults and validates them.
-// An unknown key is an error, so a misspelled setting such as "role_chek"
-// fails loudly instead of leaving its default in place.
+// Parse decodes a config.json document, fills unset defaults and validates
+// them. An unknown key, such as a misspelled setting, is an error.
 func Parse(data []byte) (Config, error) {
 	var cfg Config
 	dec := json.NewDecoder(bytes.NewReader(data))

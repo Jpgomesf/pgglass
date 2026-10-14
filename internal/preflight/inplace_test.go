@@ -1,7 +1,7 @@
 package preflight_test
 
 import (
-	_ "embed" // fixture SQL
+	_ "embed"
 	"testing"
 
 	"github.com/jpgomesf/pgglass/internal/preflight"

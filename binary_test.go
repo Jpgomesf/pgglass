@@ -14,9 +14,8 @@ import (
 	"time"
 )
 
-// The built binary prints the version goreleaser links into it, stops
-// cleanly, with exit code 0, on SIGINT and SIGTERM, and stops at once on a
-// second signal while it waits for requests to finish.
+// The built binary prints its linked version, exits 0 on SIGINT and SIGTERM,
+// and stops at once on a second signal while requests finish.
 func TestBinary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds and runs the binary")

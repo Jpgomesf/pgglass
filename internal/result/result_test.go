@@ -19,7 +19,7 @@ func TestTextHoldsTextColumnsAndCopiedRows(t *testing.T) {
 
 	cells := []string{"a", "b"}
 	res.AddRow(cells...)
-	cells[0] = "changed" // the row holds copies
+	cells[0] = "changed"
 	res.AddRow("c", "")
 	var got [][]string
 	for _, row := range res.Rows {

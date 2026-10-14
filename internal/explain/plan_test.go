@@ -10,27 +10,6 @@ import (
 	"testing"
 )
 
-// The fixtures in testdata are the output of EXPLAIN (FORMAT JSON, VERBOSE),
-// with ANALYZE and BUFFERS for the analyze_ ones, from PostgreSQL 17 on the
-// app fixture database (internal/testdb), with these settings and queries:
-//
-//   - plan.json, enable_hashjoin and enable_mergejoin off:
-//     SELECT e.id, c.email FROM app.events e JOIN app.customers c ON c.id = (e.payload->>'customer')::uuid
-//   - analyze_sort.json, work_mem 64kB:
-//     SELECT id, payload FROM app.events WHERE id % 4 = 0 AND kind = 'view' ORDER BY payload
-//   - analyze_hash.json, work_mem 64kB, enable_sort and enable_mergejoin off:
-//     SELECT a.payload, count(*) FROM app.events a JOIN app.events b ON a.payload = b.payload GROUP BY a.payload
-//   - analyze_parallel.json, parallel_setup_cost, parallel_tuple_cost and
-//     min_parallel_table_scan_size 0, enable_hashjoin and enable_mergejoin off:
-//     SELECT e.kind, count(*) FROM app.events e JOIN app.customers c ON c.id = (e.payload->>'customer')::uuid GROUP BY e.kind
-//   - limit.json and analyze_limit.json:
-//     SELECT id FROM app.events LIMIT 10
-//   - analyze_limit_sort.json:
-//     SELECT id FROM app.events ORDER BY payload LIMIT 10
-//   - limit_nested.json, enable_hashjoin and enable_mergejoin off:
-//     SELECT e.id, c.email FROM app.events e JOIN app.customers c ON c.id = (e.payload->>'customer')::uuid LIMIT 10
-
-// fixtureSizes are the reltuples of the app fixture's relations.
 var fixtureSizes = map[relation]float64{{"app", "events"}: 20000, {"app", "customers"}: 50}
 
 func fixture(t *testing.T, name string) *plan {
@@ -48,8 +27,6 @@ func fixture(t *testing.T, name string) *plan {
 
 func TestSummaryOfFixtures(t *testing.T) {
 	for _, tc := range []struct{ fixture, want string }{
-		// The outer side's estimate is enough to flag the nested loop; its
-		// own cost is mostly the inner index scan, run once per outer row.
 		{"plan", `total cost 3842.28, ~5000 rows
 top nodes by own cost:
   Nested Loop: cost 3314.11, ~5000 rows
@@ -58,8 +35,6 @@ top nodes by own cost:
 flags:
   Nested Loop: outer side of 20000 rows, each running the inner side
   Seq Scan on app.events e: full scan of ~20000 rows`},
-		// The planner multiplies the two filters' selectivities, but kind is
-		// 'view' exactly when id % 4 = 0: 200 times the estimate.
 		{"analyze_sort", `total cost 678.64, 5.496 ms, 5000 rows, 333 buffers hit, 0 read
 top nodes by own time:
   Sort: 3.195 ms, 5000 rows
@@ -81,8 +56,6 @@ flags:
   Seq Scan on app.events a: full scan of ~20000 rows
   Hash: spilled to disk (32 batches)
   Seq Scan on app.events b: full scan of ~20000 rows`},
-		// Times add up over loops and workers: 20000 inner loops of 0.001 ms,
-		// as EXPLAIN rounds them, exceed the 14 ms the query took.
 		{"analyze_parallel", `total cost 1802.91, 14.452 ms, 4 rows, 40346 buffers hit, 0 read
 top nodes by own time:
   Index Only Scan using customers_pkey on app.customers c: 20 ms, 1 row × 20000 loops
@@ -93,8 +66,6 @@ top nodes by own time:
 flags:
   Nested Loop: outer side of 20001 rows, each running the inner side
   Parallel Seq Scan on app.events e: full scan of ~20000 rows`},
-		// The Limit stops the scan after 10 of its 20000 rows: the scan costs
-		// what the Limit reads of it, 0.26 of 528, and is not flagged.
 		{"limit", `total cost 0.26, ~10 rows
 top nodes by own cost:
   Seq Scan on app.events: cost 0.26, ~10 rows
@@ -105,8 +76,6 @@ top nodes by own time:
   Seq Scan on app.events: 0.013 ms, 10 rows
   Limit: 0.002 ms, 10 rows
 flags: none`},
-		// The sort reads every row before the Limit stops it: the scan under
-		// it is flagged, and the sort's 10 rows are no misestimate.
 		{"analyze_limit_sort", `total cost 960.22, 4.806 ms, 10 rows, 333 buffers hit, 0 read
 top nodes by own time:
   Sort: 3.255 ms, 10 rows
@@ -114,8 +83,6 @@ top nodes by own time:
   Limit: 0.002 ms, 10 rows
 flags:
   Seq Scan on app.events: full scan of ~20000 rows`},
-		// The Limit stops the nested loop after 10 of its 5000 rows, so after
-		// 40 of the 20000 outer ones; the inner side still costs per loop.
 		{"limit_nested", `total cost 7.83, ~10 rows
 top nodes by own cost:
   Nested Loop: cost 6.61, ~10 rows
@@ -142,8 +109,8 @@ func TestSummaryWithoutSizes(t *testing.T) {
 func TestSeqScansNamesEachRelationOnce(t *testing.T) {
 	for name, want := range map[string][]relation{
 		"plan":             {{"app", "events"}},
-		"analyze_hash":     {{"app", "events"}}, // scanned twice
-		"analyze_parallel": {{"app", "events"}}, // the parallel scan
+		"analyze_hash":     {{"app", "events"}},
+		"analyze_parallel": {{"app", "events"}},
 	} {
 		if got := fixture(t, name).seqScans(); !slices.Equal(got, want) {
 			t.Errorf("%s: seqScans = %v, want %v", name, got, want)
@@ -163,7 +130,6 @@ func TestOwnTimeIsNeverNegative(t *testing.T) {
 	}
 }
 
-// node parses one plan node from JSON.
 func parseNode(t *testing.T, doc string) *node {
 	t.Helper()
 	p, err := parse(`[{"Plan": ` + doc + `}]`)
@@ -185,8 +151,6 @@ func TestFlags(t *testing.T) {
 			[]string{"full scan of ~10001 rows"}},
 		{"seq scan of 10k rows", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "edge"}`, false, nil},
 		{"seq scan never analyzed", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "fresh"}`, false, nil},
-		// With ANALYZE, what a seq scan read: the rows it returned and those
-		// its filter removed, both per loop.
 		{"seq scan that read 10 rows", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "big",
 			"Plan Rows": 10, "Actual Rows": 10, "Actual Loops": 1}`, true, nil},
 		{"seq scan that filtered out 10k rows", `{"Node Type": "Seq Scan", "Schema": "s", "Relation Name": "big",
@@ -230,19 +194,13 @@ func TestFlags(t *testing.T) {
 	}
 }
 
-// planNode is the JSON of a plan node: fields, then its costs, rows and
-// children.
 func planNode(fields string, startup, total, rows float64, children ...string) string {
 	return fmt.Sprintf(`{%s, "Startup Cost": %v, "Total Cost": %v, "Plan Rows": %v, "Plans": [%s]}`,
 		fields, startup, total, rows, strings.Join(children, ", "))
 }
 
-// A Limit reads its input as far as the rows it skips and returns, and so
-// does each node that passes it rows as it asks for them. An EXISTS, a
-// subplan that returns no column, reads up to its first row, as the planner
-// charges it, and that row is all a Limit's startup cost holds of it. The
-// plans are PostgreSQL 17's on the app fixture, cut to the fields that
-// matter.
+// A Limit reads its input only as far as the rows it skips and returns, and an
+// EXISTS up to its first row; the plans are PostgreSQL 17's, trimmed.
 func TestShare(t *testing.T) {
 	limit := func(startup, total, rows float64, children ...string) string {
 		return planNode(`"Node Type": "Limit"`, startup, total, rows, children...)
@@ -263,10 +221,7 @@ func TestShare(t *testing.T) {
 		{"OFFSET 15000 LIMIT 10", limit(396, 396.26, 10, scan), []float64{1, 0.7505}},
 		{"a LIMIT over fewer rows", limit(0, 578, 1, outer(`"Node Type": "Seq Scan"`, 0, 578, 1)), []float64{1, 1}},
 		{"nested limits", limit(0, 0.26, 10, outer(`"Node Type": "Limit"`, 0, 2.64, 100, scan)), []float64{1, 0.1, 0.0005}},
-		// The inner Limit skips its 15000 rows before its first row, however
-		// few of its rows the outer one reads: only its count part is cut.
 		{"nested limits with an offset", limit(396, 396.13, 5, outer(`"Node Type": "Limit"`, 396, 398.64, 100, scan)), []float64{1, 0.05, 0.75025}},
-		// The Limit's startup cost holds its initplans', which run in full.
 		{"an initplan", limit(578.01, 578.95, 10,
 			planNode(`"Node Type": "Aggregate", "Strategy": "Plain", "Parent Relationship": "InitPlan"`, 578, 578.01, 1, scan),
 			outer(`"Node Type": "Seq Scan"`, 0, 628, 6667)), []float64{1, 1, 1, 10.0 / 6667}},
@@ -298,15 +253,10 @@ func TestShare(t *testing.T) {
 		{"a subplan", limit(0, 30.26, 10,
 			outer(`"Node Type": "Seq Scan"`, 0, 60528, 20000,
 				planNode(`"Node Type": "Seq Scan", "Parent Relationship": "SubPlan"`, 0, 3, 1))), []float64{1, 0.0005, 1}},
-		// count(*) OVER (): the window aggregate reads the whole partition
-		// before its first row, and its startup cost covers the scan.
 		{"a window over the whole partition", limit(777.96, 777.96, 10,
 			outer(`"Node Type": "WindowAgg"`, 777.96, 778, 20000, scan)), []float64{1, 0.0005, 1}},
-		// row_number() OVER () returns a row as it reads one.
 		{"a window that streams", limit(0, 0.39, 10,
 			outer(`"Node Type": "WindowAgg"`, 0, 778, 20000, scan)), []float64{1, 0.0005, 0.0005}},
-		// The window's startup cost holds its initplan's, which is no read of
-		// the scan.
 		{"a window with an initplan", limit(628.01, 628.4, 10,
 			outer(`"Node Type": "WindowAgg"`, 628.01, 1406.01, 20000,
 				planNode(`"Node Type": "Aggregate", "Strategy": "Plain", "Parent Relationship": "InitPlan"`, 628, 628.01, 1, scan),
@@ -363,10 +313,8 @@ func TestFlagsUnderALimit(t *testing.T) {
 	}
 }
 
-// With ANALYZE, the scan a Limit is planned to stop early is not flagged for
-// too few rows, whatever made the Limit return fewer rows than it planned: a
-// Limit above stopped it, some of its loops had fewer rows, or it ran out of
-// rows. EXPLAIN does not tell these apart.
+// With ANALYZE, a scan a Limit is planned to stop early is not flagged for too
+// few rows: EXPLAIN does not say why the Limit returned fewer.
 func TestFlagsUnderALimitWithAnalyze(t *testing.T) {
 	limit := func(actual, loops, startup, total, rows float64, children ...string) string {
 		return planNode(fmt.Sprintf(`"Node Type": "Limit", "Parent Relationship": "Outer", "Actual Rows": %v, "Actual Loops": %v`, actual, loops),

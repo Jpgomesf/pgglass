@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// fakeClock is a clock that moves only when told to.
 type fakeClock struct {
 	mu  sync.Mutex
 	now time.Time
@@ -34,7 +33,6 @@ func newTestCache(ttl time.Duration) (*Cache, *fakeClock) {
 	return c, clock
 }
 
-// counter is a load function that returns the key and how often it ran.
 type counter struct{ calls atomic.Int64 }
 
 func (l *counter) load(key string) func() (string, error) {
@@ -59,7 +57,7 @@ func TestCacheKeepsValueForTTL(t *testing.T) {
 	get(t, c, "k", l.load("k"), "k#1")
 	clock.Advance(time.Minute - time.Nanosecond)
 	get(t, c, "k", l.load("k"), "k#1")
-	clock.Advance(time.Nanosecond) // the entry expires exactly ttl after it was stored
+	clock.Advance(time.Nanosecond)
 	get(t, c, "k", l.load("k"), "k#2")
 	get(t, c, "k", l.load("k"), "k#2")
 	if n := l.calls.Load(); n != 2 {
@@ -74,10 +72,10 @@ func TestCacheTTLIsPerKey(t *testing.T) {
 	get(t, c, "a", a.load("a"), "a#1")
 	clock.Advance(3 * time.Minute)
 	get(t, c, "b", b.load("b"), "b#1")
-	clock.Advance(2 * time.Minute) // a is 5 minutes old, b 2
+	clock.Advance(2 * time.Minute)
 	get(t, c, "a", a.load("a"), "a#2")
 	get(t, c, "b", b.load("b"), "b#1")
-	clock.Advance(3 * time.Minute) // b is 5 minutes old
+	clock.Advance(3 * time.Minute)
 	get(t, c, "b", b.load("b"), "b#2")
 }
 

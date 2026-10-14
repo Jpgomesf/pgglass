@@ -9,12 +9,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// max_rows caps pg_search, but a capped search did not say so: 1,200
-// columns match, the default max_rows of 1000 keeps the first 1000, and the
-// spill summary reported "1000 rows × 1 column, truncated=false", so the
-// agent took the file for every match. Now it says "truncated=true
-// (max_rows=1000)", as pg_query does for the same cut, or names the limit
-// the agent asked for when that is lower.
+// A pg_search cut by max_rows says truncated=true (max_rows=1000) in its spill
+// summary, or names the lower limit the agent asked for.
 func TestSearchCappedByMaxRowsSaysSo(t *testing.T) {
 	t.Parallel()
 	const name = "tools_search_capped"
@@ -49,9 +45,7 @@ func TestSearchCappedByMaxRowsSaysSo(t *testing.T) {
 	}
 }
 
-// A search that limit or max_rows cut said so only once its matches spilled:
-// inline, with the default limit of 50, it returned 50 lines and no sign of
-// the others. A last line now names the limit that cut them.
+// An inline search cut by limit or max_rows ends with a line naming the limit.
 func TestSearchCutInlineSaysSo(t *testing.T) {
 	t.Parallel()
 	cfg := newConfig(config.RoleCheckWarn, appConns(t))

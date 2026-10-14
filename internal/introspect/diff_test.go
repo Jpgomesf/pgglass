@@ -8,7 +8,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/introspect"
 )
 
-// defs are the definitions of one kind of object in a relation, by name.
 type defs = map[string]string
 
 func TestDiff(t *testing.T) {
@@ -39,7 +38,6 @@ func TestDiff(t *testing.T) {
 			right: introspect.SchemaStructure{"t": {Kind: "table", Columns: defs{}, Policies: defs{}}},
 		},
 		{
-			// What is in a relation only one side has is not listed.
 			name:  "relations only one side has",
 			left:  introspect.SchemaStructure{"orders": orders, "totals": totals},
 			right: introspect.SchemaStructure{"totals": totals, "daily": {Kind: "materialized view", Columns: defs{"day": "date"}}},
@@ -55,8 +53,6 @@ func TestDiff(t *testing.T) {
 			},
 		},
 		{
-			// Queries show on one line, after the relation's kind and
-			// before its columns.
 			name: "queries of views and materialized views",
 			left: introspect.SchemaStructure{
 				"v":    {Kind: "view", Definition: " SELECT id,\n    name\n   FROM s.t;", Columns: defs{"id": "integer", "name": "text"}},
@@ -76,8 +72,6 @@ func TestDiff(t *testing.T) {
 			},
 		},
 		{
-			// The kind says enough when only one side has a query; when both
-			// do, the line takes the left side's kind.
 			name:  "a view that changed kind",
 			left:  introspect.SchemaStructure{"a": {Kind: "view", Definition: " SELECT 1 AS n;"}, "b": {Kind: "view", Definition: " SELECT 1 AS n;"}},
 			right: introspect.SchemaStructure{"a": {Kind: "table"}, "b": {Kind: "materialized view", Definition: " SELECT 2 AS n;"}},
@@ -127,8 +121,6 @@ func TestDiff(t *testing.T) {
 			},
 		},
 		{
-			// Relations by name in byte order, then in each: the relation,
-			// its columns, constraints, indexes and policies.
 			name: "order",
 			left: introspect.SchemaStructure{
 				"b": {Kind: "table", Columns: defs{"y": "text", "x": "integer"}, Indexes: defs{"b_x_idx": "CREATE INDEX b_x_idx ON s.b USING btree (x)"}},

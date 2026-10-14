@@ -11,11 +11,8 @@ import (
 //go:embed testdata/postgres18.sql
 var postgres18SQL string
 
-// PostgreSQL 18 adds pg_signal_autovacuum_worker, whose members signal
-// autovacuum workers as pg_signal_backend's do other sessions, and
-// pg_logicalinspect, whose functions read server files as pg_read_binary_file
-// does. Both are warnings. Older servers lack the role, and the audit skips
-// it.
+// PostgreSQL 18's pg_signal_autovacuum_worker role and pg_logicalinspect
+// functions are warnings; on older servers the audit skips the role.
 func TestAuditWarnsOfWhatPostgreSQL18Adds(t *testing.T) {
 	const database = "preflight_postgres18"
 	testdb.CreateDatabase(t, database, postgres18SQL)

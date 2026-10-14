@@ -8,10 +8,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// A Postgres error can quote a value whole, and the error result returned it
-// whole: casting a 20,000-character text value to int returned a 20 kB error
-// from pg_query, from pg_explain with analyze, and from a fan-out on which
-// every connection failed.
+// A Postgres error that quotes a 20,000-character value stays within the inline
+// limit from pg_query, pg_explain with analyze and a failed fan-out.
 func TestErrorTextStaysWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_error_inline_bound"

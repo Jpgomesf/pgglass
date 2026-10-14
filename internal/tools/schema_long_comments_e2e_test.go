@@ -8,13 +8,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// pg_schema reads at most 500 relations for a listing so that the catalog
-// result stays within max_bytes, but every relation's comment came whole:
-// 500 tables commented in 2,200 characters, or one table of 300 columns
-// commented in 3,600, took more than the default 1 MiB, and the call failed
-// with "catalog result exceeds the configured limits (max_bytes=1048576)"
-// instead of returning the lines that fit and a note that counts them all.
-// Now the catalog queries cut each comment to 200 characters.
+// pg_schema cuts each comment to 200 characters, so listings of long comments
+// stay within max_bytes instead of failing.
 func TestSchemaOfLongCommentsIsCutNotRefused(t *testing.T) {
 	t.Parallel()
 	const name = "tools_schema_long_comments"

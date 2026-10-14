@@ -17,12 +17,10 @@ func TestCheckRelationRejectsDeniedRelations(t *testing.T) {
 		if !errors.As(err, &v) || v.Reason != want {
 			t.Errorf("CheckRelation(%q) = %v, want a *Violation: %s", name, err, want)
 		}
-		// Check rejects a reference to it the same way.
 		if err := guard.Check(`SELECT FROM pg_catalog."` + name + `"`); err == nil || err.Error() != want {
 			t.Errorf("Check of a reference to %s = %v, want %s", name, err, want)
 		}
 	}
-	// pgx drops NUL bytes when it quotes a name, leaving pg_authid.
 	var v *guard.Violation
 	if err := guard.CheckRelation("pg_au\x00thid"); !errors.As(err, &v) || !strings.Contains(v.Reason, "NUL byte") {
 		t.Errorf("CheckRelation with a NUL byte = %v, want a *Violation", err)

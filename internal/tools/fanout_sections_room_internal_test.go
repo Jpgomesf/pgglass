@@ -18,12 +18,10 @@ import (
 	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
-// textColumn is a text column named name.
 func textColumn(name string) result.Column {
 	return result.Column{Name: name, TypeOID: pgtype.TextOID, TypeName: "text"}
 }
 
-// readRecords reads the CSV file at path.
 func readRecords(t *testing.T, path string) [][]string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -37,10 +35,8 @@ func readRecords(t *testing.T, path string) [][]string {
 	return records
 }
 
-// Sections share what the role check's notices and the failure lines leave:
-// with the notices at their half of the inline limit, one long failure line
-// and nine sections of 10 kB each, every spilled section's summary named its
-// file past its share of about 256 bytes, and the text overran its room.
+// Sections share what the role check's notices and the failure lines leave: a
+// long failure and nine spilled sections still fit their room.
 func TestFanoutSectionsFitWhatNoticesAndFailuresLeave(t *testing.T) {
 	h := &Handlers{spill: &spill.Store{Dir: t.TempDir(), InlineMaxBytes: config.InlineMaxBytes}}
 	results := []fanoutResult{{conn: "warehouse-0", err: quotingError(20000)}}
@@ -51,18 +47,15 @@ func TestFanoutSectionsFitWhatNoticesAndFailuresLeave(t *testing.T) {
 		}
 		results = append(results, fanoutOK(fmt.Sprintf("warehouse-%d", i), textColumn(fmt.Sprintf("c%d", i)), values...))
 	}
-	room := config.InlineMaxBytes / 2 // what the notices leave at most
+	room := config.InlineMaxBytes / 2
 	got, err := h.fanoutText(results, render.TSV, room)
 	if err != nil || len(got) > room {
 		t.Errorf("fanoutText = %v, %d bytes for a room of %d:\n%s", err, len(got), room, got)
 	}
 }
 
-// A spilled section names its file even past its share, so under long
-// connection names the sections took more than their room: ten names of 300
-// characters alone took 3 kB of 2,500 bytes. Now the sections go to one more
-// file, a line each, and the result is its summary: it names that file
-// alone, which names the file of each connection's result.
+// Sections past their room go to one more file, a line each, and the result is
+// its summary, naming that file alone.
 func TestFanoutSectionsPastTheirRoomGoToOneFile(t *testing.T) {
 	h := &Handlers{spill: &spill.Store{Dir: t.TempDir(), InlineMaxBytes: config.InlineMaxBytes}}
 	var ok []fanoutResult
@@ -79,7 +72,6 @@ func TestFanoutSectionsPastTheirRoomGoToOneFile(t *testing.T) {
 	if len(lines) < 2 || lines[0][0] != "line" || lines[1][0] != "Columns differ across connections, so each has its own result." {
 		t.Fatalf("the file holds:\n%q", lines)
 	}
-	// Each section names its connection, then the file that holds its rows.
 	var sections, want []string
 	for i, line := range lines {
 		if file, isFile := strings.CutPrefix(line[0], "Full result: "); isFile {
@@ -94,12 +86,8 @@ func TestFanoutSectionsPastTheirRoomGoToOneFile(t *testing.T) {
 	}
 }
 
-// A section that fits its share comes back inline, its cells cut to 200
-// characters. Under a spill directory of 600 bytes, the two sections that
-// spilled named their files past their shares of 303 bytes, and the sections
-// went to one more file as they were: the 5,000 characters of long were
-// whole in no file. Now every section then spills to a file of its own,
-// which the file of sections names.
+// Sections that go to one more file each spill to a file of their own first, so
+// a value cut inline is whole in some file.
 func TestFanoutSectionsPastTheirRoomKeepEveryValueWhole(t *testing.T) {
 	dir := t.TempDir()
 	for len(dir) < 600 {
@@ -116,7 +104,7 @@ func TestFanoutSectionsPastTheirRoomKeepEveryValueWhole(t *testing.T) {
 		t.Fatalf("three sections under a long spill path = %v, %d bytes for a room of %d:\n%s", err, len(got), room, got)
 	}
 	lines := readRecords(t, files[0][1])
-	held := map[string][][]string{} // by the line before "Full result: <file>": the records of the file
+	held := map[string][][]string{}
 	for i, line := range lines {
 		if file, isFile := strings.CutPrefix(line[0], "Full result: "); isFile {
 			held[lines[i-1][0]] = readRecords(t, file)

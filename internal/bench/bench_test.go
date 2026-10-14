@@ -68,9 +68,8 @@ var questions = []scenario{
 
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-// TestTokenBudget measures every scenario and fails when one grows more than
-// 10% past the baseline, or tools/list passes its cap. With -update, it first
-// rewrites the baseline and the table in docs/benchmark.md.
+// TestTokenBudget fails on a scenario over 10% past the baseline or tools/list
+// past its cap; -update rewrites the baseline and docs/benchmark.md.
 func TestTokenBudget(t *testing.T) {
 	got := measure(t)
 	t.Logf("sizes on %s:\n%s", testdb.Image(), table(got))

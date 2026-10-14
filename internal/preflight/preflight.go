@@ -18,28 +18,24 @@ import (
 // Finding severities. role_check strict refuses a role with a critical
 // finding; warnings are only reported.
 const (
-	// The role can act outside the read-only transaction: as a superuser,
-	// directly or through SET ROLE, with the server program or file-write
-	// roles, or through functions that open sessions, send requests or rows
-	// out, write server files, or write in place, past READ ONLY and the
-	// rollback.
+	// The role can act outside the read-only transaction: superuser, server
+	// program or file-write roles, or functions that reach out or write.
 	SeverityCritical = "critical"
-	// Risky, but no way out of the read-only transaction on its own: role
-	// attributes, table write privileges (the transaction refuses the
-	// writes), reading server files and signalling other sessions.
+	// Risky, but no way out of the read-only transaction alone: attributes,
+	// table writes, reading server files, signalling other sessions.
 	SeverityWarning = "warning"
 )
 
 // Finding is one capability the role should not have.
 type Finding struct {
-	Severity string // SeverityCritical or SeverityWarning
-	Check    string // short identifier of the check, e.g. "table_write"
-	Detail   string // what was found, e.g. "INSERT on app.audit_log"
+	Severity string
+	Check    string
+	Detail   string
 }
 
 // Report is the result of Audit.
 type Report struct {
-	Role     string // current_user of the audited connection
+	Role     string
 	Findings []Finding
 }
 
@@ -67,44 +63,28 @@ func (r Report) String() string {
 	return b.String()
 }
 
-// maxNames bounds how many relations or functions one finding names.
 const maxNames = 10
 
-// serverRoles are the predefined roles whose membership is a finding.
 var serverRoles = map[string]string{
-	"pg_execute_server_program":   SeverityCritical, // COPY ... PROGRAM runs shell commands
-	"pg_write_server_files":       SeverityCritical, // COPY ... TO writes server files
-	"pg_read_server_files":        SeverityWarning,  // COPY ... FROM reads server files
-	"pg_signal_backend":           SeverityWarning,  // cancels or terminates other sessions
+	"pg_execute_server_program":   SeverityCritical,
+	"pg_write_server_files":       SeverityCritical,
+	"pg_read_server_files":        SeverityWarning,
+	"pg_signal_backend":           SeverityWarning,
 	"pg_signal_autovacuum_worker": SeverityWarning,
 }
 
-// dangerousFunctions are the functions whose EXECUTE privilege is a finding,
-// as LIKE patterns on "schema.function", by severity.
 var dangerousFunctions = []struct {
 	severity string
 	patterns []string
 }{
-	// Ways out of the read-only transaction: dblink* opens sessions of its
-	// own, pg_background* runs SQL in a worker's own transaction, http*
-	// (pgsql-http), net.* (Supabase pg_net), aws_s3.* and aws_lambda.* (RDS)
-	// send requests or rows out, lo_export and autoprewarm_* (pg_prewarm,
-	// which PUBLIC may execute) write server files, and heap_force_*
-	// (pg_surgery), pg_truncate_visibility_map (pg_visibility) and
-	// pg_log_standby_snapshot, which writes a WAL record, write in place.
 	{SeverityCritical, []string{`%.dblink%`, `%.pg\_background%`, `%.http%`, `net.%`, `aws\_s3.%`, `aws\_lambda.%`, `%.lo\_export`,
 		`%.autoprewarm\_%`, `%.heap\_force\_%`, `%.pg\_truncate\_visibility\_map`, `%.pg\_log\_standby\_snapshot`}},
-	// They read server files, or make another backend dump its memory
-	// contexts to the server log.
 	{SeverityWarning, []string{`%.lo\_import`, `%.pg\_read\_file`, `%.pg\_read\_binary\_file`, `%.pg\_log\_backend\_memory\_contexts`,
 		`%.pg\_get\_logical\_snapshot\_%`}},
 }
 
-// Audit inspects, through q, the privileges of the role q connects as: the
-// current user and, when the connection set another role, the session user
-// too, which RESET ROLE returns to. Each superuser gets a single finding,
-// since it passes every other check. Audit returns an error, never a partial
-// report, when a catalog query fails or comes back truncated.
+// Audit inspects through q the privileges of the current and session users, and
+// returns an error, never a partial report, if a catalog query fails or is cut.
 func Audit(ctx context.Context, q engine.Querier) (Report, error) {
 	users, err := queryRow(ctx, q, 2, usersSQL)
 	if err != nil {
@@ -124,7 +104,6 @@ func Audit(ctx context.Context, q engine.Querier) (Report, error) {
 			report.Findings = append(report.Findings, f)
 		}
 	}
-	// Critical findings first; each severity keeps the order of the checks.
 	slices.SortStableFunc(report.Findings, func(a, b Finding) int {
 		return severityRank(a.Severity) - severityRank(b.Severity)
 	})
@@ -133,7 +112,6 @@ func Audit(ctx context.Context, q engine.Querier) (Report, error) {
 
 const usersSQL = `SELECT current_user, session_user`
 
-// auditRole returns the findings for role.
 func auditRole(ctx context.Context, q engine.Querier, role string) ([]Finding, error) {
 	attrs, err := queryAttributes(ctx, q, role)
 	if err != nil {
@@ -191,8 +169,6 @@ func queryAttributes(ctx context.Context, q engine.Querier, role string) (attrib
 	return a, nil
 }
 
-// findings returns the warnings for the role attributes other than superuser,
-// which Audit handles.
 func (a attributes) findings() []Finding {
 	var found []Finding
 	for _, attr := range []struct {
@@ -210,10 +186,6 @@ func (a attributes) findings() []Finding {
 	return found
 }
 
-// membershipsSQL lists the roles in $2 that role $1 is a member of. MEMBER,
-// not USAGE: a member that does not inherit a role's privileges can still SET
-// ROLE to it. Roles are matched by oid, so one missing on an older server is
-// skipped rather than an error.
 const membershipsSQL = `
 SELECT string_agg(rolname, ' ' ORDER BY rolname)
 FROM pg_roles
@@ -231,9 +203,6 @@ func roleMemberships(ctx context.Context, q engine.Querier, role string) ([]Find
 	return found, nil
 }
 
-// superusersSQL counts the superusers that role $1 is a member of, and lists
-// the first $2. Superuser is never inherited, but SET ROLE reaches it, as for
-// the predefined roles.
 const superusersSQL = `
 SELECT count(*), array_to_string((array_agg(format('%I', rolname) ORDER BY rolname))[1:$2::int], ', ')
 FROM pg_roles
@@ -247,10 +216,6 @@ func superuserMemberships(ctx context.Context, q engine.Querier, role string) ([
 	return []Finding{{Severity: SeverityCritical, Check: "superuser_membership", Detail: "member of " + summarize(total, "superusers", sample)}}, nil
 }
 
-// tableWritesSQL counts the tables, partitioned tables, views, materialized
-// views and foreign tables that role $1 can write, and lists the first $2.
-// Column-level INSERT or UPDATE grants count. A relation in a schema the role
-// cannot use is unreachable, so it does not count.
 const tableWritesSQL = `
 SELECT count(*), array_to_string((array_agg(privileges || ' on ' || name ORDER BY name))[1:$2::int], '; ')
 FROM (
@@ -276,9 +241,6 @@ func tableWrites(ctx context.Context, q engine.Querier, role string) ([]Finding,
 	return []Finding{{Severity: SeverityWarning, Check: "table_write", Detail: summarize(total, "relations", sample)}}, nil
 }
 
-// functionGrantsSQL counts the functions matching the patterns in $2 that
-// role $1 can execute, overloads counted once, and lists the first $3. As
-// with tables, a function in a schema the role cannot use does not count.
 const functionGrantsSQL = `
 SELECT count(*), array_to_string((array_agg(name ORDER BY name))[1:$3::int], ', ')
 FROM (
@@ -305,7 +267,6 @@ func functionGrants(ctx context.Context, q engine.Querier, role string) ([]Findi
 	return found, nil
 }
 
-// summarize describes total items from sample, which lists the first maxNames.
 func summarize(total int, noun, sample string) string {
 	switch {
 	case total == 1:
@@ -317,7 +278,6 @@ func summarize(total int, noun, sample string) string {
 	}
 }
 
-// countAndSample runs sql, whose one row holds a count and a sample of names.
 func countAndSample(ctx context.Context, q engine.Querier, sql string, params ...any) (int, string, error) {
 	row, err := queryRow(ctx, q, 2, sql, params...)
 	if err != nil {
@@ -327,12 +287,6 @@ func countAndSample(ctx context.Context, q engine.Querier, sql string, params ..
 	return total, text(row[1]), err
 }
 
-// queryRow runs sql and returns its only row, which must hold width values.
-// Every query of the audit aggregates into one row, so max_rows cannot cut it
-// short, and any other result is an error rather than a silently clean audit.
-// The search_path is pg_catalog alone: a schema the role or database puts
-// before it could otherwise shadow the catalogs and functions the audit reads
-// and fake a clean report.
 func queryRow(ctx context.Context, q engine.Querier, width int, sql string, params ...any) ([]*string, error) {
 	res, err := q.Query(ctx, engine.Query{SQL: sql, Params: params, SearchPath: "pg_catalog"})
 	if err != nil {
@@ -349,7 +303,6 @@ func queryRow(ctx context.Context, q engine.Querier, width int, sql string, para
 	return res.Rows[0], nil
 }
 
-// text returns a value, with NULL as "".
 func text(value *string) string {
 	if value == nil {
 		return ""

@@ -11,19 +11,12 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// boundColumn is the name of column c of table w in database i of
-// TestFanoutSectionsStayWithinTheInlineLimit: 55 characters, and different in
-// each database.
 func boundColumn(i, c int) string {
 	return fmt.Sprintf("%s_%d_%d", strings.Repeat("c", 50), i, c)
 }
 
-// pg_query fanned out to connections whose columns differ gives each its own
-// section, and the sections share the inline limit. A section's summary
-// listed its first 20 columns however long their names were, so ten sections
-// of twenty 55-character names took about 17 kB. Now a summary lists as many
-// columns as fit, and the sections fit together; each spill file holds every
-// column and row.
+// Fan-out sections share the inline limit: a summary lists only the columns
+// that fit, and each spill file holds every column and row.
 func TestFanoutSectionsStayWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	conns := map[string]config.Connection{}

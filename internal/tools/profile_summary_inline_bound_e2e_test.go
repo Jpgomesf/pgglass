@@ -8,10 +8,7 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// pg_profile fits its rows to InlineMaxBytes, then puts the line that names
-// the table before them, so rows that just fit came back over the limit: two
-// columns of five most common values of 976 characters render in 9,946
-// bytes, and the line before them, with its line break, took 94 more.
+// pg_profile fits its table line and rows within InlineMaxBytes together.
 func TestProfileSummaryLineStaysWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_profile_inline_bound"

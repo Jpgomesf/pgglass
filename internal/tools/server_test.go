@@ -23,7 +23,6 @@ import (
 
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-// lockedBuffer collects the audit log, which calls running in parallel write.
 type lockedBuffer struct {
 	mu  sync.Mutex
 	buf bytes.Buffer
@@ -41,7 +40,6 @@ func (b *lockedBuffer) String() string {
 	return b.buf.String()
 }
 
-// session is a client connected in memory to a server built on a config.
 type session struct {
 	*mcp.ClientSession
 	audit    *lockedBuffer
@@ -53,7 +51,6 @@ func connect(t *testing.T, cfg config.Config) *session {
 	return connectSpillingTo(t, cfg, t.TempDir())
 }
 
-// connectSpillingTo is connect with its spill files in dir.
 func connectSpillingTo(t *testing.T, cfg config.Config, dir string) *session {
 	t.Helper()
 	return connectAt(t, cfg, dir, "")
@@ -88,22 +85,16 @@ func connectClient(t *testing.T, cfg config.Config, dir, protocolVersion string,
 	return s
 }
 
-// newConfig returns a config with the given role check and connections, and
-// every other setting at its default.
 func newConfig(roleCheck string, conns map[string]config.Connection) config.Config {
 	return config.Config{Defaults: config.Defaults{RoleCheck: roleCheck}.WithDefaults(), Connections: conns}
 }
 
-// direct is a connection with a fixed DSN.
 func direct(dsn string) config.Connection {
 	return config.Connection{Source: "direct", DSN: dsn}
 }
 
-// unusedDSN is never dialed: the tests that use it fail before any query.
 const unusedDSN = "postgres://127.0.0.1:1/none?sslmode=disable"
 
-// call calls tool and returns the text of its result and whether it is an
-// error. A protocol error fails the test: every failure must be a result.
 func (s *session) call(t *testing.T, tool string, args map[string]any) (string, bool) {
 	t.Helper()
 	res, err := s.CallTool(t.Context(), &mcp.CallToolParams{Name: tool, Arguments: args})
@@ -125,7 +116,6 @@ func resultText(t testing.TB, res *mcp.CallToolResult) string {
 	return text.Text
 }
 
-// ok calls tool and fails the test if the result is an error.
 func (s *session) ok(t *testing.T, tool string, args map[string]any) string {
 	t.Helper()
 	text, isErr := s.call(t, tool, args)
@@ -135,7 +125,6 @@ func (s *session) ok(t *testing.T, tool string, args map[string]any) string {
 	return text
 }
 
-// fails calls tool and fails the test unless the result is an error.
 func (s *session) fails(t *testing.T, tool string, args map[string]any) string {
 	t.Helper()
 	text, isErr := s.call(t, tool, args)
@@ -145,13 +134,11 @@ func (s *session) fails(t *testing.T, tool string, args map[string]any) string {
 	return text
 }
 
-// sha12 is the first 12 hex digits of the SHA-256 of s.
 func sha12(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])[:12]
 }
 
-// auditLine is one line of the audit log.
 type auditLine struct {
 	Msg        string `json:"msg"`
 	Tool       string `json:"tool"`
@@ -165,8 +152,6 @@ type auditLine struct {
 	SQLState   string `json:"sqlstate"`
 }
 
-// auditLines decodes the audit log, failing the test on a line that is not
-// JSON or that holds keys an audit line must not have.
 func (s *session) auditLines(t *testing.T) []auditLine {
 	t.Helper()
 	allowed := map[string]bool{"time": true, "level": true, "msg": true, "tool": true, "connection": true,
@@ -211,8 +196,6 @@ func (s *session) auditedCall(t *testing.T, tool string, a map[string]any) (stri
 	return text, isErr, lines
 }
 
-// listedTool returns the definition of the tool named name, as tools/list
-// sends it, and its size in bytes of JSON.
 func listedTool(t *testing.T, name string) (*mcp.Tool, int) {
 	t.Helper()
 	s := connect(t, newConfig(config.RoleCheckWarn, nil))
@@ -387,7 +370,6 @@ func TestAuditLinesForCallsThatFailEarly(t *testing.T) {
 	}
 	want := []auditLine{
 		{Msg: "tool call", Tool: "pg_query", Connection: "db", SQLSHA256: sha12(markedSQL), SQLLen: len(markedSQL), Outcome: "guard_reject"},
-		// An unknown connection name is the caller's text: it is not logged.
 		{Msg: "tool call", Tool: "pg_query", SQLSHA256: sha12("SELECT 1"), SQLLen: 8, Outcome: "error"},
 		{Msg: "tool call", Tool: "pg_list_connections", Outcome: "ok"},
 	}

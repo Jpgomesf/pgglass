@@ -15,8 +15,6 @@ type explainArgs struct {
 	Schema     string `json:"schema"`
 }
 
-// explain runs pg_explain: the guard, as for pg_query, the role check, then
-// the plan of the SELECT, summarized inline or spilled to a file.
 func (h *Handlers) explain(ctx context.Context, raw json.RawMessage, c *call) (string, error) {
 	var args explainArgs
 	if err := decode(raw, &args); err != nil {

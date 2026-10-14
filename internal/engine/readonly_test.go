@@ -10,9 +10,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// These tests connect as the superuser, who may write anything, and skip the
-// guard: the engine alone must keep the database unchanged.
-
 const writesFixture = `
 CREATE TABLE t (id int PRIMARY KEY, v text NOT NULL);
 INSERT INTO t VALUES (1, 'one'), (2, 'two');
@@ -22,15 +19,11 @@ CREATE SEQUENCE s;
 CREATE PROCEDURE add_row(i int) LANGUAGE sql AS $$ INSERT INTO t VALUES (i, 'proc') $$;
 `
 
-// stateSQL fingerprints everything the attempts below could change.
 const stateSQL = `SELECT format('t=%s seq=%s temp_tables=%s',
 	(SELECT string_agg(id || ':' || v, ',' ORDER BY id) FROM t),
 	(SELECT last_value || '/' || is_called FROM s),
 	(SELECT count(*) FROM pg_class WHERE relpersistence = 't'))`
 
-// superuserScratch creates database name from writesFixture and returns a
-// Manager connected to it as the superuser, through a single connection, and
-// an observer connection.
 func superuserScratch(t *testing.T, name string) (*engine.Manager, *pgx.Conn) {
 	t.Helper()
 	testdb.CreateDatabase(t, name, writesFixture)
@@ -48,7 +41,7 @@ func TestWritesAreRefused(t *testing.T) {
 		{"nextval", "SELECT nextval('s')", "25006"},
 		{"CREATE TEMP TABLE", "CREATE TEMP TABLE scratch (id int)", "25006"},
 		{"COPY FROM", "COPY t FROM PROGRAM 'touch /tmp/engine_copy_from_ran; echo 9,nine' WITH (FORMAT csv)", "25006"},
-		{"COMMIT then DROP TABLE", "COMMIT; DROP TABLE t", "42601"}, // one statement per query
+		{"COMMIT then DROP TABLE", "COMMIT; DROP TABLE t", "42601"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			before := testdb.Value[string](t, watch, stateSQL)
@@ -87,11 +80,10 @@ func TestReadOnlyCannotBeTurnedOff(t *testing.T) {
 
 	for _, tc := range []struct {
 		name, sql string
-		state     string // SQLSTATE of the attempt; empty when it succeeds
+		state     string
 	}{
 		{"SET default_transaction_read_only", "SET default_transaction_read_only = off", ""},
 		{"SET SESSION CHARACTERISTICS", "SET SESSION CHARACTERISTICS AS TRANSACTION READ WRITE", ""},
-		// The engine's setup took the first snapshot: too late to switch.
 		{"SET TRANSACTION READ WRITE", "SET TRANSACTION READ WRITE", "25001"},
 		{"set_config of transaction_read_only", "SELECT set_config('transaction_read_only', 'off', false)", "25001"},
 		{"COMMIT", "COMMIT", ""},
@@ -119,10 +111,8 @@ func TestReadOnlyCannotBeTurnedOff(t *testing.T) {
 	}
 }
 
-// These act outside the query's transaction, through a new session, a
-// server-side program or the server's files, so READ ONLY cannot stop them.
-// internal/guard owns rejecting them; these tests pin what the engine alone
-// lets through so the gap stays visible.
+// These act outside the transaction, so READ ONLY cannot stop them: the guard
+// rejects them, and these tests keep visible what the engine alone allows.
 func TestGapsOwnedByTheGuard(t *testing.T) {
 	t.Parallel()
 	testdb.CreateDatabase(t, "engine_gaps", "CREATE EXTENSION dblink; CREATE TABLE t (id int PRIMARY KEY, v text NOT NULL);")

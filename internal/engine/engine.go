@@ -31,32 +31,25 @@ import (
 )
 
 const (
-	// deadlineGrace is how long past the statement timeout the client waits
-	// before it gives up on the server.
-	deadlineGrace = 2 * time.Second
-	// cancelWait is how long a cancelled query has to stop on the server
-	// before its connection is closed instead.
-	cancelWait = 2 * time.Second
-	// rollbackTimeout bounds the ROLLBACK that ends every query.
+	deadlineGrace   = 2 * time.Second
+	cancelWait      = 2 * time.Second
 	rollbackTimeout = 5 * time.Second
-	// vpnTimeout bounds the reachability check of requires_vpn connections.
-	vpnTimeout = 3 * time.Second
+	vpnTimeout      = 3 * time.Second
 )
 
 var errClosed = errors.New("engine: manager is closed")
 
-// limits bound every query.
 type limits struct {
-	StatementTimeout time.Duration // SET LOCAL statement_timeout
-	LockTimeout      time.Duration // SET LOCAL lock_timeout
-	MaxRows          int           // rows kept before the result is truncated
-	MaxBytes         int           // bytes kept before the result is truncated: each value's length plus valueCost
+	StatementTimeout time.Duration
+	LockTimeout      time.Duration
+	MaxRows          int
+	MaxBytes         int
 }
 
 // Query is one SQL statement to run.
 type Query struct {
 	SQL    string
-	Params []any // values for $1..$n
+	Params []any
 	// SearchPath, when set, names the one schema used as search_path for this
 	// query only. The engine quotes it as an identifier.
 	SearchPath string
@@ -71,7 +64,7 @@ type QueryError struct {
 	Message  string
 	Detail   string
 	Hint     string
-	Position int // 1-based character offset into the SQL; 0 when unknown
+	Position int
 }
 
 // Error returns the message and SQLSTATE.
@@ -95,20 +88,13 @@ type Manager struct {
 	pools  map[string]*lazyPool
 }
 
-// lazyPool is the pool of one connection. Its own lock serializes opening
-// it, so a slow connection never holds up the others. The lock is a 1-slot
-// channel so that a query waiting on a slow open can give up when its
-// context ends.
 type lazyPool struct {
 	lock chan struct{}
 	pool *pgxpool.Pool
 }
 
-// New returns a Manager for the connections in cfg. Its limits come from
-// cfg.Defaults, whose defaults are filled in, as config.Parse returns them:
-// statement_timeout_seconds, lock_timeout_seconds, max_rows and max_bytes.
-// DSNs are resolved with resolver.Resolve when a connection is first used,
-// and again for each new database connection, so New does no I/O.
+// New returns a Manager for cfg, limited by its Defaults as config.Parse fills
+// them. It does no I/O: DSNs resolve on first use and for each new connection.
 func New(cfg *config.Config) *Manager {
 	d := cfg.Defaults
 	return &Manager{
@@ -123,13 +109,8 @@ func New(cfg *config.Config) *Manager {
 	}
 }
 
-// Query runs q on the connection named conn inside a READ ONLY transaction
-// that is always rolled back, with the limits applied. Rows beyond MaxRows or
-// MaxBytes are dropped and reported through Result.Truncated. Errors raised
-// by Postgres are returned as *QueryError; connection, resolution and context
-// failures as plain errors. Query does not run the guard: callers passing
-// untrusted SQL or SearchPath must check them first, with guard.Check and
-// guard.CheckSearchPath.
+// Query runs q on conn within the limits, in a READ ONLY transaction it always
+// rolls back. It runs no guard: check untrusted SQL and SearchPath first.
 func (m *Manager) Query(ctx context.Context, conn string, q Query) (*result.Result, error) {
 	p, err := m.pool(ctx, conn)
 	if err != nil {
@@ -148,8 +129,6 @@ func (m *Manager) Query(ctx context.Context, conn string, q Query) (*result.Resu
 	return res, nil
 }
 
-// limitsFor returns the limits of q: the Manager's, with MaxRows lowered to
-// q.MaxRows when that is smaller.
 func (m *Manager) limitsFor(q Query) limits {
 	l := m.limits
 	if q.MaxRows > 0 && q.MaxRows < l.MaxRows {
@@ -189,8 +168,6 @@ func (b boundQuerier) Query(ctx context.Context, q Query) (*result.Result, error
 	return b.m.Query(ctx, b.conn, q)
 }
 
-// pool returns the pool of the connection named name, opening it on first
-// use. A failed open is retried by the next call.
 func (m *Manager) pool(ctx context.Context, name string) (connPool, error) {
 	lp, err := m.lazyPool(name)
 	if err != nil {
@@ -203,7 +180,6 @@ func (m *Manager) pool(ctx context.Context, name string) (connPool, error) {
 	}
 	defer func() { <-lp.lock }()
 	if lp.pool == nil {
-		// Close may have run since lazyPool returned; a pool opened now would leak.
 		if m.isClosed() {
 			return connPool{}, errClosed
 		}
@@ -216,17 +192,11 @@ func (m *Manager) pool(ctx context.Context, name string) (connPool, error) {
 	return connPool{pool: lp.pool, conn: m.cfg.Connections[name]}, nil
 }
 
-// connPool is the pool of one configured connection.
 type connPool struct {
 	pool *pgxpool.Pool
 	conn config.Connection
 }
 
-// acquire returns a database connection from the pool. When opening a new
-// one fails because the server refuses its credentials, the source may have
-// answered from a cache that a rotation made stale: if it caches, acquire
-// has it drop them and tries once more, with credentials resolved afresh.
-// Nothing ran on the server yet, so the second try is safe.
 func (p connPool) acquire(ctx context.Context) (*pgxpool.Conn, error) {
 	c, err := p.pool.Acquire(ctx)
 	if authFailed(err) && resolver.Invalidate(p.conn) {
@@ -235,9 +205,6 @@ func (p connPool) acquire(ctx context.Context) (*pgxpool.Conn, error) {
 	return c, err
 }
 
-// authFailed reports whether err is the server refusing the credentials of
-// a connection: invalid_password (28P01) or invalid_authorization_specification
-// (28000).
 func authFailed(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && (pgErr.Code == "28P01" || pgErr.Code == "28000")
@@ -274,22 +241,8 @@ func UnknownConnection(name string, conns map[string]config.Connection) error {
 	return fmt.Errorf("unknown connection %q (available: %s)", name, strings.Join(slices.Sorted(maps.Keys(conns)), ", "))
 }
 
-// rowByteHeadroom is added to max_bytes to get the per-message cap. Any row the
-// budget allows fits under max_bytes alone, since the wire adds 4 bytes per
-// value where the budget counts valueCost; the headroom is for the messages
-// that are not rows, such as row descriptions and errors, when max_bytes is
-// small.
 const rowByteHeadroom = 1 << 20
 
-// open resolves the DSN of the connection named name and creates its pool,
-// which dials on first use. Each new database connection resolves the DSN
-// again and takes its password and TLS settings from it, so rotated
-// credentials reach it without a restart, even from a source that caches
-// them (see connPool.acquire). A DSN that names another user, database or
-// host than the first fails the connection instead, since the role check
-// audits a connection once. The rest of the DSN, pool settings included, is
-// read once, here. maxBytes is the result byte budget, used to bound one wire
-// message.
 func open(ctx context.Context, name string, conn config.Connection, maxBytes int) (*pgxpool.Pool, error) {
 	cfg, err := parseDSN(ctx, name, conn)
 	if err != nil {
@@ -304,7 +257,6 @@ func open(ctx context.Context, name string, conn config.Connection, maxBytes int
 		if target(&f.Config) != target(&c.Config) {
 			return fmt.Errorf("connection %q: the DSN now names another user, database or host; restart the server to use it, so that its role is checked", name)
 		}
-		// The same hosts, perhaps reordered, each with its TLS settings.
 		c.Host, c.Port, c.TLSConfig, c.Fallbacks, c.Password = f.Host, f.Port, f.TLSConfig, f.Fallbacks, f.Password
 		if conn.RequiresVPN {
 			return checkVPN(name, c.Host, int(c.Port))
@@ -319,8 +271,6 @@ func open(ctx context.Context, name string, conn config.Connection, maxBytes int
 	return p, nil
 }
 
-// target is whom a connection logs in as, and where: its user, its database
-// and the hosts it may dial, fallbacks included, in any order.
 func target(c *pgconn.Config) string {
 	hosts := []string{net.JoinHostPort(c.Host, strconv.Itoa(int(c.Port)))}
 	for _, f := range c.Fallbacks {
@@ -330,7 +280,6 @@ func target(c *pgconn.Config) string {
 	return fmt.Sprintf("%q %q %q", c.User, c.Database, slices.Compact(hosts))
 }
 
-// parseDSN resolves the DSN of the connection named name and parses it.
 func parseDSN(ctx context.Context, name string, conn config.Connection) (*pgxpool.Config, error) {
 	dsn, err := resolver.Resolve(ctx, name, conn)
 	if err != nil {
@@ -338,13 +287,11 @@ func parseDSN(ctx context.Context, name string, conn config.Connection) (*pgxpoo
 	}
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("connection %q: %w", name, err) // pgx redacts the password
+		return nil, fmt.Errorf("connection %q: %w", name, err)
 	}
 	return cfg, nil
 }
 
-// checkVPN fails fast, before each dial, when the host of a requires_vpn
-// connection is unreachable.
 func checkVPN(name, host string, port int) error {
 	conn, err := net.DialTimeout("tcp", net.JoinHostPort(host, strconv.Itoa(port)), vpnTimeout)
 	if err != nil {
@@ -354,30 +301,13 @@ func checkVPN(name, host string, port int) error {
 	return nil
 }
 
-// harden sets what every connection needs, whatever the DSN says. maxBodyLen
-// bounds one protocol message.
 func harden(c *pgx.ConnConfig, maxBodyLen int) {
-	// A second layer under the READ ONLY transactions. PgBouncer refuses
-	// startup parameters it does not know: list this one in its
-	// track_extra_parameters (1.20+), or in ignore_startup_parameters.
 	c.RuntimeParams["default_transaction_read_only"] = "on"
-	// The guard reads SQL as UTF-8, and results are decoded as UTF-8: a role
-	// or database default such as SJIS, where a multibyte character can end
-	// in a backslash byte, must not change how the server reads either.
 	c.RuntimeParams["client_encoding"] = "UTF8"
-	// The extended protocol with the unnamed statement: one statement per
-	// query, and no server-side state for a transaction-mode pooler to lose.
 	c.DefaultQueryExecMode = pgx.QueryExecModeExec
-	// A cancelled context cancels the query on the server and keeps the
-	// connection for the next query; pgx's default drops the connection.
 	c.BuildContextWatcherHandler = func(pc *pgconn.PgConn) ctxwatch.Handler {
 		return &pgconn.CancelRequestContextWatcherHandler{Conn: pc, DeadlineDelay: cancelWait}
 	}
-	// Bound one wire message so a single huge field (SELECT repeat('x', 1e9))
-	// cannot be buffered far past the byte budget: pgx rejects a larger
-	// message after reading its 5-byte header, before allocating the body. The
-	// collector's MaxBytes cap only bounds the bytes it keeps, which is after
-	// pgx has already buffered the whole row.
 	c.AfterConnect = func(_ context.Context, pc *pgconn.PgConn) error {
 		pc.Frontend().SetMaxBodyLen(maxBodyLen)
 		return nil

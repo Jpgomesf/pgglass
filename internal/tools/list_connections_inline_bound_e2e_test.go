@@ -9,11 +9,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// writableTables is a fixture in which ro_clean may write the twelve
-// long-named tables of a schema: its role check reports a table_write
-// warning that names ten of them, about 1.2 kB. It grants to a fixture role
-// rather than create one, since TestBypassCorpusIsRejectedAndChangesNothing
-// checks that the cluster's roles do not change while it runs.
 func writableTables() string {
 	var fixture strings.Builder
 	fixture.WriteString("CREATE SCHEMA analytics_reporting_warehouse;\n")
@@ -25,10 +20,8 @@ func writableTables() string {
 	return fixture.String()
 }
 
-// pg_list_connections returns every connection with its role check report,
-// with no bound: ten connections whose role may write the tables it reads,
-// each reported as a table_write warning that names ten of them, took 12,447
-// bytes.
+// pg_list_connections stays within the inline limit when every connection's
+// role check report is long.
 func TestListConnectionsStaysWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_list_inline_bound"
@@ -39,7 +32,6 @@ func TestListConnectionsStaysWithinTheInlineLimit(t *testing.T) {
 	}
 	s := connect(t, newConfig(config.RoleCheckWarn, conns))
 	for conn := range conns {
-		// The first use audits the role, and the result starts with its report.
 		got := s.ok(t, "pg_query", args(conn, "SELECT 1"))
 		if !strings.HasPrefix(got, "role check: role ro_clean: 1 finding(s)\n  warning table_write: 12 relations, first 10: ") {
 			t.Fatalf("%s: first call:\n%.300s", conn, got)

@@ -19,8 +19,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// appConns connects to the app fixture as ro_clean (with default_schema
-// app), ro_leaky and the superuser.
 func appConns(t *testing.T) map[string]config.Connection {
 	t.Helper()
 	return map[string]config.Connection{
@@ -46,7 +44,7 @@ func TestQueryReturnsPostgresTextInEveryFormat(t *testing.T) {
 	tsv := "n\ts\tz\tb\tj\tm\tu\tn\n" +
 		"1\ta b\t\\N\tt\t{\"k\": [1, 2]}\t12.30\t0ddc4d69-0dcf-fba9-15c2-88a68e6665de\t2\n(1 row)"
 	for format, want := range map[string]string{
-		"":    tsv, // the configured default
+		"":    tsv,
 		"tsv": tsv,
 		"json": `{"columns":[{"name":"n","type":"int4"},{"name":"s","type":"text"},{"name":"z","type":"text"},` +
 			`{"name":"b","type":"bool"},{"name":"j","type":"jsonb"},{"name":"m","type":"numeric"},` +
@@ -92,7 +90,6 @@ func TestQueryArguments(t *testing.T) {
 		}
 	}
 
-	// max_rows only lowers the configured cap of 1000.
 	got := s.ok(t, "pg_query", args("clean", "SELECT g FROM generate_series(1, 2000) g", "max_rows", 5000))
 	if !strings.HasSuffix(got, "\n1000\n(1000 rows; truncated: max_rows=1000)") {
 		t.Errorf("max_rows above the cap: ends with %q", got[max(0, len(got)-60):])
@@ -103,7 +100,6 @@ func TestQueryArguments(t *testing.T) {
 		t.Errorf("array param: %s", text)
 	}
 
-	// schema replaces default_schema, so customers is not found in public.
 	text = s.fails(t, "pg_query", args("clean", "SELECT count(*) FROM customers", "schema", "public"))
 	if !strings.Contains(text, "(SQLSTATE 42P01)") {
 		t.Errorf("customers in public: %s", text)
@@ -122,7 +118,7 @@ func TestDatabaseErrorsAreToolErrors(t *testing.T) {
 		{args("clean", "SELECT 'x'::jsonb"), "ERROR: invalid input syntax for type json (SQLSTATE 22P02) at character 8\n" +
 			`DETAIL: Token "x" is invalid.`},
 		{args("clean", "SELECT 1/0"), "ERROR: division by zero (SQLSTATE 22012)"},
-		{args("clean", "SELECT 1", "params", []any{1}), "(SQLSTATE 08P01)"}, // a parameter the query has no place for
+		{args("clean", "SELECT 1", "params", []any{1}), "(SQLSTATE 08P01)"},
 		{args("clean", "SELECT id FROM tenant_notes FOR UPDATE"), "query rejected: FOR UPDATE/FOR SHARE is not allowed"},
 	} {
 		if got := s.fails(t, "pg_query", tc.args); !strings.Contains(got, tc.want) {
@@ -141,13 +137,11 @@ func TestDatabaseErrorsAreToolErrors(t *testing.T) {
 			t.Errorf("%s %v = %q, want it to contain %q", tc.tool, tc.args, got, tc.want)
 		}
 	}
-	// The connection is still usable.
 	if got := s.ok(t, "pg_query", args("clean", "SELECT 1 AS one")); got != "one\n1\n(1 row)" {
 		t.Errorf("after the errors: %q", got)
 	}
 }
 
-// sizes matches the pretty sizes in pg_schema output, which vary by version.
 var sizes = regexp.MustCompile(`\d+ (bytes|kB|MB)`)
 
 func TestSchemaDescribesStepByStep(t *testing.T) {
@@ -191,7 +185,6 @@ indexes:
 	if got := schema(map[string]any{"schema": "app", "table": "orders"}); got != orders {
 		t.Errorf("app.orders:\n%s\nwant\n%s", got, orders)
 	}
-	// Without schema, table is looked up in the connection's default_schema.
 	if got := schema(map[string]any{"table": "orders"}); got != orders {
 		t.Errorf("orders in default_schema app:\n%s", got)
 	}
@@ -214,7 +207,6 @@ func TestSchemaIsCached(t *testing.T) {
 	if again := s.ok(t, "pg_schema", list); again != first {
 		t.Errorf("second listing changed within the cache TTL:\n%s", again)
 	}
-	// pg_search is not cached: the new table is there.
 	if got := s.ok(t, "pg_search", map[string]any{"connection": "db", "pattern": "after_listing"}); got != "public.after_listing: table" {
 		t.Errorf("pg_search after_listing = %q", got)
 	}
@@ -336,7 +328,6 @@ func TestRoleCheckWarnShowsFindingsOnce(t *testing.T) {
 		t.Errorf("second result on ro_leaky repeats the findings:\n%s", again)
 	}
 
-	// The findings come with the first result even when it is an error.
 	failed := s.fails(t, "pg_query", args("super", "SELECT 1/0"))
 	if want := "role check: role postgres: 1 finding(s)\n  critical superuser: bypasses every privilege check\n\n" +
 		"ERROR: division by zero (SQLSTATE 22012)"; failed != want {
@@ -359,8 +350,6 @@ func TestRoleCheckOffSkipsTheAudit(t *testing.T) {
 	}
 }
 
-// parallelRow matches the result of one query of the parallel test: its
-// parameter and the backend that ran it.
 var parallelRow = regexp.MustCompile(`^i\tn\tpid\tpg_sleep\n(\d+)\t1000\t(\d+)\t\n\(1 row\)$`)
 
 // Calls on one connection overlap: run one at a time, they would all reuse
@@ -380,13 +369,13 @@ func TestParallelQueriesOnOneConnection(t *testing.T) {
 			res, err := s.CallTool(t.Context(), &mcp.CallToolParams{Name: "pg_query", Arguments: args("clean",
 				"SELECT $1::int AS i, count(*) AS n, pg_backend_pid() AS pid, pg_sleep(0.05) FROM events WHERE id % 20 = $1",
 				"params", []any{i})})
-			var text string // not resultText: t.Fatal must not run on this goroutine
+			var text string
 			if err == nil && len(res.Content) == 1 {
 				if c, ok := res.Content[0].(*mcp.TextContent); ok {
 					text = c.Text
 				}
 			}
-			m := parallelRow.FindStringSubmatch(text) // an error result does not match
+			m := parallelRow.FindStringSubmatch(text)
 			if m == nil || m[1] != strconv.Itoa(i) {
 				t.Errorf("query %d: %v\n%s", i, err, text)
 				return
@@ -411,8 +400,6 @@ func TestParallelQueriesOnOneConnection(t *testing.T) {
 	}
 }
 
-// readSpill reads the spill file at path, which must be a private file in
-// dir, as CSV.
 func readSpill(t *testing.T, path, dir string) [][]string {
 	t.Helper()
 	if filepath.Dir(path) != dir {
@@ -437,7 +424,6 @@ func readSpill(t *testing.T, path, dir string) [][]string {
 	return records
 }
 
-// spillPath returns the file a spill summary points at.
 func spillPath(t *testing.T, summary string) string {
 	t.Helper()
 	m := regexp.MustCompile(`(?m)^Full result: (.+)$`).FindStringSubmatch(summary)
@@ -472,7 +458,6 @@ func TestLargeResultSpillsToCSV(t *testing.T) {
 		t.Errorf("last row = %q", last)
 	}
 
-	// With the default max_rows, the summary says the result was cut.
 	capped := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
 	summary = capped.ok(t, "pg_query", args("clean", "SELECT * FROM events ORDER BY id"))
 	if !strings.Contains(summary, "1000 rows × 4 columns, truncated=true (max_rows=1000).") {
@@ -521,8 +506,6 @@ func TestAuditLinesHoldNoSQLOrValues(t *testing.T) {
 	}
 }
 
-// stateSQL fingerprints what the bypass corpus tries to change in a
-// database, and in the cluster around it.
 const stateSQL = `SELECT concat_ws(' ',
 	'relations=' || (SELECT count(*) FROM pg_class),
 	'acl=' || (SELECT md5(coalesce(string_agg(relacl::text, ',' ORDER BY oid), '')) FROM pg_class),
@@ -579,7 +562,6 @@ func TestBypassCorpusIsRejectedAndChangesNothing(t *testing.T) {
 		}
 	}
 
-	// The sessions are intact and still read-only.
 	for _, conn := range []string{"app", "supabase"} {
 		got := s.ok(t, "pg_query", args(conn, `SELECT current_user, current_setting('default_transaction_read_only') AS dtro,
 			current_setting('transaction_read_only') AS tro`))
@@ -601,11 +583,8 @@ func TestBypassCorpusIsRejectedAndChangesNothing(t *testing.T) {
 	}
 }
 
-// The statement below is one string literal when standard_conforming_strings
-// is on, as the guard reads it. With the setting off, the backslash escapes
-// the quote after it, the literal ends early, and the dblink_exec call after
-// it would run. The engine turns the setting on, so Postgres reads the SQL as
-// the guard did.
+// With standard_conforming_strings off, a backslash would end the literal early
+// and run dblink_exec, so the engine forces it on, as the guard reads SQL.
 func TestBackslashCannotHideACallFromTheGuard(t *testing.T) {
 	t.Parallel()
 	const name = "tools_scs_off"
@@ -623,10 +602,8 @@ func TestBackslashCannotHideACallFromTheGuard(t *testing.T) {
 	}
 }
 
-// The guard denies every function in schema net, but sees only the names a
-// statement spells: with net as the search_path, an unqualified call would
-// resolve into it (red-team F2). pg_query refuses that search_path, whether
-// the schema argument or default_schema sets it.
+// pg_query refuses net as the search_path, from the schema argument or
+// default_schema, since unqualified calls would resolve into it past the guard.
 func TestSearchPathCannotBeADeniedSchema(t *testing.T) {
 	t.Parallel()
 	const name = "tools_net_search_path"
@@ -649,7 +626,6 @@ func TestSearchPathCannotBeADeniedSchema(t *testing.T) {
 			t.Errorf("%v: %s", a, got)
 		}
 	}
-	// Under any other search_path the name does not resolve.
 	if got := s.fails(t, "pg_query", args("db", call, "schema", "public")); !strings.Contains(got, "(SQLSTATE 42883)") {
 		t.Errorf("schema public: %s", got)
 	}

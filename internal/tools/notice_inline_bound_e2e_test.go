@@ -8,12 +8,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// Under role_check warn, the first call on a connection whose role has
-// findings starts with the role check's report. handle prepends that report
-// after the tool has fitted its output to InlineMaxBytes, so an output that
-// just fit came back over the limit: 9,808 bytes of pg_query rows plus
-// ro_leaky's 472-byte report, and a pg_schema listing cut to 9,990 bytes plus
-// the same report.
+// Under role_check warn, the role check's report and the output it precedes fit
+// within InlineMaxBytes together.
 func TestRoleCheckNoticeStaysWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_notice_inline_bound"
@@ -35,7 +31,7 @@ func TestRoleCheckNoticeStaysWithinTheInlineLimit(t *testing.T) {
 		{"pg_query", args("for_query", "SELECT repeat('x', 100) AS v FROM generate_series(1, 97)")},
 		{"pg_schema", map[string]any{"connection": "for_schema", "schema": "app"}},
 	} {
-		got := s.ok(t, tc.tool, tc.args) // the connection's first call
+		got := s.ok(t, tc.tool, tc.args)
 		if !strings.HasPrefix(got, "role check: role ro_leaky: ") {
 			t.Fatalf("%s: the first call does not start with the role check's findings:\n%.300s", tc.tool, got)
 		}

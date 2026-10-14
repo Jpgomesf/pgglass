@@ -26,7 +26,7 @@ import (
 // Schema is a non-system schema the current role can see.
 type Schema struct {
 	Name      string
-	Relations int // tables, views, materialized views and foreign tables
+	Relations int
 	Comment   string
 }
 
@@ -37,26 +37,25 @@ type SchemaList []Schema
 type Relation struct {
 	Schema string
 	Name   string
-	Kind   string // "table", "partitioned table", "view", "materialized view" or "foreign table"
-	Rows   int64  // planner estimate (pg_class.reltuples); -1 when never analyzed
+	Kind   string
+	Rows   int64
 	// Size is the pretty total size, TOAST, indexes and partitions included,
 	// e.g. "48 kB"; empty for views and foreign tables.
 	Size    string
-	RLS     bool // row-level security is enabled
+	RLS     bool
 	Comment string
 }
 
 // RelationList is the result of FirstTables.
 type RelationList []Relation
 
-// Column is a column of a relation. NotNull is set when a validated
-// constraint keeps nulls out of every row, not for a NOT VALID one
-// (PostgreSQL 18), which leaves older rows unchecked.
+// Column is a column of a relation. NotNull is set only by a validated
+// constraint, not a NOT VALID one (PostgreSQL 18).
 type Column struct {
 	Name    string
-	Type    string // format_type, e.g. "numeric(12,2)", "integer[]", "app.order_status"
+	Type    string
 	NotNull bool
-	Default string // default expression; empty when none
+	Default string
 	// Generated is the identity or generation clause, e.g. "GENERATED ALWAYS
 	// AS IDENTITY" or "GENERATED ALWAYS AS (price * qty) STORED"; empty when none.
 	Generated string
@@ -69,7 +68,7 @@ type Column struct {
 // Index is an index of a table.
 type Index struct {
 	Name       string
-	Definition string // pg_get_indexdef, e.g. "CREATE INDEX ... WHERE status = 'pending'::app.order_status"
+	Definition string
 	Primary    bool
 	Unique     bool
 }
@@ -77,18 +76,18 @@ type Index struct {
 // Constraint is a primary key, unique, check, foreign key or exclusion constraint.
 type Constraint struct {
 	Name       string
-	Kind       string // "primary key", "unique", "check", "foreign key" or "exclusion"
-	Definition string // pg_get_constraintdef, e.g. "FOREIGN KEY (customer_id) REFERENCES app.customers(id)"
+	Kind       string
+	Definition string
 }
 
 // Policy is a row-level security policy.
 type Policy struct {
 	Name       string
-	Command    string   // "ALL", "SELECT", "INSERT", "UPDATE" or "DELETE"
-	Permissive bool     // false for RESTRICTIVE policies
-	Roles      []string // "public" when the policy applies to everyone
-	Using      string   // USING expression; empty when none
-	WithCheck  string   // WITH CHECK expression; empty when none
+	Command    string
+	Permissive bool
+	Roles      []string
+	Using      string
+	WithCheck  string
 }
 
 // TableDetail is the full description of one relation, returned by Table.
@@ -98,8 +97,8 @@ type TableDetail struct {
 	Indexes     []Index
 	Constraints []Constraint
 	Policies    []Policy
-	Triggers    []string // user-defined triggers; internal constraint triggers are left out
-	Definition  string   // query of a view or materialized view; empty for tables
+	Triggers    []string
+	Definition  string
 }
 
 // Match is one hit of Search.
@@ -108,7 +107,7 @@ type Match struct {
 	// Table is the relation name or, for a function match, the function name
 	// and identity arguments, e.g. "order_total(customer uuid)".
 	Table  string
-	Column string // empty when the relation or function name itself matched
+	Column string
 	// Type is the column type, the relation kind for a relation match, or
 	// "function", "aggregate", "window function" or "procedure".
 	Type string
@@ -117,20 +116,16 @@ type Match struct {
 // MatchList is the result of Search.
 type MatchList []Match
 
-// errNoRows reports a catalog query that found nothing, such as a missing
-// relation or one the role cannot read.
 var errNoRows = errors.New("no rows")
 
-// errTooLarge reports a catalog result that max_rows or max_bytes cut short.
 var errTooLarge = errors.New("catalog result exceeds the configured limits")
 
 // ErrNotFound is wrapped by the error of Table for a relation that does not
 // exist or that the current role cannot read.
 var ErrNotFound = errors.New("does not exist or the current role cannot read it")
 
-// FirstSchemas lists the first limit of the non-system schemas the current
-// role can see, by name, and returns how many there are in all, so the
-// catalog result stays small however many schemas there are.
+// FirstSchemas lists the first limit non-system schemas the role can see, by
+// name, and returns how many there are in all.
 func FirstSchemas(ctx context.Context, q engine.Querier, limit int) (SchemaList, int, error) {
 	if limit < 1 {
 		return nil, 0, fmt.Errorf("limit must be at least 1, got %d", limit)
@@ -145,11 +140,8 @@ func FirstSchemas(ctx context.Context, q engine.Querier, limit int) (SchemaList,
 	return page.Schemas, page.Total, nil
 }
 
-// FirstTables lists the first limit of the relations in schema that the
-// current role can read, by name, leaving out partitions, and returns how
-// many there are in all, so the catalog result stays small however many
-// relations the schema holds. It returns an error if the schema does not
-// exist or the role lacks USAGE on it.
+// FirstTables lists the first limit relations in schema the role can read, by
+// name, partitions aside, with their total; an unusable schema is an error.
 func FirstTables(ctx context.Context, q engine.Querier, schema string, limit int) (RelationList, int, error) {
 	if limit < 1 {
 		return nil, 0, fmt.Errorf("limit must be at least 1, got %d", limit)
@@ -168,9 +160,8 @@ func FirstTables(ctx context.Context, q engine.Querier, schema string, limit int
 	return page.Relations, page.Total, nil
 }
 
-// Table describes the relation schema.name, or returns an error wrapping
-// ErrNotFound if the current role cannot see it. Names match exactly, as the
-// catalog stores them (unquoted). Partitions can be described too.
+// Table describes the relation schema.name, partitions included, or returns an
+// error wrapping ErrNotFound if the role cannot see it. Names match exactly.
 func Table(ctx context.Context, q engine.Querier, schema, name string) (*TableDetail, error) {
 	var t TableDetail
 	err := queryJSON(ctx, q, &t, tableSQL, schema, name)
@@ -183,10 +174,8 @@ func Table(ctx context.Context, q engine.Querier, schema, name string) (*TableDe
 	return &t, nil
 }
 
-// Search finds relations and columns whose name contains pattern, ignoring
-// case and treating pattern literally (no wildcards), and returns at most
-// limit matches. Functions whose name contains pattern match too. Relations
-// come first, then columns, then functions.
+// Search returns at most limit relations, then columns, then functions whose
+// name contains pattern, literally and ignoring case.
 func Search(ctx context.Context, q engine.Querier, pattern string, limit int) (MatchList, error) {
 	if pattern == "" {
 		return nil, errors.New("search pattern is empty")
@@ -201,9 +190,6 @@ func Search(ctx context.Context, q engine.Querier, pattern string, limit int) (M
 	return list, nil
 }
 
-// queryJSON runs sql, which returns at most one row holding one JSON value,
-// and decodes that value into dst. It returns errNoRows when no row or NULL
-// comes back.
 func queryJSON(ctx context.Context, q engine.Querier, dst any, sql string, params ...any) error {
 	res, err := q.Query(ctx, engine.Query{SQL: sql, Params: params, SearchPath: "pg_catalog"})
 	if err != nil {
@@ -216,14 +202,12 @@ func queryJSON(ctx context.Context, q engine.Querier, dst any, sql string, param
 		return errNoRows
 	}
 	dec := json.NewDecoder(strings.NewReader(*res.Rows[0][0]))
-	dec.DisallowUnknownFields() // a key the SQL misspells fails loudly
+	dec.DisallowUnknownFields()
 	return dec.Decode(dst)
 }
 
-// likeEscaper escapes the ILIKE wildcards and its escape character.
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
-// likePattern returns an ILIKE pattern that matches s literally anywhere.
 func likePattern(s string) string {
 	return "%" + likeEscaper.Replace(s) + "%"
 }

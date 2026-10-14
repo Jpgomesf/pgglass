@@ -20,10 +20,8 @@ const (
 		INSERT INTO notes VALUES (1, 'first');`
 )
 
-// pg_schema and pg_diff_schema show a column as NOT NULL only when Postgres
-// has checked every row. From PostgreSQL 18, a NOT VALID not-null constraint
-// sets attnotnull without checking the rows before it, such as the row whose
-// body is null; on every version, that body is nullable.
+// pg_schema and pg_diff_schema show a column as NOT NULL only once Postgres has
+// checked every row, so a NOT VALID one (PostgreSQL 18) is nullable.
 func TestSchemaAndDiffShowANotValidNotNullColumnAsNullable(t *testing.T) {
 	t.Parallel()
 	testdb.CreateDatabase(t, "tools_not_valid", notValidSQL)

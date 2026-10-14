@@ -12,10 +12,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/spill"
 )
 
-// linesOutput gets lines its caller found too large to return inline. Cut
-// to 200 characters each, lines of 300 that total just over 10 KB fit, and
-// the spill store returned them so, without a file: their ends were lost.
-// Now they always go to a spill file, whole.
+// linesOutput always writes the lines its caller found too large to return
+// inline to a spill file, whole.
 func TestLinesOutputSpillsLinesWhole(t *testing.T) {
 	h := &Handlers{spill: &spill.Store{Dir: t.TempDir(), InlineMaxBytes: config.InlineMaxBytes}}
 	var lines []string

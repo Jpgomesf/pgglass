@@ -15,33 +15,28 @@ import (
 	"github.com/jpgomesf/pgglass/internal/guard"
 )
 
-// Outcomes of a call, as its audit line reports them.
 const (
 	outcomeOK             = "ok"
 	outcomeGuardReject    = "guard_reject"
 	outcomeDBError        = "db_error"
 	outcomePreflightBlock = "preflight_block"
-	outcomeError          = "error" // anything else, such as invalid arguments
+	outcomeError          = "error"
 	outcomeDeclined       = "declined"
 )
 
-// call is one tool call: what its audit line reports, and the notice its
-// result starts with.
 type call struct {
 	tool       string
 	start      time.Time
-	connection string // a configured connection name; empty until checked
-	sql        string // hashed and measured, never logged
+	connection string
+	sql        string
 	rows       int
 	truncated  bool
-	notice     string // shown before the result, success or error
-	audited    bool   // the call wrote its own audit lines, one per connection
+	notice     string
+	audited    bool
 	answers    mcp.InputResponseMap
 	canAsk     bool
 }
 
-// audit writes the audit line of c, which ended with err. It never logs SQL
-// text, parameters or values.
 func (h *Handlers) audit(c *call, err error) {
 	outcome, sqlState := classify(err)
 	h.log.Info("tool call",
@@ -57,8 +52,6 @@ func (h *Handlers) audit(c *call, err error) {
 	)
 }
 
-// sqlHash returns the first 12 hex digits of the SHA-256 of sql, or "" when
-// there is no SQL.
 func sqlHash(sql string) string {
 	if sql == "" {
 		return ""
@@ -67,16 +60,12 @@ func sqlHash(sql string) string {
 	return hex.EncodeToString(sum[:6])
 }
 
-// dbError is a failure reported by the database, or met on the way to it.
 type dbError struct{ err error }
 
 func (e *dbError) Error() string { return e.err.Error() }
 
 func (e *dbError) Unwrap() error { return e.err }
 
-// connError is the failure of a call on one of its connections, such as one
-// side of pg_diff_schema. Its text starts with the connection's name, a
-// Postgres error's too.
 type connError struct {
 	conn string
 	err  error
@@ -86,8 +75,6 @@ func (e *connError) Error() string { return e.conn + ": " + e.err.Error() }
 
 func (e *connError) Unwrap() error { return e.err }
 
-// classify returns the outcome of a call that ended with err and, for a
-// Postgres error, its SQLSTATE.
 func classify(err error) (outcome, sqlState string) {
 	var (
 		violation *guard.Violation
@@ -113,7 +100,6 @@ func classify(err error) (outcome, sqlState string) {
 	}
 }
 
-// errorText is the text of the result of a call that ended with err.
 func errorText(err error) string {
 	var (
 		connErr   *connError
@@ -135,8 +121,6 @@ func errorText(err error) string {
 	}
 }
 
-// queryErrorText renders a Postgres error as psql does: message, SQLSTATE
-// and position, then detail and hint.
 func queryErrorText(e *engine.QueryError) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ERROR: %s (SQLSTATE %s)", e.Message, e.SQLState)

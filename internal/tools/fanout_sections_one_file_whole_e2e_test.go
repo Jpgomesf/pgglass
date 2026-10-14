@@ -10,14 +10,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// Fanned-out sections that take more than their room go to one more file, a
-// line each. A section that fit its share went there as it is returned
-// inline, its cells cut to 200 characters, so a longer value was whole in no
-// file. A spill directory of 600 bytes makes each spilled section's line
-// longer than its share: of ten connections of 63-byte names, two fail,
-// seven return 200 rows that spill, and one returns a value of 5,000
-// characters, which fit its share cut to 200. Now every section then spills
-// to a file of its own, which the file of sections names.
+// When fan-out sections overflow into one file of sections, each spills to a
+// file of its own first, so every value is whole in some file.
 func TestFanoutSectionsInOneFileKeepEveryValueWhole(t *testing.T) {
 	t.Parallel()
 	const db = "tools_fanout_sections_one_file_whole"

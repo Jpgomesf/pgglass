@@ -8,10 +8,6 @@ import (
 	pgquery "github.com/wasilibs/go-pgquery"
 )
 
-// The guard relies on github.com/wasilibs/go-pgquery: libpg_query compiled to
-// WebAssembly, so the server keeps building with CGO_ENABLED=0. These tests
-// pin what the guard needs from it: PG 17 syntax, statement counts and errors.
-
 func parseOne(t *testing.T, sql string) *pg_query.Node {
 	t.Helper()
 	tree, err := pgquery.Parse(sql)

@@ -8,13 +8,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// Under role_check strict, a role check that Postgres refuses refuses the
-// call, and said only what Postgres said: in a database where PUBLIC may not
-// read pg_proc, pg_query of SELECT 1 returned "ERROR: permission denied for
-// table pg_proc", as if the agent's own query had failed. The error now says
-// that the role check failed, in pg_query, in a fan-out's line for the
-// connection and after pg_diff_schema's side, and the audit line keeps the
-// SQLSTATE.
+// Under role_check strict, an audit Postgres refuses fails the call with an
+// error saying the role check failed, and the audit line keeps the SQLSTATE.
 func TestRoleCheckStrictSaysWhenPostgresRefusedTheAudit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_rolecheck_noproc"

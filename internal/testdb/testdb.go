@@ -19,7 +19,7 @@ package testdb
 
 import (
 	"context"
-	_ "embed" // fixture SQL
+	_ "embed"
 	"errors"
 	"fmt"
 	"net"
@@ -39,18 +39,17 @@ import (
 
 // Roles and databases created by the fixtures.
 const (
-	Superuser    = "postgres"      // owns everything
-	RoleClean    = "ro_clean"      // USAGE + SELECT on schema app, nothing else
-	RoleLeaky    = "ro_leaky"      // RoleClean + INSERT on app.audit_log, EXECUTE on dblink, member of pg_read_server_files
-	RoleSupabase = "ro_supabase"   // SELECT on public.profiles in DBSupabase; PUBLIC grants do the rest
-	DBApp        = "app"           // the main fixture database
-	DBSupabase   = "supabase_like" // the pg_net look-alike
+	Superuser    = "postgres"
+	RoleClean    = "ro_clean"
+	RoleLeaky    = "ro_leaky"
+	RoleSupabase = "ro_supabase"
+	DBApp        = "app"
+	DBSupabase   = "supabase_like"
 )
 
 // DefaultImage is the Postgres image used when PGGLASS_PG_IMAGE is unset.
 const DefaultImage = "postgres:17-alpine"
 
-// maintenanceDB is the database the superuser connects to for cluster-wide statements.
 const maintenanceDB = "postgres"
 
 const startTimeout = 5 * time.Minute
@@ -87,8 +86,7 @@ func DSN(t testing.TB, role, database string) string {
 }
 
 // Querier returns an engine.Querier that reads database as role through the
-// engine, with the default limits, as the server does. It is closed when t
-// finishes.
+// engine, with the default limits. It is closed when t finishes.
 func Querier(t testing.TB, role, database string) engine.Querier {
 	t.Helper()
 	m := engine.New(&config.Config{
@@ -100,8 +98,7 @@ func Querier(t testing.TB, role, database string) engine.Querier {
 }
 
 // Conn opens a plain connection to database as role, outside the engine, for
-// setup and to observe what queries leave behind. It is closed when t
-// finishes.
+// setup and observation. It is closed when t finishes.
 func Conn(t testing.TB, role, database string) *pgx.Conn {
 	t.Helper()
 	conn, err := pgx.Connect(t.Context(), DSN(t, role, database))
@@ -129,11 +126,8 @@ func ServerVersion(t testing.TB) int {
 	return Value[int](t, Conn(t, Superuser, maintenanceDB), "SELECT current_setting('server_version_num')::int")
 }
 
-// CreateDatabase creates database name, runs fixtureSQL in it as the superuser
-// and drops the database, closing any open connections, when t finishes.
-// fixtureSQL may hold several statements. Roles are cluster-wide and survive
-// the drop, so create them idempotently and give each the password of its
-// name to reach it through DSN.
+// CreateDatabase creates database name, runs fixtureSQL in it as the superuser,
+// and drops it when t finishes; roles survive, so create them idempotently.
 func CreateDatabase(t testing.TB, name, fixtureSQL string) {
 	t.Helper()
 	srv := shared.get(t)
@@ -150,10 +144,9 @@ func CreateDatabase(t testing.TB, name, fixtureSQL string) {
 	}
 }
 
-// harness starts the server once per test binary.
 type harness struct {
 	start   func(context.Context) (*server, error)
-	managed bool // set by Main, which terminates the container
+	managed bool
 
 	once sync.Once
 	srv  *server
@@ -196,10 +189,7 @@ type server struct {
 	port string
 }
 
-// startServer runs the container and loads the fixtures, terminating the
-// container if any step fails.
 func startServer(ctx context.Context) (srv *server, err error) {
-	// testcontainers panics, rather than failing, when it finds no Docker host.
 	defer func() {
 		if r := recover(); r != nil {
 			srv, err = nil, fmt.Errorf("panic: %v", r)
@@ -287,7 +277,6 @@ func (s *server) dropDatabase(ctx context.Context, name string) error {
 	return nil
 }
 
-// exec runs sql, which may hold several statements, as the superuser on database.
 func (s *server) exec(ctx context.Context, database, sql string) error {
 	conn, err := pgx.Connect(ctx, s.dsn(Superuser, database))
 	if err != nil {

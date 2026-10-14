@@ -73,14 +73,14 @@ func TestTargetIsUserDatabaseAndHosts(t *testing.T) {
 	}
 	first := parse("postgres://u:old@a:5432,b:5433/d")
 	for dsn, same := range map[string]bool{
-		"postgres://u:new@a:5432,b:5433/d":                 true, // a rotated password
-		"postgres://u:old@a:5432,b:5433/d?sslmode=require": true, // other TLS settings, without plaintext fallbacks
-		"postgres://u:old@b:5433,a:5432/d":                 true, // the same hosts, reordered
+		"postgres://u:new@a:5432,b:5433/d":                 true,
+		"postgres://u:old@a:5432,b:5433/d?sslmode=require": true,
+		"postgres://u:old@b:5433,a:5432/d":                 true,
 		"postgres://v:old@a:5432,b:5433/d":                 false,
 		"postgres://u:old@a:5432,b:5433/e":                 false,
 		"postgres://u:old@a:5432,c:5433/d":                 false,
 		"postgres://u:old@a:5432,b:5434/d":                 false,
-		"postgres://u:old@a:5432/d":                        false, // a host fewer
+		"postgres://u:old@a:5432/d":                        false,
 	} {
 		if got := parse(dsn) == first; got != same {
 			t.Errorf("%s: same target = %t, want %t", dsn, got, same)
@@ -88,7 +88,6 @@ func TestTargetIsUserDatabaseAndHosts(t *testing.T) {
 	}
 }
 
-// rawRow builds a row as pgx returns it; "\x00" stands for NULL.
 func rawRow(values ...string) [][]byte {
 	row := make([][]byte, len(values))
 	for i, v := range values {
@@ -112,7 +111,7 @@ func collectAll(l limits, rows ...[][]byte) (*result.Result, int) {
 }
 
 func TestCollectorLimits(t *testing.T) {
-	row := rawRow("ab", "cd") // 4 bytes of values, 52 with their valueCost
+	row := rawRow("ab", "cd")
 	for _, tc := range []struct {
 		name      string
 		limits    limits
@@ -150,7 +149,7 @@ func TestCollectorCountsEmptyAndNullValues(t *testing.T) {
 	empty := make([][]byte, 1600)
 	for i := range empty {
 		if i%2 == 0 {
-			empty[i] = []byte{} // the other half stays NULL
+			empty[i] = []byte{}
 		}
 	}
 	rows := make([][][]byte, 1000)
@@ -177,7 +176,7 @@ func TestCollectorKeepsNullDistinctAndCopiesValues(t *testing.T) {
 		t.Errorf("empty string became %v", row[1])
 	}
 
-	raw[2][0] = 'X' // pgx reuses its buffer for the next row
+	raw[2][0] = 'X'
 	if *row[2] != "abc" {
 		t.Errorf("kept value changed with the buffer: %q", *row[2])
 	}
@@ -188,7 +187,7 @@ func TestColumnsNamesTypesPgxKnows(t *testing.T) {
 		{Name: "a", DataTypeOID: pgtype.Int4OID},
 		{Name: "a", DataTypeOID: pgtype.NumericOID},
 		{Name: "tags", DataTypeOID: pgtype.TextArrayOID},
-		{Name: "status", DataTypeOID: 16_500}, // an enum: not built in
+		{Name: "status", DataTypeOID: 16_500},
 	}
 	want := []result.Column{
 		{Name: "a", TypeOID: pgtype.Int4OID, TypeName: "int4"},
@@ -219,7 +218,6 @@ func TestQueryErrorFlattensPostgresErrors(t *testing.T) {
 func TestQueryErrorReportsEndedContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	// Postgres answers the cancel request pgx sends with 57014.
 	err := queryError(ctx, &pgconn.PgError{Code: "57014", Message: "canceling statement due to user request"})
 	var qe *QueryError
 	if !errors.Is(err, context.Canceled) || errors.As(err, &qe) {

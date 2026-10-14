@@ -8,14 +8,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// blockTimeout bounds how long Block waits for the waiter to block.
 const blockTimeout = 10 * time.Second
 
-// Block makes waiter wait for a lock that holder keeps until t finishes, and
-// returns their pids: holder runs lockSQL in a transaction it keeps open,
-// then waiter runs waitSQL in the background, and Block returns once waiter
-// waits for holder. When t finishes, holder rolls back, and waitSQL must then
-// succeed.
+// Block makes waiter, running waitSQL, wait for the lock holder takes with
+// lockSQL until t finishes, and returns their pids. waitSQL must then succeed.
 func Block(t testing.TB, holder, waiter *pgx.Conn, lockSQL, waitSQL string) (holderPID, waiterPID int) {
 	t.Helper()
 	holderPID = Value[int](t, holder, "SELECT pg_backend_pid()")

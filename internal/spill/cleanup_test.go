@@ -8,7 +8,6 @@ import (
 	"time"
 )
 
-// staleInfo describes a regular file last modified in 1970.
 type staleInfo struct{ name string }
 
 func (i staleInfo) Name() string       { return i.name }

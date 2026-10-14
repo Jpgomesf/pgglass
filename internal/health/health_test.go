@@ -18,7 +18,6 @@ func TestMain(m *testing.M) { testdb.Main(m) }
 
 var sectionNames = []string{"connections", "long_running", "blocked", "cache_hit", "dead_tuples", "unused_indexes", "xid_wraparound", "replication"}
 
-// report returns the details of each section of lines.
 func report(t *testing.T, lines []Line) map[string][]string {
 	t.Helper()
 	var order []string
@@ -55,8 +54,6 @@ func match(t *testing.T, section string, got []string, patterns ...string) {
 	}
 }
 
-// waitFor polls sql on conn until it selects true: the statistics reach
-// other sessions some time after the statements that change them.
 func waitFor(t *testing.T, conn *pgx.Conn, sql string, args ...any) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
@@ -69,7 +66,7 @@ func waitFor(t *testing.T, conn *pgx.Conn, sql string, args ...any) {
 }
 
 func TestCheckOnTheAppFixture(t *testing.T) {
-	testdb.Conn(t, testdb.Superuser, testdb.DBApp) // a session whose state ro_clean may not see
+	testdb.Conn(t, testdb.Superuser, testdb.DBApp)
 	unused := []string{
 		"app.customers_lower_name_idx on app.customers: 16 kB",
 		"app.orders_customer_id_idx on app.orders: 16 kB",
@@ -99,9 +96,6 @@ func TestCheckOnTheAppFixture(t *testing.T) {
 
 func TestCheckFindsDeadTuplesAndUnusedIndexes(t *testing.T) {
 	const name = "health_tables"
-	// Autovacuum is off for the tables, so their dead rows stay. The
-	// exclusion constraint's index and the unique ones are never scanned
-	// either, but enforce constraints, so they are not unused.
 	testdb.CreateDatabase(t, name, `
 		CREATE TABLE churn (id int PRIMARY KEY, v int) WITH (autovacuum_enabled = off);
 		CREATE INDEX churn_v_idx ON churn (v);
@@ -124,8 +118,6 @@ func TestCheckFindsDeadTuplesAndUnusedIndexes(t *testing.T) {
 		(SELECT n_dead_tup = 3 AND n_live_tup = 1 FROM pg_stat_user_tables WHERE relname = 'tiny') AND
 		(SELECT idx_scan > 0 FROM pg_stat_user_indexes WHERE indexrelname = 'scanned_v_idx')`)
 
-	// The statistics views show every table to every role. Tables rank by
-	// their dead rows: tiny has the highest share of them, but the fewest.
 	got := checkAs(t, testdb.RoleClean, name, longRunning)
 	equal(t, got["dead_tuples"], []string{
 		"public.churn: 25.0% dead (25 dead, 75 live), never autovacuumed",
@@ -143,12 +135,11 @@ func TestCheckListsLongRunningAndBlockedSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	holder, waiter := testdb.Block(t, holderConn, waiterConn, "UPDATE t SET v = 1 WHERE id = 1", "UPDATE t SET v = 2 WHERE id = 1")
-	time.Sleep(1100 * time.Millisecond) // both queries have run for over a second
+	time.Sleep(1100 * time.Millisecond)
 
 	got := checkAs(t, testdb.Superuser, name, time.Second)
 	waiting := fmt.Sprintf(`pid %d, database health_locks, active for \d+s, waiting on Lock:transactionid, application "health_waiter"`, waiter)
 	idle := fmt.Sprintf(`pid %d, database health_locks, idle in transaction, transaction open for \d+s, waiting on Client:ClientRead`, holder)
-	// Longest first, then by pid: the two may have run for as many seconds.
 	if long := got["long_running"]; len(long) == 2 && regexp.MustCompile("^"+waiting+"$").MatchString(long[0]) {
 		match(t, "long_running", long, waiting, idle)
 	} else {
@@ -156,19 +147,14 @@ func TestCheckListsLongRunningAndBlockedSessions(t *testing.T) {
 	}
 	match(t, "blocked", got["blocked"], fmt.Sprintf("%s, blocked by %d", waiting, holder))
 
-	// ro_clean finds the blocked session, but sees none of its details, and
-	// no other role's long-running queries.
 	got = checkAs(t, testdb.RoleClean, name, time.Second)
 	equal(t, got["long_running"], []string{"none", "other roles' sessions are not visible to role ro_clean"})
 	equal(t, got["blocked"], []string{fmt.Sprintf(
 		`pid %d, database health_locks, state not visible to role ro_clean, application "health_waiter", blocked by %d`, waiter, holder)})
 
-	// Neither query has run for a minute.
 	equal(t, checkAs(t, testdb.Superuser, name, longRunning)["long_running"], []string{"none"})
 }
 
-// start runs sql on conn in the background until it returns or t ends,
-// which cancels it.
 func start(t *testing.T, conn *pgx.Conn, sql string) {
 	t.Helper()
 	done := make(chan struct{})
@@ -176,14 +162,11 @@ func start(t *testing.T, conn *pgx.Conn, sql string) {
 		defer close(done)
 		_, _ = conn.Exec(t.Context(), sql)
 	}()
-	t.Cleanup(func() { <-done }) // t.Context is canceled first, which ends sql
+	t.Cleanup(func() { <-done })
 }
 
-// A session in a transaction is as old as its transaction, which keeps its
-// locks however recent its query, running or not, and its line says that the
-// transaction, not its state, is that old. One whose transaction failed keeps
-// none, and is as old as the query that failed. A procedure that commits
-// starts a new transaction, and is as old as its CALL.
+// A session is as old as its open transaction, and its line says so; after a
+// failure, as old as the failed query; in a committing procedure, as its CALL.
 func TestCheckListsSessionsInOldTransactions(t *testing.T) {
 	const name = "health_idle"
 	testdb.CreateDatabase(t, name, `CREATE PROCEDURE nap_then_commit() LANGUAGE plpgsql
@@ -206,10 +189,8 @@ func TestCheckListsSessionsInOldTransactions(t *testing.T) {
 		t.Fatal("SELECT 1/0 succeeded")
 	}
 	start(t, call, "CALL nap_then_commit()")
-	time.Sleep(1100 * time.Millisecond) // the three transactions and the CALL are over a second old
+	time.Sleep(1100 * time.Millisecond)
 
-	// The last queries of idle and active are not, nor is the transaction
-	// the CALL commits into.
 	if _, err := idle.Exec(t.Context(), "SELECT 1"); err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +199,6 @@ func TestCheckListsSessionsInOldTransactions(t *testing.T) {
 		WHERE (pid = $1 AND wait_event = 'PgSleep') OR (pid = $2 AND xact_start > query_start)`, activePID, callPID)
 
 	long := checkAs(t, testdb.Superuser, name, time.Second)["long_running"]
-	// In any order: they may be as many seconds old, and then come by pid.
 	for _, want := range []string{
 		fmt.Sprintf(`pid %d, database health_idle, idle in transaction, transaction open for [1-9]\d*s, waiting on Client:ClientRead`, idlePID),
 		fmt.Sprintf(`pid %d, database health_idle, idle in transaction \(aborted\) for [1-9]\d*s, waiting on Client:ClientRead`, abortedPID),
@@ -238,7 +218,6 @@ func TestCheckListsSessionsInOldTransactions(t *testing.T) {
 // have slots of their own, so connections leaves them out.
 func TestCheckCountsClientBackendsOnly(t *testing.T) {
 	const name = "health_workers"
-	// A parallel scan that naps on every row keeps its workers running.
 	testdb.CreateDatabase(t, name, `
 		CREATE TABLE t WITH (autovacuum_enabled = off) AS SELECT g FROM generate_series(1, 100000) g;
 		ANALYZE t;
@@ -253,7 +232,7 @@ func TestCheckCountsClientBackendsOnly(t *testing.T) {
 		defer close(done)
 		_, _ = leader.Exec(t.Context(), "SELECT count(*) FROM t WHERE nap()")
 	}()
-	t.Cleanup(func() { <-done }) // t.Context is canceled first, which ends the scan
+	t.Cleanup(func() { <-done })
 	waitFor(t, observer, "SELECT count(*) > 0 FROM pg_stat_activity WHERE backend_type = 'parallel worker'")
 
 	got := checkAs(t, testdb.Superuser, name, longRunning)
@@ -282,7 +261,6 @@ func TestCheckSaysWhatTheRoleMayNotSee(t *testing.T) {
 	equal(t, got["xid_wraparound"], hidden)
 	equal(t, got["replication"], hidden)
 
-	// The superuser bypasses the privileges.
 	got = checkAs(t, testdb.Superuser, name, longRunning)
 	equal(t, got["blocked"], []string{"none"})
 	equal(t, got["dead_tuples"], []string{"none"})

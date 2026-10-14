@@ -16,7 +16,6 @@ const instructions = `pgglass gives read-only access to PostgreSQL: pg_query run
 - Check a heavy query's plan with pg_explain before running it. pg_profile shows what a table's columns hold; pg_health checks a server.
 - Calls can run in parallel.`
 
-// annotations hold for every tool: none changes anything.
 var annotations = &mcp.ToolAnnotations{
 	ReadOnlyHint:    true,
 	DestructiveHint: ptr(false),
@@ -60,7 +59,6 @@ var queryTool = &mcp.Tool{
 	}),
 }
 
-// fanoutConnectionsArg lets pg_query fan out: see fanout.
 var fanoutConnectionsArg = map[string]any{
 	"type":        "array",
 	"items":       map[string]any{"type": "string"},

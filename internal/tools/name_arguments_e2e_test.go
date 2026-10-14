@@ -7,12 +7,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/config"
 )
 
-// Postgres keeps names of at most 63 bytes and cuts a longer one to its
-// first 63, which may name another object: a tool given one read what those
-// bytes name and repeated the whole name in its output. Every argument that
-// names a schema, table or column now refuses a longer name before the
-// database: the DSN is never dialed. A default_schema that long stops the
-// server from starting (see config).
+// Every schema, table or column argument over 63 bytes, which Postgres would
+// cut, is refused before the DSN is dialed.
 func TestNameArgumentsOver63BytesAreRefused(t *testing.T) {
 	long := strings.Repeat("n", 64)
 	s := connect(t, newConfig(config.RoleCheckStrict, map[string]config.Connection{

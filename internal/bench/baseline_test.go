@@ -132,9 +132,8 @@ func write(t *testing.T, path, content string) {
 	}
 }
 
-// TestRegressions checks what fails the benchmark: a scenario more than 10%
-// larger than the baseline, one the baseline lacks or holds but that is no
-// longer measured, and tools/list over its cap.
+// TestRegressions checks what fails the benchmark: a scenario over 10% past the
+// baseline, missing from it or no longer measured, and tools/list over its cap.
 func TestRegressions(t *testing.T) {
 	want := []measurement{newMeasurement(toolsList, 5800), newMeasurement("query", 1000)}
 	for _, tc := range []struct {

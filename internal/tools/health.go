@@ -13,10 +13,6 @@ type healthArgs struct {
 	Connection string `json:"connection"`
 }
 
-// health runs pg_health: the role check, then the health sections, whose
-// lines are returned like a query result, inline or spilled to a file, and
-// whole: cut to 200 characters, an unused index named by a long schema,
-// table and index loses its table and size.
 func (h *Handlers) health(ctx context.Context, raw json.RawMessage, c *call) (string, error) {
 	var args healthArgs
 	if err := decode(raw, &args); err != nil {
@@ -38,8 +34,6 @@ func (h *Handlers) health(ctx context.Context, raw json.RawMessage, c *call) (st
 	return h.spill.OutputWhole("pg_health", args.Connection, res, render.Format(h.cfg.Defaults.Format), h.room(c))
 }
 
-// healthResult returns lines as a result with two text columns, section and
-// detail.
 func healthResult(lines []health.Line) *result.Result {
 	res := result.Text("section", "detail")
 	for _, l := range lines {

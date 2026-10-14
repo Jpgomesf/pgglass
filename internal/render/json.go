@@ -11,7 +11,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/result"
 )
 
-// jsonNumber matches the JSON number grammar (RFC 8259, section 6).
 var jsonNumber = regexp.MustCompile(`^-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$`)
 
 type jsonColumn struct {
@@ -48,10 +47,6 @@ func renderJSON(res *result.Result, maxCell int) (string, error) {
 	return b.String(), nil
 }
 
-// jsonValue returns the value encoding/json writes for a cell of type oid.
-// A value that does not have the form its type promises (NaN, a cut value)
-// falls back to a string. Embedding json and jsonb means a jsonb 'null' and
-// SQL NULL both come out as null.
 func jsonValue(v *string, oid uint32, maxCell int) any {
 	if v == nil {
 		return nil

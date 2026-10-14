@@ -28,18 +28,18 @@ type TableProfile struct {
 	// Rows is the planner's row estimate (pg_class.reltuples, summed over the
 	// partitions of a partitioned table); -1 when unknown.
 	Rows    int64
-	Sampled bool    // pg_stats has nothing on the columns: they come from a sample
-	Sample  int64   // rows in the sample, when Sampled
-	Percent float64 // the TABLESAMPLE SYSTEM percentage of the sample, when Sampled
-	More    int     // columns the role can SELECT past the first ProfileColumns
+	Sampled bool
+	Sample  int64
+	Percent float64
+	More    int
 	Columns []ColumnProfile
 }
 
 // ColumnProfile describes the values of one column.
 type ColumnProfile struct {
 	Name  string
-	Type  string       // format_type, e.g. "numeric(12,2)"
-	Stats *ColumnStats // its pg_stats row; nil when there is none
+	Type  string
+	Stats *ColumnStats
 	// Nulls and Distinct count the nulls and the distinct values of the
 	// column in the sample, when the profile is Sampled.
 	Nulls    int64
@@ -48,26 +48,19 @@ type ColumnProfile struct {
 
 // ColumnStats is the pg_stats row of a column, as of the last ANALYZE.
 type ColumnStats struct {
-	NullFrac float64 // the fraction of rows that are null
+	NullFrac float64
 	// Distinct is n_distinct: the number of distinct non-null values or, when
 	// negative, minus that number divided by the rows; 0 when unknown.
 	Distinct float64
-	Width    int       // average width in bytes
-	Common   []string  // the 5 most common values, most common first
-	Freqs    []float64 // the fraction of rows each of Common takes
-	Min, Max *string   // the first and last histogram bounds; nil without a histogram
+	Width    int
+	Common   []string
+	Freqs    []float64
+	Min, Max *string
 }
 
-// profiled keeps pg_attribute a to the columns of pg_class c that the role
-// can SELECT, or to column $3 alone when $3 is not empty.
 const profiled = `a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
 	AND has_column_privilege(c.oid, a.attnum, 'SELECT') AND ($3 = '' OR a.attname = $3)`
 
-// columnStatsJSON is the ColumnStats of column a of pg_class c in
-// pg_namespace n, or NULL. pg_stats shows only the columns the role can
-// SELECT, and none while row-level security applies to it. A table with
-// inheritance children has a row over the whole hierarchy too, which wins.
-// anyarray cannot be sliced, hence the casts to text[].
 const columnStatsJSON = `(SELECT json_build_object(
 		'NullFrac', s.null_frac,
 		'Distinct', s.n_distinct,
@@ -81,9 +74,6 @@ const columnStatsJSON = `(SELECT json_build_object(
 	ORDER BY s.inherited DESC
 	LIMIT 1)`
 
-// profileSQL returns no row when relation $1.$2 is not a table, partitioned
-// table or materialized view. Columns holds the first $4 profiled columns.
-// A partitioned table has no rows of its own: its partitions' are summed.
 const profileSQL = `
 SELECT json_build_object(
 	'Rows', CASE WHEN c.relkind = 'p'
@@ -102,16 +92,8 @@ FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r', 'p', 'm')`
 
-// Profile describes the values of the columns of table schema.name that the
-// current role can SELECT, the first ProfileColumns of them, or of column
-// alone when it is not empty. Names match exactly, as the catalog stores them.
-//
-// The figures come from pg_stats, which reads nothing from the table. When
-// it has nothing on any of the columns (the table was never analyzed,
-// row-level security hides its statistics, or they are virtual generated
-// columns, which ANALYZE skips), Profile reads a sample of the table instead,
-// at most SampleRows rows taken with TABLESAMPLE SYSTEM, as the role:
-// privileges and row-level security apply.
+// Profile describes up to ProfileColumns readable columns of schema.name, or
+// column alone, from pg_stats or else a sample of at most SampleRows rows.
 func Profile(ctx context.Context, q engine.Querier, schema, name, column string) (*TableProfile, error) {
 	var found struct {
 		Rows     int64
@@ -138,8 +120,6 @@ func Profile(ctx context.Context, q engine.Querier, schema, name, column string)
 	return p, nil
 }
 
-// noColumns explains a profile with no columns: pg_stats shows only the
-// columns the role can SELECT.
 func noColumns(schema, name, column string) error {
 	if column != "" {
 		return fmt.Errorf("column %q of %q.%q does not exist or the current role cannot SELECT it: "+
@@ -157,12 +137,10 @@ func (p *TableProfile) hasStats() bool {
 	return false
 }
 
-// sample counts the rows of a sample of the table, then the nulls and the
-// distinct values of each column in it.
 func (p *TableProfile) sample(ctx context.Context, q engine.Querier) error {
 	var counts struct {
 		Rows    int64
-		Columns [][2]int64 // nulls and distinct values, per column
+		Columns [][2]int64
 	}
 	percent := samplePercent(p.Rows)
 	if err := queryJSON(ctx, q, &counts, sampleSQL(p.Schema, p.Name, p.Columns), percent, SampleRows); err != nil {
@@ -178,9 +156,6 @@ func (p *TableProfile) sample(ctx context.Context, q engine.Querier) error {
 	return nil
 }
 
-// samplePercent returns the TABLESAMPLE SYSTEM percentage that reads about
-// SampleRows of a table of rows rows: all of a smaller table, and of one whose
-// rows are unknown (-1), as much as the LIMIT allows.
 func samplePercent(rows int64) float64 {
 	if rows <= SampleRows {
 		return 100
@@ -188,10 +163,6 @@ func samplePercent(rows int64) float64 {
 	return 100 * SampleRows / float64(rows)
 }
 
-// sampleSQL counts, in a sample of at most $2 rows of table schema.name taken
-// with TABLESAMPLE SYSTEM ($1), the rows, then the nulls and the distinct
-// values of each of columns. Values are compared as text, since some types,
-// such as json, have no equality operator.
 func sampleSQL(schema, name string, columns []ColumnProfile) string {
 	names := make([]string, len(columns))
 	counts := make([]string, len(columns))
@@ -224,10 +195,8 @@ func (p *TableProfile) Summary() string {
 	return s
 }
 
-// Result returns one row per column. From pg_stats: its type, the share of
-// nulls, distinct values, average width in bytes, most common values and the
-// histogram's bounds. From a sample: its type, and the nulls and distinct
-// values in the sample.
+// Result returns one row per column: its type, nulls and distinct values, plus,
+// from pg_stats, average width, most common values and histogram bounds.
 func (p *TableProfile) Result() *result.Result {
 	if p.Sampled {
 		res := result.Text("column", "type", "nulls", "distinct")
@@ -243,8 +212,6 @@ func (p *TableProfile) Result() *result.Result {
 	return res
 }
 
-// cells renders s as the nulls, distinct, width, common, min and max cells
-// of Result, all empty when s is nil.
 func (s *ColumnStats) cells() []string {
 	if s == nil {
 		return make([]string, 6)
@@ -252,7 +219,6 @@ func (s *ColumnStats) cells() []string {
 	return []string{percent(s.NullFrac), distinct(s.Distinct), strconv.Itoa(s.Width), common(s.Common, s.Freqs), deref(s.Min), deref(s.Max)}
 }
 
-// distinct renders n_distinct: a count, or a share of the rows when negative.
 func distinct(n float64) string {
 	switch {
 	case n > 0:
@@ -260,12 +226,10 @@ func distinct(n float64) string {
 	case n < 0:
 		return percent(-n)
 	default:
-		return "" // unknown
+		return ""
 	}
 }
 
-// common renders the most common values as SQL literals, each with its
-// share of the rows, e.g. "'paid' 26%, 'shipped' 24%".
 func common(values []string, freqs []float64) string {
 	parts := make([]string, 0, len(values))
 	for i, f := range freqs {
@@ -276,12 +240,10 @@ func common(values []string, freqs []float64) string {
 	return strings.Join(parts, ", ")
 }
 
-// percent renders a fraction as a percentage, e.g. 0.26 as "26%".
 func percent(f float64) string {
 	return number(f*100) + "%"
 }
 
-// number renders f with up to 3 significant digits.
 func number(f float64) string {
 	return strconv.FormatFloat(f, 'g', 3, 64)
 }

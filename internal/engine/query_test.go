@@ -45,7 +45,7 @@ func TestValuesComeBackAsPostgresText(t *testing.T) {
 		{"texts", "_text", `{"a b","c\"d",NULL}`},
 		{"raw", "bytea", `\xdeadbeef`},
 		{"at", "timestamptz", "2024-03-01 09:30:00.123456+00"},
-		{"status", "order_status", "shipped"}, // named from pg_type
+		{"status", "order_status", "shipped"},
 		{"statuses", "_order_status", "{paid}"},
 	}
 	if len(res.Columns) != len(want) || len(res.Rows) != 1 {
@@ -78,7 +78,6 @@ func TestParamsBind(t *testing.T) {
 	t.Parallel()
 	m := cleanApp(t, config.Defaults{})
 
-	// JSON-decoded values, as a tool handler passes them.
 	res := mustQuery(t, m, engine.Query{
 		SQL:    "SELECT $1::int + 1, $2::text, $3::bool, $4::text IS NULL, $5::numeric",
 		Params: []any{float64(41), "x'); DROP TABLE app.customers; --", true, nil, 1.5},
@@ -90,7 +89,6 @@ func TestParamsBind(t *testing.T) {
 		}
 	}
 
-	// Untyped parameters take their type from the query.
 	res = mustQuery(t, m, engine.Query{
 		SQL:    "SELECT o.total, c.email FROM app.orders o JOIN app.customers c ON c.id = o.customer_id WHERE o.id = $1",
 		Params: []any{float64(6)},
@@ -109,7 +107,7 @@ func TestSearchPathAppliesToOneQuery(t *testing.T) {
 		t.Errorf("count = %s, want 50", got)
 	}
 	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT count(*) FROM customers"})
-	wantSQLState(t, err, "42P01") // undefined_table: the search_path did not stick
+	wantSQLState(t, err, "42P01")
 
 	odd := `app"; SET LOCAL search_path TO public; --`
 	res = mustQuery(t, m, engine.Query{SQL: "SELECT current_setting('search_path')", SearchPath: odd})
@@ -146,7 +144,7 @@ func TestLargestTimeoutsAreAccepted(t *testing.T) {
 
 	over := cleanApp(t, config.Defaults{StatementTimeoutSeconds: largest + 1})
 	_, err := over.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
-	wantSQLState(t, err, "22023") // invalid_parameter_value
+	wantSQLState(t, err, "22023")
 }
 
 func TestDSNCannotTurnOffReadOnlyDefault(t *testing.T) {
@@ -164,7 +162,7 @@ func TestStatementTimeout(t *testing.T) {
 	m := cleanApp(t, config.Defaults{StatementTimeoutSeconds: 1})
 	start := time.Now()
 	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT pg_sleep(5)"})
-	wantSQLState(t, err, "57014") // query_canceled
+	wantSQLState(t, err, "57014")
 	if elapsed := time.Since(start); elapsed > 4*time.Second {
 		t.Errorf("timed out after %v, want about 1s", elapsed)
 	}
@@ -187,7 +185,7 @@ func TestLockTimeout(t *testing.T) {
 	}
 
 	_, err = m.Query(t.Context(), db, engine.Query{SQL: "SELECT count(*) FROM t"})
-	wantSQLState(t, err, "55P03") // lock_not_available
+	wantSQLState(t, err, "55P03")
 }
 
 func TestPostgresErrorsAreFlattened(t *testing.T) {
@@ -234,7 +232,7 @@ func TestQueryMaxRowsOnlyLowersTheCap(t *testing.T) {
 	}{
 		{3, 3, "max_rows=3"},
 		{0, 10, "max_rows=10"},
-		{50, 10, "max_rows=10"}, // never above the configured cap
+		{50, 10, "max_rows=10"},
 	} {
 		res := mustQuery(t, m, engine.Query{SQL: "SELECT id FROM app.events", MaxRows: tc.asked})
 		if len(res.Rows) != tc.wantRows || res.TruncatedReason != tc.wantReason {
@@ -284,15 +282,12 @@ func TestMaxBytesTruncates(t *testing.T) {
 		t.Errorf("exactly max_bytes: %d rows, truncated %v; want 2, not truncated", len(res.Rows), res.Truncated)
 	}
 
-	// Empty and NULL values are not free.
 	res = mustQuery(t, m, engine.Query{SQL: "SELECT '', NULL::text FROM generate_series(1, 10)"})
 	if len(res.Rows) != 2 || res.TruncatedReason != "max_bytes=100" {
 		t.Errorf("empty values: %d rows, truncated %q; want 2 rows, max_bytes=100", len(res.Rows), res.TruncatedReason)
 	}
 }
 
-// running counts the backends, other than the observer's, running a query
-// that contains fragment.
 func running(t *testing.T, observer *pgx.Conn, fragment string) int {
 	t.Helper()
 	n, err := strconv.Atoi(testdb.Value[string](t, observer, `SELECT count(*)::text FROM pg_stat_activity
@@ -310,7 +305,6 @@ func TestTruncationStopsTheQuery(t *testing.T) {
 	m := cleanApp(t, config.Defaults{MaxRows: 3, StatementTimeoutSeconds: 10})
 	pid := value(t, m, "SELECT pg_backend_pid()")
 
-	// 10 kB rows every 5ms, for over 8 minutes.
 	const slow = "SELECT g, repeat('x', 10000), pg_sleep(0.005) FROM generate_series(1, 100000) AS g"
 	start := time.Now()
 	res := mustQuery(t, m, engine.Query{SQL: slow})

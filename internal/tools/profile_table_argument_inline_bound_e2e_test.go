@@ -8,14 +8,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// pg_profile names the table as the call spells it, but Postgres cuts a name
-// parameter to 63 bytes, so a table argument of 12,070 bytes still matched
-// the 63-byte table: the line naming it took more than the inline limit, the
-// rows spilled, and the result took about 12.3 kB. A schema, table or column
-// over 63 bytes is now refused before any query. Under that cap the line
-// takes at most 346 bytes (two names of 63, the note on a sample and a count
-// of the columns not shown), and the rows fit what it leaves of the 5,000 the
-// role check's findings leave at least.
+// pg_profile refuses names over 63 bytes before any query, so the line naming
+// the table and its rows stay within the inline limit.
 func TestProfileLongTableArgumentStaysWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_profile_long_table_argument"

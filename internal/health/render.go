@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// viewer is the role the queries run as.
 type viewer struct {
 	Role string
 	// AllStats reports that the role has the privileges of
@@ -15,7 +14,6 @@ type viewer struct {
 	AllStats bool
 }
 
-// connections is the result of connectionsSQL.
 type connections struct {
 	Max    int
 	Used   int
@@ -23,13 +21,10 @@ type connections struct {
 }
 
 type stateCount struct {
-	State string // empty for NULL: not visible to the role, or never reported
+	State string
 	Count int
 }
 
-// connectionLines renders one line: the connections used, then by state.
-// When the role may not see the type of some backends, which need not be
-// client backends, the count is an upper bound.
 func connectionLines(c connections, v viewer) []string {
 	var states []string
 	hidden := 0
@@ -56,14 +51,11 @@ func connectionLines(c connections, v viewer) []string {
 	return []string{line}
 }
 
-// list holds the first items of a list, and how many there are in all.
 type list[T any] struct {
 	Total int
 	Items []T
 }
 
-// lines renders one line per item, then one saying how many were left out;
-// "none" when there are no items.
 func (l list[T]) lines(line func(T) string) []string {
 	if len(l.Items) == 0 {
 		return []string{"none"}
@@ -78,24 +70,19 @@ func (l list[T]) lines(line func(T) string) []string {
 	return lines
 }
 
-// session is a row of pg_stat_activity. A role that may not see a session
-// sees its pid, database and application name only.
 type session struct {
 	PID      int
 	Database string
-	State    string // empty when not visible to the role
+	State    string
 	// Seconds is the time since the current or last query started or, for a
 	// long-running session, since its transaction did, when that was earlier.
 	Seconds         int64
 	FromTransaction bool
-	Wait            string // wait_event_type:wait_event; empty when not waiting
+	Wait            string
 	App             string
-	BlockedBy       []int // the pids that block it, for blocked sessions
+	BlockedBy       []int
 }
 
-// line renders s, e.g. "pid 76, database app, active for 1m5s, waiting on
-// Lock:transactionid, blocked by 75", or for a session idle in transaction
-// "pid 75, database app, idle in transaction, transaction open for 2h0m0s".
 func (s session) line(v viewer) string {
 	parts := []string{"pid " + strconv.Itoa(s.PID)}
 	if s.Database != "" {
@@ -125,9 +112,6 @@ func (s session) line(v viewer) string {
 	return strings.Join(parts, ", ")
 }
 
-// longRunningLines renders the long-running sessions. A role without the
-// privileges of pg_read_all_stats cannot tell other roles' idle sessions from
-// running ones, so the last line says so.
 func longRunningLines(l list[session], v viewer) []string {
 	lines := l.lines(func(s session) string { return s.line(v) })
 	if !v.AllStats {
@@ -140,7 +124,6 @@ func blockedLines(l list[session], v viewer) []string {
 	return l.lines(func(s session) string { return s.line(v) })
 }
 
-// cacheHit is the result of cacheHitSQL.
 type cacheHit struct {
 	Database  string
 	Hit, Read int64
@@ -153,11 +136,10 @@ func cacheHitLines(c cacheHit, _ viewer) []string {
 	return []string{percent(c.Hit, c.Hit+c.Read, 2) + " in database " + c.Database}
 }
 
-// table is a row of deadTuplesSQL.
 type table struct {
 	Name                 string
 	Dead, Live           int64
-	AutovacuumSecondsAgo *int64 // nil when never autovacuumed
+	AutovacuumSecondsAgo *int64
 }
 
 func deadTupleLines(tables []table, _ viewer) []string {
@@ -175,7 +157,6 @@ func deadTupleLines(tables []table, _ viewer) []string {
 	return lines
 }
 
-// index is an item of unusedIndexesSQL.
 type index struct {
 	Name, Table, Size string
 }
@@ -184,7 +165,6 @@ func unusedIndexLines(l list[index], _ viewer) []string {
 	return l.lines(func(i index) string { return i.Name + " on " + i.Table + ": " + i.Size })
 }
 
-// wraparound is the result of wraparoundSQL.
 type wraparound struct {
 	Database          string
 	Age, FreezeMaxAge int64
@@ -195,11 +175,10 @@ func wraparoundLines(w wraparound, _ viewer) []string {
 		w.Age, w.Database, percent(w.Age, w.FreezeMaxAge, 1), w.FreezeMaxAge)}
 }
 
-// replication is the result of replicationSQL.
 type replication struct {
 	Replica            bool
-	ReplayedSecondsAgo *int64 // nil when no transaction was replayed yet
-	UnreplayedBytes    *int64 // nil when no WAL was received by streaming
+	ReplayedSecondsAgo *int64
+	UnreplayedBytes    *int64
 }
 
 func replicationLines(r replication, _ viewer) []string {
@@ -216,13 +195,10 @@ func replicationLines(r replication, _ viewer) []string {
 	return []string{line}
 }
 
-// duration renders seconds as Go does, e.g. "1m5s".
 func duration(seconds int64) string {
 	return (time.Duration(seconds) * time.Second).String()
 }
 
-// percent renders part of whole as a percentage with decimals digits after
-// the point, e.g. "99.25%".
 func percent(part, whole int64, decimals int) string {
 	return strconv.FormatFloat(100*float64(part)/float64(whole), 'f', decimals, 64) + "%"
 }

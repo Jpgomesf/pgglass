@@ -11,7 +11,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/resolver"
 )
 
-// writeDotenv writes contents to a temp .env file and returns its path.
 func writeDotenv(t *testing.T, contents string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), ".env")
@@ -142,7 +141,6 @@ func TestResolveDispatch(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `unknown source "nope"`) {
 		t.Fatalf("Resolve of an unknown source: err = %v", err)
 	}
-	// The error lists the registered sources so the user can correct it.
 	for _, want := range []string{"direct", "env", "dotenv", "aws_secrets_manager"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("unknown-source error %q does not list %q", err, want)
@@ -150,9 +148,8 @@ func TestResolveDispatch(t *testing.T) {
 	}
 }
 
-// TestRegisterSource writes the source registry, which RegisterSource does not
-// lock because sources register in init. It is not parallel, so it ends before
-// the parallel tests that read the registry resume.
+// TestRegisterSource writes the unlocked source registry, so it is not parallel
+// and ends before the parallel tests that read it resume.
 func TestRegisterSource(t *testing.T) {
 	resolver.RegisterSource(fakeSource{})
 	if !resolver.IsRegistered("resolver_test_fake") {

@@ -9,7 +9,6 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// nested builds SQL that nests n levels of one construct.
 var nested = map[string]func(n int) string{
 	"operator":        func(n int) string { return "SELECT 1" + strings.Repeat(" + 1", n) },
 	"unary minus":     func(n int) string { return "SELECT " + strings.Repeat("- ", n) + "x" },
@@ -55,7 +54,6 @@ var nested = map[string]func(n int) string{
 	},
 }
 
-// treeDepth is the depth of m in protobuf messages, as the decoder counts it.
 func treeDepth(m protoreflect.Message) int {
 	deepest := 0
 	m.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
@@ -81,7 +79,6 @@ func TestNestingBoundIsAnUpperBound(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s x %d: nestingBound: %v", name, n, err)
 			}
-			// 300 levels are safe to parse whatever the bound says.
 			tree, err := pgquery.Parse(sql)
 			if err != nil {
 				t.Fatalf("%s x %d: Parse: %v", name, n, err)
@@ -94,8 +91,6 @@ func TestNestingBoundIsAnUpperBound(t *testing.T) {
 }
 
 func TestNestingBoundRejectsWhatWouldOverflowTheParser(t *testing.T) {
-	// The shallowest depths at which the parser's stack overflowed on
-	// linux/amd64 when this was written; arm64 needed about twice as many.
 	for name, n := range map[string]int{
 		"operator":        3_500,
 		"unary minus":     3_500,
@@ -132,10 +127,8 @@ func TestNestingBoundWeighsTokens(t *testing.T) {
 	}{
 		{"", baseWeight},
 		{"SELECT 1 -- note", opWeight + baseWeight},
-		// A comma ends an element: the two calls are siblings.
 		{"SELECT f(1), g(2)", opWeight + groupWeight + baseWeight},
 		{"SELECT f(g(1))", opWeight + 2*groupWeight + baseWeight},
-		// Unbalanced brackets, which the parser then rejects.
 		{"SELECT ((((", opWeight + 4*groupWeight + baseWeight},
 		{"SELECT 1))))", 5*opWeight + baseWeight},
 	} {
@@ -154,7 +147,7 @@ func FuzzNestingBound(f *testing.F) {
 	f.Fuzz(func(t *testing.T, sql string) {
 		bound, err := nestingBound(sql)
 		if err != nil || bound > maxNesting || strings.ContainsRune(sql, 0) || !utf8.ValidString(sql) {
-			return // Check never parses this, and the parser could overflow on it
+			return
 		}
 		tree, err := pgquery.Parse(sql)
 		if err != nil {

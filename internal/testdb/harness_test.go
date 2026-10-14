@@ -11,8 +11,6 @@ import (
 
 func TestMain(m *testing.M) { Main(m) }
 
-// recorder is a testing.TB that records Skip and Fatalf instead of acting on
-// them, so a test can tell which one the harness called.
 type recorder struct {
 	testing.TB
 	skipped, failed bool
@@ -39,7 +37,7 @@ func TestGetFailsWhenDockerIsUnavailable(t *testing.T) {
 	}}
 	r := &recorder{}
 	done := make(chan struct{})
-	go func() { // Skip and Fatalf end this goroutine, not the test's
+	go func() {
 		defer close(done)
 		h.get(r)
 	}()

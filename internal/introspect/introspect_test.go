@@ -1,7 +1,7 @@
 package introspect_test
 
 import (
-	_ "embed" // lab fixture SQL
+	_ "embed"
 	"fmt"
 	"reflect"
 	"strings"
@@ -15,13 +15,11 @@ import (
 
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-// labDB holds the lab fixture: the object kinds the shared app fixture lacks.
 const labDB = "introspect_lab"
 
 //go:embed testdata/lab.sql
 var labSQL string
 
-// loadLab creates labDB for the duration of the test.
 func loadLab(t *testing.T) {
 	t.Helper()
 	testdb.CreateDatabase(t, labDB, labSQL)
@@ -43,8 +41,6 @@ func describe(t *testing.T, q engine.Querier, schema, name string) *introspect.T
 	return d
 }
 
-// withoutSize checks that d has a size exactly when wantSize, then clears
-// it: sizes depend on the server version, so tests compare the rest.
 func withoutSize(t *testing.T, d *introspect.TableDetail, wantSize bool) *introspect.TableDetail {
 	t.Helper()
 	if (d.Size != "") != wantSize {
@@ -61,8 +57,6 @@ func wantErr(t *testing.T, err error, want string) {
 	}
 }
 
-// everything is a listing limit past all the schemas and relations of the
-// fixtures.
 const everything = 100
 
 func TestSchemasAsCleanRole(t *testing.T) {
@@ -77,8 +71,6 @@ func TestSchemasAsCleanRole(t *testing.T) {
 }
 
 func TestSchemasExcludeSystemSchemas(t *testing.T) {
-	// The superuser may use every schema, so only the exclusions keep these
-	// out. A temporary table makes the session's pg_temp_N and pg_toast_temp_N.
 	conn := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
 	if _, err := conn.Exec(t.Context(), "CREATE TEMP TABLE scratch (id int)"); err != nil {
 		t.Fatal(err)
@@ -103,7 +95,6 @@ func TestSchemasExcludeSystemSchemas(t *testing.T) {
 func TestSchemasCountReadableRelationsWithoutPartitions(t *testing.T) {
 	loadLab(t)
 
-	// ro_clean cannot read lab.hidden, nor use schema locked.
 	got, _, err := introspect.FirstSchemas(t.Context(), testdb.Querier(t, testdb.RoleClean, labDB), everything)
 	if err != nil {
 		t.Fatal(err)
@@ -113,7 +104,6 @@ func TestSchemasCountReadableRelationsWithoutPartitions(t *testing.T) {
 		{Name: "public", Relations: 0, Comment: "standard public schema"},
 	})
 
-	// The superuser reads everything; the two partitions still do not count.
 	got, _, err = introspect.FirstSchemas(t.Context(), testdb.Querier(t, testdb.Superuser, labDB), everything)
 	if err != nil {
 		t.Fatal(err)
@@ -158,8 +148,6 @@ func TestTablesListsEveryKindButPartitions(t *testing.T) {
 		sizes[r.Name] = r.Size
 		got[i].Size = ""
 	}
-	// Not listed: the partitions measurements_2024 (readable) and
-	// measurements_2025, and lab.hidden, which ro_clean cannot read.
 	equal(t, "FirstTables(lab)", got, introspect.RelationList{
 		{Schema: "lab", Name: "Mixed Case", Kind: "table", Rows: 0},
 		{Schema: "lab", Name: "child", Kind: "table", Rows: 0, RLS: true, Comment: "Line items.\nSecond line of the comment."},
@@ -293,7 +281,6 @@ func TestTableDescribesLabChild(t *testing.T) {
 			{Name: "child_insert", Command: "INSERT", Permissive: true, Roles: []string{"public"}, WithCheck: "qty < 100"},
 			{Name: "child_read", Command: "SELECT", Permissive: true, Roles: []string{"ro_clean", "ro_leaky"}, Using: "qty > 0"},
 		},
-		// The foreign key's internal triggers are left out.
 		Triggers: []string{"child_audit", "child_touch"},
 	})
 }
@@ -330,8 +317,6 @@ func TestTableDescribesViews(t *testing.T) {
 			"     LEFT JOIN app.orders o ON o.customer_id = c.id\n  GROUP BY c.id, c.email;",
 	})
 
-	// Postgres 15 deparses this one with qualified column names, so only
-	// version-independent parts are checked.
 	d = describe(t, q, "app", "daily_event_counts")
 	if d.Kind != "materialized view" || d.Rows != 56 || d.Size == "" || len(d.Columns) != 3 {
 		t.Errorf("daily_event_counts = %+v", d.Relation)
@@ -358,7 +343,6 @@ func TestTableDescribesPartitionsAndForeignTables(t *testing.T) {
 		Columns:  columns,
 	})
 
-	// A partition is not listed, but it is described when the role can read it.
 	d = describe(t, q, "lab", "measurements_2024")
 	equal(t, "partition", *withoutSize(t, d, true), introspect.TableDetail{
 		Relation: introspect.Relation{Schema: "lab", Name: "measurements_2024", Kind: "table", Rows: 365},
@@ -376,7 +360,6 @@ func TestTableShowsOnlyWhatTheRoleCanRead(t *testing.T) {
 	loadLab(t)
 	q := testdb.Querier(t, testdb.RoleClean, labDB)
 
-	// ro_clean may SELECT only id and label: token stays hidden.
 	d := describe(t, q, "lab", "secrets")
 	equal(t, "secrets columns", d.Columns, []introspect.Column{
 		{Name: "id", Type: "integer", NotNull: true},
@@ -387,12 +370,12 @@ func TestTableShowsOnlyWhatTheRoleCanRead(t *testing.T) {
 	equal(t, "Mixed Case columns", d.Columns, []introspect.Column{{Name: "Weird Col", Type: "integer"}})
 
 	for _, tc := range []struct{ schema, name string }{
-		{"lab", "hidden"},            // no privilege at all
-		{"lab", "measurements_2025"}, // a partition ro_clean cannot read
-		{"locked", "vault"},          // SELECT granted, but no USAGE on the schema
-		{"lab", "mixed case"},        // names are exact
-		{"lab", "child_pkey"},        // an index is not table-like
-		{"app", "orders"},            // another database
+		{"lab", "hidden"},
+		{"lab", "measurements_2025"},
+		{"locked", "vault"},
+		{"lab", "mixed case"},
+		{"lab", "child_pkey"},
+		{"app", "orders"},
 		{"nope", "nope"},
 	} {
 		got, err := introspect.Table(t.Context(), q, tc.schema, tc.name)
@@ -443,7 +426,6 @@ policies:
   child_insert FOR INSERT TO public WITH CHECK (qty < 100)
   child_read FOR SELECT TO ro_clean, ro_leaky USING (qty > 0)
 triggers: child_audit, child_touch`},
-		// Every index implements a constraint, so there is no indexes section.
 		{labDB, "lab", "parent", `lab.parent: table, ~0 rows, SIZE
   id integer NOT NULL
   name text NOT NULL
@@ -497,16 +479,16 @@ func TestSearchFindsRelationsColumnsAndFunctions(t *testing.T) {
 		pattern string
 		want    introspect.MatchList
 	}{
-		{"PARENT", introspect.MatchList{ // any case; relations before columns
+		{"PARENT", introspect.MatchList{
 			{Schema: "lab", Table: "parent", Type: "table"},
 			{Schema: "lab", Table: "child", Column: "parent_id", Type: "integer"},
 		}},
-		{"total", introspect.MatchList{ // columns before functions; overloads by arguments
+		{"total", introspect.MatchList{
 			{Schema: "lab", Table: "child", Column: "total", Type: "numeric"},
 			{Schema: "lab", Table: "child_total(p_parent integer)", Type: "function"},
 			{Schema: "lab", Table: "child_total(p_parent integer, p_mood lab.mood)", Type: "function"},
 		}},
-		{"measurements", introspect.MatchList{ // not the partitions
+		{"measurements", introspect.MatchList{
 			{Schema: "lab", Table: "measurements", Type: "partitioned table"},
 		}},
 		{"item", introspect.MatchList{
@@ -515,14 +497,14 @@ func TestSearchFindsRelationsColumnsAndFunctions(t *testing.T) {
 		{"weird", introspect.MatchList{
 			{Schema: "lab", Table: "Mixed Case", Column: "Weird Col", Type: "integer"},
 		}},
-		{"%", nil},      // literal: no name contains a percent sign
-		{`\`, nil},      // nor a backslash
-		{"hidden", nil}, // ro_clean cannot read lab.hidden
-		{"token", nil},  // nor the column secrets.token
-		{"vault", nil},  // nor use schema locked
-		{"touch", nil},  // nor execute lab.touch()
+		{"%", nil},
+		{`\`, nil},
+		{"hidden", nil},
+		{"token", nil},
+		{"vault", nil},
+		{"touch", nil},
 		{"pg_class", nil},
-		{"relname", nil}, // system catalogs are not searched
+		{"relname", nil},
 	} {
 		got, err := introspect.Search(t.Context(), q, tc.pattern, 10)
 		if err != nil {
@@ -541,8 +523,6 @@ func TestSearchTreatsUnderscoreLiterally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// remote_items, parent_id, taken_on, the view's 150 wide_column_N and
-	// the two child_total functions.
 	if len(got) != 155 {
 		t.Errorf("got %d matches, want 155", len(got))
 	}
@@ -574,7 +554,6 @@ func TestSearchKeepsTheFirstLimitMatches(t *testing.T) {
 }
 
 func TestSearchShowsOnlyExecutableFunctions(t *testing.T) {
-	// dblink's functions are executable by ro_leaky, not by ro_clean.
 	got, err := introspect.Search(t.Context(), testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "dblink_connect", 10)
 	if err != nil || len(got) != 0 {
 		t.Errorf("as ro_clean: %v, %v; want no matches", got, err)

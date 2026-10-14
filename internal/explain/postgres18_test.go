@@ -5,13 +5,8 @@ import (
 	"testing"
 )
 
-// TestSummaryOfAPostgreSQL18Plan reads testdata/analyze_window.json, the
-// output of EXPLAIN (FORMAT JSON, VERBOSE, ANALYZE, BUFFERS) from PostgreSQL
-// 18 on the app fixture, with work_mem 64kB and parallel_setup_cost,
-// parallel_tuple_cost and min_parallel_table_scan_size 0, of
-// SELECT e.kind, count(*) OVER () FROM app.events e. PostgreSQL 18 gives the
-// rows of each loop to two decimals, and reports where a window aggregate
-// kept its rows.
+// TestSummaryOfAPostgreSQL18Plan summarizes testdata/analyze_window.json:
+// PostgreSQL 18's EXPLAIN ANALYZE of a count(*) OVER () on app.events.
 func TestSummaryOfAPostgreSQL18Plan(t *testing.T) {
 	want := `total cost 661.33, 11.478 ms, 20000 rows, 328 buffers hit, 0 read
 top nodes by own time:
@@ -26,9 +21,8 @@ flags:
 	}
 }
 
-// From PostgreSQL 18, a window aggregate, materialize, CTE scan and the like
-// report the storage of their rows. Every scan of one CTE reports the CTE's,
-// even one that never ran.
+// From PostgreSQL 18, window aggregates, CTE scans and the like report their
+// rows' storage; each CTE scan reports the CTE's, even one never run.
 func TestFlagsOfStorage(t *testing.T) {
 	for _, tc := range []struct {
 		name, node string
@@ -47,9 +41,8 @@ func TestFlagsOfStorage(t *testing.T) {
 	}
 }
 
-// From PostgreSQL 18, the rows of each loop have two decimals, which the
-// summary keeps, as EXPLAIN does: 0.8 rows over 20000 loops are 16000 rows,
-// not 20000.
+// From PostgreSQL 18, the summary keeps two decimals of rows per loop: 0.8 rows
+// over 20000 loops are 16000 rows, not 20000.
 func TestRowsPerLoopKeepTwoDecimals(t *testing.T) {
 	limit := parseNode(t, `{"Node Type": "Limit", "Plan Rows": 1, "Actual Total Time": 0.008, "Actual Rows": 0.80, "Actual Loops": 20000}`)
 	if got, want := limit.measure(true), "160 ms, 0.8 rows × 20000 loops"; got != want {

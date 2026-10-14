@@ -8,8 +8,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// unanalyzedFixture holds tables that pg_stats has nothing on: one smaller
-// and one larger than a sample.
 const unanalyzedFixture = `
 CREATE TABLE fresh (id int, note text) WITH (autovacuum_enabled = false);
 INSERT INTO fresh SELECT g, CASE WHEN g % 3 <> 0 THEN 'n' || g % 7 END FROM generate_series(1, 300) AS g;
@@ -18,9 +16,6 @@ INSERT INTO big SELECT g FROM generate_series(1, 12000) AS g;
 GRANT SELECT ON fresh, big TO ro_clean;
 `
 
-// wideFixture holds a table with more columns than pg_profile shows, whose
-// common values are long enough to make its profile too large to return
-// inline: c01 to c60, each with five values of 300 characters.
 const wideFixture = `
 DO $$ BEGIN
 	EXECUTE 'CREATE TABLE wide (' || (SELECT string_agg(format('c%s text', lpad(i::text, 2, '0')), ', ')
@@ -32,10 +27,6 @@ ANALYZE wide;
 GRANT SELECT ON wide TO ro_clean;
 `
 
-// profileConns creates database name from fixture and connects to it as
-// ro_clean ("profile"), and to the app fixture as ro_clean (with
-// default_schema app), as ro_supabase, which may read none of it, and as the
-// superuser.
 func profileConns(t *testing.T, name, fixture string) map[string]config.Connection {
 	t.Helper()
 	testdb.CreateDatabase(t, name, fixture)
@@ -45,10 +36,6 @@ func profileConns(t *testing.T, name, fixture string) map[string]config.Connecti
 	return conns
 }
 
-// ordersProfile is the profile of app.orders. The fixture was analyzed with
-// every row in ANALYZE's sample, so it is exact. A column without common
-// values or a histogram has empty cells for them, and TSV writes the
-// backslash that starts a bytea value as \\.
 const ordersProfile = "app.orders: ~50 rows, from pg_stats\n" +
 	"column\ttype\tnulls\tdistinct\twidth\tcommon\tmin\tmax\n" +
 	"id\tbigint\t0%\t100%\t8\t\t1\t50\n" +
@@ -71,7 +58,7 @@ func TestProfile(t *testing.T) {
 	s := connect(t, newConfig(config.RoleCheckWarn, profileConns(t, "tools_profile", unanalyzedFixture)))
 	for _, tc := range []struct {
 		args    map[string]any
-		want    string // the whole result, or for an error a part of it
+		want    string
 		outcome string
 		rows    int
 	}{
@@ -80,13 +67,10 @@ func TestProfile(t *testing.T) {
 			"column\ttype\tnulls\tdistinct\twidth\tcommon\tmin\tmax\nactive\tboolean\t0%\t2\t1\t't' 80%, 'f' 20%\t\t\n(1 row)", "ok", 1},
 		{map[string]any{"connection": "clean", "table": "customers", "schema": "app", "column": "profile"}, "app.customers: ~50 rows, from pg_stats\n" +
 			"column\ttype\tnulls\tdistinct\twidth\tcommon\tmin\tmax\nprofile\tjson\t10%\t\t36\t\t\t\n(1 row)", "ok", 1},
-		// Never analyzed: every row is read, up to the LIMIT.
 		{map[string]any{"connection": "profile", "table": "public.fresh"}, "public.fresh: sampled 300 rows" + sampledFrom +
 			"column\ttype\tnulls\tdistinct\nid\tinteger\t0\t300\nnote\ttext\t100\t7\n(2 rows)", "ok", 2},
 		{map[string]any{"connection": "profile", "table": "public.big"}, "public.big: sampled 10000 rows" + sampledFrom +
 			"column\ttype\tnulls\tdistinct\nid\tinteger\t0\t10000\n(1 row)", "ok", 1},
-		// Row-level security hides the statistics from ro_clean, and the sample
-		// holds only the rows it may see: tenant acme's.
 		{map[string]any{"connection": "clean", "table": "tenant_notes", "column": "tenant"}, "app.tenant_notes: sampled 25 rows" + sampledFrom +
 			"column\ttype\tnulls\tdistinct\ntenant\ttext\t0\t1\n(1 row)", "ok", 1},
 		{map[string]any{"connection": "clean", "table": "nope"}, `relation "app"."nope" does not exist or is not a table or materialized view`, "db_error", 0},
@@ -95,8 +79,6 @@ func TestProfile(t *testing.T) {
 			"pg_stats shows only the columns a role can SELECT", "db_error", 0},
 		{map[string]any{"connection": "supa", "table": "app.orders"}, `the current role can SELECT no column of "app"."orders": ` +
 			"pg_stats shows only the columns a role can SELECT", "db_error", 0},
-		// The superuser may read pg_authid, but its statistics hold password
-		// verifiers, as its rows do.
 		{map[string]any{"connection": "super", "table": "pg_catalog.pg_authid"}, "query rejected: relation pg_authid is not allowed: " +
 			"it discloses server configuration or credentials", "guard_reject", 0},
 		{map[string]any{"connection": "profile", "table": "fresh"}, "table needs a schema: pass schema.table, or the schema that holds it", "error", 0},
@@ -135,7 +117,6 @@ func TestProfileSpillsAndCountsTheColumnsLeftOut(t *testing.T) {
 	if len(records) != 51 || strings.Join(records[0], ",") != "column,type,nulls,distinct,width,common,min,max" {
 		t.Fatalf("spill file: %d records, header %q", len(records), records[0])
 	}
-	// The file keeps the common values whole: five of 300 characters each.
 	c01 := records[1]
 	if c01[0] != "c01" || c01[2] != "0%" || c01[3] != "5" || len(c01[5]) != 5*len("'"+strings.Repeat("A", 300)+"' 20%")+4*len(", ") {
 		t.Errorf("first record = %q", c01)

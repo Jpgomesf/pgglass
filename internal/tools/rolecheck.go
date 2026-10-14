@@ -10,13 +10,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/preflight"
 )
 
-// roleChecks audits the role of each connection once, on first use, and
-// applies role_check: strict refuses a role with a critical finding, a way
-// out of the read-only transaction such as superuser or EXECUTE on dblink
-// (see preflight.SeverityCritical), and shows warnings, such as table writes,
-// once; warn shows the findings once; off skips the audit.
 type roleChecks struct {
-	mode  string // config.RoleCheck*
+	mode  string
 	audit func(ctx context.Context, conn string) (preflight.Report, error)
 
 	mu    sync.Mutex
@@ -33,20 +28,15 @@ func newRoleChecks(mode string, eng *engine.Manager) *roleChecks {
 	}
 }
 
-// roleCheck is the audit of one connection. A failed audit is retried by the
-// next call; a report, once made, is kept.
 type roleCheck struct {
-	// running holds a token during an audit, so one runs at a time. A
-	// channel, unlike a mutex, lets a waiting call give up when it ends.
 	running chan struct{}
 
 	mu     sync.Mutex
-	report *preflight.Report // nil until an audit succeeds
-	err    error             // why the last audit failed
+	report *preflight.Report
+	err    error
 	shown  bool
 }
 
-// blockedError refuses a connection under role_check strict.
 type blockedError struct {
 	conn   string
 	report preflight.Report
@@ -64,10 +54,6 @@ func (e *roleCheckError) Error() string { return roleCheckFailed + e.err.Error()
 
 func (e *roleCheckError) Unwrap() error { return e.err }
 
-// gate audits the role of conn on first use and decides whether a call may
-// go on. The notice it returns starts the call's result: the findings, unless
-// a result has shown them already, or why the audit failed under role_check
-// warn.
 func (rc *roleChecks) gate(ctx context.Context, conn string) (notice string, err error) {
 	return rc.pass(ctx, conn, true)
 }
@@ -98,7 +84,6 @@ func (rc *roleChecks) pass(ctx context.Context, conn string, show bool) (notice 
 	}
 }
 
-// status describes the role check of conn for pg_list_connections.
 func (rc *roleChecks) status(conn string) string {
 	if rc.mode == config.RoleCheckOff {
 		return "role check off"
@@ -127,10 +112,6 @@ func (rc *roleChecks) check(conn string) *roleCheck {
 	return c
 }
 
-// run returns the report, auditing first unless an audit has succeeded;
-// fresh reports whether this call, which shows the report when show is set,
-// is the first to show it. A call that ends while another audits returns its
-// context's error and records no failure.
 func (c *roleCheck) run(ctx context.Context, show bool, audit func(context.Context) (preflight.Report, error)) (report preflight.Report, fresh bool, err error) {
 	select {
 	case c.running <- struct{}{}:

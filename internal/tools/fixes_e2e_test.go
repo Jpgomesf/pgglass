@@ -9,10 +9,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// pg_schema bounds the catalog queries behind its listings, not only their
-// output: a database whose schemas, or a schema whose relations, take more
-// than max_bytes of catalog result is still listed, with a note that counts
-// them all.
+// pg_schema still lists schemas or relations whose catalog result exceeds
+// max_bytes, with a note that counts them all.
 func TestSchemaListingsOfAHugeCatalog(t *testing.T) {
 	t.Parallel()
 	const name = "tools_huge_catalog"
@@ -25,7 +23,7 @@ func TestSchemaListingsOfAHugeCatalog(t *testing.T) {
 		END LOOP;
 	END $$`)
 	cfg := newConfig(config.RoleCheckOff, map[string]config.Connection{"db": direct(testdb.DSN(t, testdb.Superuser, name))})
-	cfg.Defaults.MaxBytes = 100_000 // less than the catalog result of all 1000 relations, or all 2501 schemas
+	cfg.Defaults.MaxBytes = 100_000
 	s := connect(t, cfg)
 
 	for _, tc := range []struct {

@@ -22,10 +22,8 @@ func eventually(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// A client that gives up on a call, as an agent does when its user
-// interrupts it, sends notifications/cancelled: the server then ends the
-// call, which cancels its query on Postgres at once, well before the
-// statement timeout, logs the call and keeps the connection for the next one.
+// notifications/cancelled ends the call and cancels its query on Postgres at
+// once; the call is logged and the connection kept for the next one.
 func TestCancellingACallCancelsItsQuery(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckOff, appConns(t)))

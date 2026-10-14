@@ -64,7 +64,6 @@ func TestErrorText(t *testing.T) {
 		{&dbError{&engine.QueryError{SQLState: "22P02", Message: "invalid input syntax for type json", Detail: `Token "x" is invalid.`}},
 			"ERROR: invalid input syntax for type json (SQLSTATE 22P02)\nDETAIL: Token \"x\" is invalid."},
 		{&dbError{errors.New("query cancelled: context canceled")}, "query cancelled: context canceled"},
-		// The connection's name starts the text, a Postgres error's too.
 		{&dbError{&connError{conn: "staging", err: fmt.Errorf("read the structure of schema %q: %w", "public", queryErr)}},
 			`staging: ERROR: column "nam" does not exist (SQLSTATE 42703) at character 8` + "\n" +
 				`HINT: Perhaps you meant to reference the column "customers.name".`},
@@ -79,7 +78,6 @@ func TestErrorText(t *testing.T) {
 }
 
 func TestSQLHash(t *testing.T) {
-	// echo -n 'SELECT 1' | shasum -a 256
 	if got := sqlHash("SELECT 1"); got != "e004ebd5b553" {
 		t.Errorf("sqlHash(SELECT 1) = %q", got)
 	}
@@ -111,14 +109,12 @@ func TestSearchLimit(t *testing.T) {
 }
 
 func TestFirstLines(t *testing.T) {
-	text := strings.Repeat("0123456789\n", 99) + "0123456789" // 100 lines, 1099 bytes
-	// A total lower than the lines of text counts those lines instead.
+	text := strings.Repeat("0123456789\n", 99) + "0123456789"
 	for _, total := range []int{0, 100} {
 		if got := firstLines(text, total, len(text)); got != text {
 			t.Errorf("text that fits, total %d, was cut:\n%s", total, got)
 		}
 	}
-	// 38 lines and the note take 497 bytes; a 39th line would not fit.
 	want := strings.Repeat("0123456789\n", 38) + "… 38 of 100 lines shown (output limit 500 bytes): use pg_search to find names"
 	if got := firstLines(text, 100, 500); got != want || len(got) > 500 {
 		t.Errorf("firstLines(text, 100, 500) =\n%s\nwant\n%s", got, want)
@@ -176,8 +172,6 @@ func TestSearchPath(t *testing.T) {
 			t.Errorf("searchPath(%q, %q): err = %v, want a *guard.Violation", tc.conn, tc.schema, err)
 		}
 	}
-	// Postgres would cut a longer name to the first 63 bytes, which may name
-	// another schema.
 	long := strings.Repeat("s", 64)
 	h.cfg.Connections["long"] = config.Connection{DefaultSchema: long}
 	for _, tc := range []struct{ conn, schema string }{{"app", long}, {"long", ""}} {
@@ -237,8 +231,6 @@ func TestCheckParams(t *testing.T) {
 	}
 }
 
-// fakeChecks returns roleChecks whose audit returns the next of results and
-// counts its calls.
 func fakeChecks(mode string, results ...func() (preflight.Report, error)) (*roleChecks, *atomic.Int32) {
 	var calls atomic.Int32
 	rc := &roleChecks{mode: mode, conns: map[string]*roleCheck{}}
@@ -273,7 +265,6 @@ func TestGateStrict(t *testing.T) {
 		t.Errorf("status = %q", got)
 	}
 
-	// Warnings alone do not block, and show once.
 	rc, _ = fakeChecks(config.RoleCheckStrict, report(warnReport))
 	if notice, err := rc.gate(t.Context(), "reader"); err != nil || !strings.Contains(notice, "warning role_membership") {
 		t.Errorf("first gate = %q, %v; want the warning", notice, err)
@@ -409,9 +400,8 @@ func TestGateAuditsOnceUnderConcurrency(t *testing.T) {
 	}
 }
 
-// Under role_check strict, an audit that Postgres refused showed the Postgres
-// error alone, as if the call's own query had failed. The text now says the
-// role check failed first, and pg_diff_schema names its side before that.
+// Under role_check strict, a refused audit's error says the role check failed,
+// preceded by the side for pg_diff_schema.
 func TestStrictRoleCheckFailureKeepsItsContext(t *testing.T) {
 	denied := &engine.QueryError{SQLState: "42501", Message: "permission denied for table pg_proc"}
 	rc, _ := fakeChecks(config.RoleCheckStrict, failure(fmt.Errorf("preflight: function grants: %w", denied)))

@@ -15,27 +15,23 @@ type SchemaStructure map[string]RelationStructure
 // RelationStructure is what Diff compares of one relation. Each map holds
 // the definitions of one kind of object in it, by name.
 type RelationStructure struct {
-	Kind       string // as in Relation
-	RLS        bool   // row-level security is enabled
-	Definition string // as in TableDetail: the query of a view or materialized view
-	// Columns hold the type, NOT NULL, then the default, identity or
-	// generation clause, as in CREATE TABLE: "bigint NOT NULL GENERATED
-	// ALWAYS AS IDENTITY". Only the columns the role can SELECT are there.
+	Kind       string
+	RLS        bool
+	Definition string
+	// Columns map the readable columns to their CREATE TABLE definitions, such
+	// as "bigint NOT NULL GENERATED ALWAYS AS IDENTITY".
 	Columns     map[string]string
-	Constraints map[string]string // as in Constraint.Definition
-	// Indexes are as in Index.Definition, but for those that implement a
-	// primary key, unique or exclusion constraint: the constraint stands for
-	// them.
+	Constraints map[string]string
+	// Indexes are as in Index.Definition, leaving out those that implement a
+	// constraint, which stands for them.
 	Indexes map[string]string
 	// Policies are as in CREATE POLICY, from AS or FOR on:
 	// "FOR SELECT TO public USING (tenant = 'acme'::text)".
 	Policies map[string]string
 }
 
-// Structure reads the structure of schema with one catalog query. It returns
-// an error if the schema does not exist or the current role lacks USAGE on
-// it, or if its structure, one JSON value, exceeds max_bytes. As in
-// FirstTables, what the role cannot read is left out, and so are partitions.
+// Structure reads what the role can read of schema, partitions aside, in one
+// catalog query; an unusable schema or one past max_bytes is an error.
 func Structure(ctx context.Context, q engine.Querier, schema string) (SchemaStructure, error) {
 	var s SchemaStructure
 	err := queryJSON(ctx, q, &s, structureSQL, schema)
@@ -51,9 +47,6 @@ func Structure(ctx context.Context, q engine.Querier, schema string) (SchemaStru
 	return s, nil
 }
 
-// columnDefinitionsSQL maps the columns of pg_class c the role can SELECT to
-// their definitions. As in columnsSQL, a generated column keeps its
-// expression in pg_attrdef, so it has no default.
 const columnDefinitionsSQL = `SELECT json_object_agg(a.attname, format_type(a.atttypid, a.atttypmod)
 		|| CASE WHEN ` + notNull + ` THEN ' NOT NULL' ELSE '' END
 		|| CASE
@@ -69,22 +62,16 @@ const columnDefinitionsSQL = `SELECT json_object_agg(a.attname, format_type(a.at
 	WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
 		AND has_column_privilege(c.oid, a.attnum, 'SELECT')`
 
-// constraintDefinitionsSQL maps the constraints of pg_class c to their
-// definitions. NOT NULL constraints are part of the columns instead.
 const constraintDefinitionsSQL = `SELECT json_object_agg(k.conname, pg_get_constraintdef(k.oid, true))
 	FROM pg_constraint k
 	WHERE k.conrelid = c.oid AND k.contype IN ('p', 'u', 'c', 'f', 'x')`
 
-// indexDefinitionsSQL maps the indexes of pg_class c to their definitions,
-// leaving out the indexes of its constraints.
 const indexDefinitionsSQL = `SELECT json_object_agg(ic.relname, pg_get_indexdef(i.indexrelid, 0, true))
 	FROM pg_index i
 	JOIN pg_class ic ON ic.oid = i.indexrelid
 	WHERE i.indrelid = c.oid AND NOT EXISTS (SELECT 1 FROM pg_constraint k
 		WHERE k.conrelid = c.oid AND k.conindid = i.indexrelid AND k.contype IN ('p', 'u', 'x'))`
 
-// policyDefinitionsSQL maps the row-level security policies of pg_class c to
-// their definitions. Role 0 in polroles is PUBLIC.
 const policyDefinitionsSQL = `SELECT json_object_agg(p.polname, concat_ws(' ',
 		CASE WHEN NOT p.polpermissive THEN 'AS RESTRICTIVE' END,
 		'FOR ' || CASE p.polcmd
@@ -101,10 +88,6 @@ const policyDefinitionsSQL = `SELECT json_object_agg(p.polname, concat_ws(' ',
 	FROM pg_policy p
 	WHERE p.polrelid = c.oid`
 
-// structureSQL returns the relations of schema $1 that FirstTables lists,
-// each with its query, if a view or materialized view, and the definitions of
-// its columns, constraints, indexes and policies; no row when the schema does
-// not exist or the role lacks USAGE on it.
 const structureSQL = `
 SELECT (SELECT coalesce(json_object_agg(c.relname, json_build_object(
 		'Kind', ` + relKind + `,

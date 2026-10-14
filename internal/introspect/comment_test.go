@@ -8,10 +8,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// The listings and a description read a comment of over 200 characters cut
-// there, with a note of how many it drops, and one of 200 whole: however long
-// their comments, 500 relations or 1600 columns keep the catalog result well
-// within max_bytes. Characters are counted, not bytes.
+// Listings and descriptions cut comments past 200 characters, not bytes, with a
+// note of what was dropped, keeping catalog results within max_bytes.
 func TestLongCommentsAreCut(t *testing.T) {
 	const name = "introspect_long_comments"
 	testdb.CreateDatabase(t, name, `CREATE SCHEMA s;

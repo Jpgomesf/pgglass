@@ -12,7 +12,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/result"
 )
 
-// fakeQuerier returns a canned result and records the query it was given.
 type fakeQuerier struct {
 	res *result.Result
 	err error
@@ -24,12 +23,10 @@ func (f *fakeQuerier) Query(_ context.Context, q engine.Query) (*result.Result, 
 	return f.res, f.err
 }
 
-// oneValue is a result with a single row holding v.
 func oneValue(v string) *result.Result {
 	return &result.Result{Columns: []result.Column{{Name: "json"}}, Rows: [][]*string{{&v}}}
 }
 
-// call runs each public query function against q and returns their errors.
 func call(q engine.Querier) map[string]error {
 	ctx := context.Background()
 	_, _, schemasErr := introspect.FirstSchemas(ctx, q, 3)
@@ -49,7 +46,6 @@ func TestQueriesPinSearchPathAndPassParameters(t *testing.T) {
 		{"FirstSchemas", func(q engine.Querier) error { _, _, err := introspect.FirstSchemas(ctx, q, 3); return err }, []any{3}},
 		{"FirstTables", func(q engine.Querier) error { _, _, err := introspect.FirstTables(ctx, q, "app", 3); return err }, []any{"app", 3}},
 		{"Table", func(q engine.Querier) error { _, err := introspect.Table(ctx, q, "app", "orders"); return err }, []any{"app", "orders"}},
-		// The pattern matches literally: ILIKE wildcards and the escape are escaped.
 		{"Search", func(q engine.Querier) error { _, err := introspect.Search(ctx, q, `a_b%c\d`, 5); return err }, []any{`%a\_b\%c\\d%`, 5}},
 	} {
 		q := &fakeQuerier{res: oneValue("{}")}
@@ -91,7 +87,6 @@ func TestNoRowMeansNotFound(t *testing.T) {
 		errs := call(&fakeQuerier{res: res})
 		wantErr(t, errs["FirstTables"], `schema "app" does not exist or the current role lacks USAGE on it`)
 		wantErr(t, errs["Table"], `relation "app"."orders" does not exist or the current role cannot read it`)
-		// Their aggregates always return a row, so none is a broken result.
 		if errs["FirstSchemas"] == nil || errs["Search"] == nil {
 			t.Errorf("FirstSchemas: %v, Search: %v, want errors", errs["FirstSchemas"], errs["Search"])
 		}

@@ -12,18 +12,14 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// cached is the "cached" credential source. Like aws_secrets_manager, it
-// caches what it fetches until the engine invalidates it: a fetch returns
-// the DSN its store holds. One test uses it, and resets it first, so
-// repeated runs start clean.
 var cached = &cachedSource{}
 
 func init() { resolver.RegisterSource(cached) }
 
 type cachedSource struct {
 	mu          sync.Mutex
-	store       string // the DSN a fetch returns
-	cache       string // the DSN fetched last; empty once invalidated
+	store       string
+	cache       string
 	fetches     int
 	invalidated int
 }
@@ -49,21 +45,18 @@ func (s *cachedSource) Invalidate(config.Connection) {
 	s.invalidated++
 }
 
-// reset empties the cache and the counts, and stores dsn.
 func (s *cachedSource) reset(dsn string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.store, s.cache, s.fetches, s.invalidated = dsn, "", 0, 0
 }
 
-// rotate stores dsn, as a rotation does, and leaves the cache alone.
 func (s *cachedSource) rotate(dsn string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.store = dsn
 }
 
-// wantCounts checks how often the source fetched and was invalidated.
 func (s *cachedSource) wantCounts(t *testing.T, fetches, invalidated int) {
 	t.Helper()
 	s.mu.Lock()
@@ -73,11 +66,8 @@ func (s *cachedSource) wantCounts(t *testing.T, fetches, invalidated int) {
 	}
 }
 
-// A source that caches credentials, as aws_secrets_manager does, still
-// answers with the old password after a rotation. The server refuses it, so
-// the engine has the source drop it and connects once more, with the
-// password fetched afresh. pool_max_conn_lifetime=1ms retires every
-// connection after one use, so each query connects anew.
+// When the server refuses a cached password after a rotation, the engine has
+// the source drop it and connects once more with credentials fetched afresh.
 func TestRefusedCredentialsAreFetchedAgainOnce(t *testing.T) {
 	const role = "engine_cached"
 	admin := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
@@ -113,21 +103,18 @@ func TestRefusedCredentialsAreFetchedAgainOnce(t *testing.T) {
 	}
 	cached.wantCounts(t, 2, 1)
 
-	// An error the query raises is no refused connection, whatever its SQLSTATE.
 	_, err := m.Query(t.Context(), db, engine.Query{SQL: "DO $$ BEGIN RAISE EXCEPTION 'raised' USING ERRCODE = '28P01'; END $$"})
 	wantSQLState(t, err, "28P01")
 	cached.wantCounts(t, 2, 1)
 
-	// Credentials the server still refuses once fetched afresh fail after
-	// that one retry: a wrong password, then a role that may not log in.
 	exec("ALTER ROLE " + role + " PASSWORD 'third'")
 	_, err = m.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
-	wantSQLState(t, err, "28P01") // invalid_password
+	wantSQLState(t, err, "28P01")
 	cached.wantCounts(t, 3, 2)
 
 	exec("ALTER ROLE " + role + " NOLOGIN PASSWORD 'second'")
 	_, err = m.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
-	wantSQLState(t, err, "28000") // invalid_authorization_specification
+	wantSQLState(t, err, "28000")
 	cached.wantCounts(t, 4, 3)
 }
 
@@ -145,7 +132,6 @@ func TestRefusedCredentialsOfAnUncachedSourceAreNotRetried(t *testing.T) {
 
 	_, err = m.Query(t.Context(), name, engine.Query{SQL: "SELECT 1"})
 	wantSQLState(t, err, "28P01")
-	// One resolve opens the pool, one more for its only connection attempt.
 	if n := stub.callCount(name); n != 2 {
 		t.Errorf("resolved %d times, want 2", n)
 	}

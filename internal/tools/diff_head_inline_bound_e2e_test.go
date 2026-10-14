@@ -8,10 +8,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// pg_diff_schema's first line names the schema as given. Postgres cuts a
-// name parameter to 63 bytes, so a 12,063-byte schema argument matched the
-// 63-byte schema, and the line that repeated it took the result to about
-// 12.6 kB. Such an argument is refused, and the error does not repeat it.
+// A schema argument over 63 bytes is refused without being repeated, so
+// pg_diff_schema's result stays within the inline limit.
 func TestDiffSchemaHeadStaysWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	schema := strings.Repeat("s", 63)

@@ -8,8 +8,6 @@ import (
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
-// These cover fail-closed branches that no parse tree reaches.
-
 func TestWalkRejectsMapFields(t *testing.T) {
 	msg, err := structpb.NewStruct(map[string]any{"k": "v"})
 	if err != nil {

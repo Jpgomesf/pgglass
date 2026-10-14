@@ -9,8 +9,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/config"
 )
 
-// parseConnectionNames parses a config.json whose connections have the given
-// names, as the server loads it, and returns its error.
 func parseConnectionNames(names ...string) error {
 	conns := map[string]config.Connection{}
 	for _, name := range names {
@@ -24,20 +22,8 @@ func parseConnectionNames(names ...string) error {
 	return err
 }
 
-// A fanned-out pg_query whose connections return the same columns merges
-// their rows, and its footer names every connection a limit cut. When the
-// merged result spills and its summary does not fit, the summary falls back
-// to the file and that footer, whatever it takes. Under role_check warn, ten
-// connections of 299 characters whose roles have a table_write finding, one
-// failing on a long value and nine cut by max_rows, returned about 10.5 kB.
-//
-// Config now refuses connection names over 63 bytes. Under that cap the
-// footer's list of the connections a limit cut takes at most 948 bytes (ten
-// names, each with its limit: max_bytes and 19 digits at most), and the
-// summary's first part at most 1,271 bytes and its file path. The rows get at
-// least 2,499 bytes, what the failures' half and their line break leave of
-// the 5,000 the findings leave at least, so that part fits for a path of up
-// to 1.2 kB, and the fallback, the path and the footer, fits too.
+// A merged fan-out's footer names every connection a limit cut; with names
+// capped at 63 bytes, it and the spill fallback stay within the inline limit.
 func TestFanoutMergedTruncationReasonStaysWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	names := func(size int) []string {
@@ -53,9 +39,6 @@ func TestFanoutMergedTruncationReasonStaysWithinTheInlineLimit(t *testing.T) {
 	longest := names(63)
 	s := sectionsRoom(t, "tools_fanout_merged_reason", longest, t.TempDir())
 
-	// The whole-row reference reads v in s0, whose cast fails, and gives every
-	// other connection the same column. max_rows cuts each of them, and their
-	// 450 rows spill.
 	got := s.ok(t, "pg_query", fanoutArgs(longest, "SELECT t::text IS NOT NULL AS v FROM t", "max_rows", 50))
 	if len(got) > config.InlineMaxBytes {
 		t.Errorf("fan-out returned %d bytes, limit %d:\n%.200s…%s", len(got), config.InlineMaxBytes, got, got[len(got)-200:])

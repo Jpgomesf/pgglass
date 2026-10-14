@@ -25,8 +25,8 @@ func TestValidatorReportsEveryMissingField(t *testing.T) {
 	t.Parallel()
 	v := resolver.NewValidator("prod", "aws_secrets_manager")
 	v.Require("secret_name", "")
-	v.RequireFromMap(map[string]string{"host": "h"}, "password") // absent key
-	v.RequireFromMap(map[string]string{"user": ""}, "user")      // present but empty
+	v.RequireFromMap(map[string]string{"host": "h"}, "password")
+	v.RequireFromMap(map[string]string{"user": ""}, "user")
 
 	err := v.Err()
 	if err == nil {

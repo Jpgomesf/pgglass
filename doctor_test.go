@@ -88,10 +88,8 @@ func refusedAddr(t *testing.T) string {
 	return addr
 }
 
-// pgglass doctor reports each connection on a line of its own, in name order: a
-// read-only role passes, a role with only warnings passes with them, and a
-// role with a critical finding, credentials that do not resolve or parse and
-// an unreachable host fail it. No password is printed.
+// pgglass doctor reports each connection in name order, never a password:
+// warnings pass; critical findings, bad credentials or unreachable hosts fail.
 func TestDoctorChecksEveryConnection(t *testing.T) {
 	testdb.CreateDatabase(t, "doctor", creatorSQL)
 	refused := refusedAddr(t)
@@ -193,9 +191,8 @@ func (stallingSource) Status(config.Connection) string { return "" }
 
 func init() { resolver.RegisterSource(stallingSource{}) }
 
-// Neither a host that accepts the connection and never answers, nor a
-// credential source that never returns, may hold the doctor up past its
-// timeout: the source used to have none.
+// Neither a host that never answers nor a credential source that never returns
+// holds the doctor past its timeout.
 func TestDoctorGivesUpOnASilentHostOrStalledCredentials(t *testing.T) {
 	t.Parallel()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

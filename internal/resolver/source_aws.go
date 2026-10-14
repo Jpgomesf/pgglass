@@ -17,9 +17,8 @@ import (
 
 func init() { RegisterSource(&AWSSecretsSource{}) }
 
-// AWSSecretsSource resolves credentials from AWS Secrets Manager. Secrets
-// are cached in memory for secretCacheTTL, per AWS profile and secret name,
-// unless Invalidate drops them first.
+// AWSSecretsSource resolves credentials from AWS Secrets Manager, caching them
+// per profile and secret for secretCacheTTL or until Invalidate.
 type AWSSecretsSource struct{}
 
 func (AWSSecretsSource) Type() string { return "aws_secrets_manager" }
@@ -50,8 +49,6 @@ func (AWSSecretsSource) Resolve(ctx context.Context, connName string, conn confi
 		port = "5432"
 	}
 
-	// A URL escapes every value, so a password holding a space or a quote
-	// can neither break the DSN nor set another of its parameters.
 	dsn := url.URL{
 		Scheme: "postgres",
 		User:   url.UserPassword(user, password),
@@ -78,12 +75,8 @@ func (AWSSecretsSource) Invalidate(conn config.Connection) {
 	awsSecrets.Invalidate(conn.AWSProfile, conn.SecretName)
 }
 
-// --- AWS secrets cache ---
-
 const secretCacheTTL = 24 * time.Hour
 
-// secretKey identifies a cached secret: one name can hold different secrets
-// in the accounts or regions that different AWS profiles reach.
 type secretKey struct{ profile, name string }
 
 type secretEntry struct {
@@ -92,7 +85,6 @@ type secretEntry struct {
 }
 
 type awsSecretsCache struct {
-	// fetch gets a secret from AWS Secrets Manager; tests replace it.
 	fetch func(ctx context.Context, awsProfile, secretName string) (map[string]string, error)
 
 	mu    sync.RWMutex
@@ -134,7 +126,6 @@ func (sc *awsSecretsCache) Invalidate(awsProfile, secretName string) {
 	sc.mu.Unlock()
 }
 
-// cached returns the secret cached under key, unless it is missing or expired.
 func (sc *awsSecretsCache) cached(key secretKey) (map[string]string, bool) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
@@ -145,8 +136,6 @@ func (sc *awsSecretsCache) cached(key secretKey) (map[string]string, bool) {
 	return entry.value, true
 }
 
-// fetchSecret gets a secret from AWS Secrets Manager, with the credentials of
-// awsProfile or, when it is empty, of the default credential chain.
 func fetchSecret(ctx context.Context, awsProfile, secretName string) (map[string]string, error) {
 	opts := []func(*awsconfig.LoadOptions) error{}
 	if awsProfile != "" {
@@ -168,8 +157,6 @@ func fetchSecret(ctx context.Context, awsProfile, secretName string) (map[string
 	return secretValue(secretName, result)
 }
 
-// secretValue decodes the JSON object a secret holds as its string value. A
-// binary secret has none.
 func secretValue(secretName string, out *secretsmanager.GetSecretValueOutput) (map[string]string, error) {
 	if out.SecretString == nil {
 		return nil, fmt.Errorf("secret %q has no string value: binary secrets are not supported", secretName)

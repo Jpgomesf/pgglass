@@ -37,17 +37,8 @@ func violation(format string, args ...any) error {
 	return &Violation{Reason: fmt.Sprintf(format, args...)}
 }
 
-// Check returns nil if sql is exactly one statement that only reads, and a
-// *Violation otherwise, including when sql does not parse.
-//
-// The statement must be a SELECT (VALUES, TABLE and set operations included),
-// EXPLAIN [ANALYZE] of such a SELECT, or SHOW. Every node of the query is then
-// checked: WITH queries must be SELECTs, SELECT INTO and FOR UPDATE/SHARE are
-// rejected, and so are references to the relations in deniedRelations and
-// calls to the functions in deniedFunctions, deniedPrefixes and, by qualified
-// name, deniedSchemas, wherever they appear and including field-selection
-// calls such as x.pg_read_file. SQL nested too deeply to parse safely is
-// rejected before parsing. Check is safe for concurrent use.
+// Check returns nil if sql is one read-only SELECT, EXPLAIN of one, or SHOW
+// that touches no denied relation or function, and a *Violation otherwise.
 func Check(sql string) error {
 	stmt, err := parseSingle(sql)
 	if err != nil {
@@ -56,9 +47,7 @@ func Check(sql string) error {
 	return checkStatement(stmt)
 }
 
-// parseSingle parses sql and returns its only statement.
 func parseSingle(sql string) (*pg_query.Node, error) {
-	// The parser reads sql as a C string, so it would not see past a NUL.
 	if strings.ContainsRune(sql, 0) {
 		return nil, violation("SQL contains a NUL byte")
 	}
@@ -79,9 +68,6 @@ func parseSingle(sql string) (*pg_query.Node, error) {
 	return stmts[0].GetStmt(), nil
 }
 
-// safely calls the parser's f, turning a panic of its WebAssembly runtime into
-// an error. checkNesting keeps the known cause, a stack overflow, from
-// happening.
 func safely[T any](f func(string) (T, error), sql string) (result T, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -91,7 +77,6 @@ func safely[T any](f func(string) (T, error), sql string) (result T, err error) 
 	return f(sql)
 }
 
-// parseErrorText is the parser's message, with the position when it has one.
 func parseErrorText(err error) string {
 	var perr *parser.Error
 	if errors.As(err, &perr) && perr.Cursorpos > 0 {
@@ -100,15 +85,11 @@ func parseErrorText(err error) string {
 	return err.Error()
 }
 
-// checkStatement allows SELECT, EXPLAIN SELECT and SHOW, and checks every node
-// of the SELECT.
 func checkStatement(stmt *pg_query.Node) error {
 	switch n := stmt.GetNode().(type) {
 	case *pg_query.Node_SelectStmt:
 		return walk(n.SelectStmt.ProtoReflect())
 	case *pg_query.Node_ExplainStmt:
-		// EXPLAIN options are constants in the grammar; only the query can hold
-		// function calls. ANALYZE runs it, which is fine for a SELECT.
 		query := n.ExplainStmt.GetQuery()
 		if query.GetSelectStmt() == nil {
 			return violation("EXPLAIN of %s is not allowed: only a SELECT can be explained", nodeName(query))
@@ -121,7 +102,6 @@ func checkStatement(stmt *pg_query.Node) error {
 	}
 }
 
-// nodeName names the type of node n wraps, e.g. "DeleteStmt".
 func nodeName(n *pg_query.Node) string {
 	name := "nothing"
 	n.ProtoReflect().Range(func(fd protoreflect.FieldDescriptor, _ protoreflect.Value) bool {
@@ -131,7 +111,6 @@ func nodeName(n *pg_query.Node) string {
 	return name
 }
 
-// walk checks m and every message nested in it, through any field.
 func walk(m protoreflect.Message) error {
 	if err := checkNode(m.Interface()); err != nil {
 		return err
@@ -144,13 +123,11 @@ func walk(m protoreflect.Message) error {
 	return err
 }
 
-// walkField walks the messages that field fd holds in v.
 func walkField(fd protoreflect.FieldDescriptor, v protoreflect.Value) error {
 	switch {
 	case fd.Message() == nil:
 		return nil
 	case fd.IsMap():
-		// pg_query's protobuf has no map fields; fail closed if one appears.
 		return violation("cannot check %s", fd.FullName())
 	case fd.IsList():
 		list := v.List()
@@ -165,7 +142,6 @@ func walkField(fd protoreflect.FieldDescriptor, v protoreflect.Value) error {
 	}
 }
 
-// checkNode checks one node of the tree.
 func checkNode(m protoreflect.ProtoMessage) error {
 	switch n := m.(type) {
 	case *pg_query.FuncCall:
@@ -181,16 +157,12 @@ func checkNode(m protoreflect.ProtoMessage) error {
 	case *pg_query.CommonTableExpr:
 		return checkCTE(n)
 	}
-	// Every statement node type is named *Stmt. Only SELECT may appear inside
-	// a query; this rejects any other that the cases above did not.
 	if name := string(m.ProtoReflect().Descriptor().Name()); strings.HasSuffix(name, "Stmt") {
 		return violation("%s is not allowed inside a query", name)
 	}
 	return nil
 }
 
-// checkSelect rejects SELECT INTO, which creates a table, and FOR UPDATE or
-// FOR SHARE, which lock rows.
 func checkSelect(s *pg_query.SelectStmt) error {
 	if s.GetIntoClause() != nil {
 		return violation("SELECT INTO is not allowed: it creates a table")
@@ -201,8 +173,6 @@ func checkSelect(s *pg_query.SelectStmt) error {
 	return nil
 }
 
-// checkCTE rejects a WITH query that is not a SELECT, such as
-// WITH gone AS (DELETE FROM t RETURNING *).
 func checkCTE(c *pg_query.CommonTableExpr) error {
 	if c.GetCtequery().GetSelectStmt() == nil {
 		return violation("WITH query %q is a %s: only SELECT is allowed", c.GetCtename(), nodeName(c.GetCtequery()))
@@ -210,22 +180,10 @@ func checkCTE(c *pg_query.CommonTableExpr) error {
 	return nil
 }
 
-// checkRelation rejects a reference to a system catalog or view in
-// deniedRelations, which disclose server configuration files or credentials.
-// The match is on the relation's own name, lower-cased and whatever the
-// schema, like checkFunction: a CTE or table that shadows one of these names
-// is rejected too, since the parse tree cannot tell them apart.
-//
-// Only a reference in the query is a RangeVar. A function that takes a
-// relation by name, as a regclass or text argument, and returns its rows
-// reads the relation without one, so such functions must be denied as well:
-// table_to_xml*, xpath_table and get_raw_page are.
 func checkRelation(r *pg_query.RangeVar) error {
 	return CheckRelation(r.GetRelname())
 }
 
-// checkFunction rejects a call to a denied function. Names match
-// case-insensitively, with or without a schema.
 func checkFunction(name []*pg_query.Node) error {
 	parts := make([]string, len(name))
 	for i, part := range name {
@@ -237,13 +195,6 @@ func checkFunction(name []*pg_query.Node) error {
 	return nil
 }
 
-// Postgres also reads a field selection x.f as the call f(x) when x has no
-// field f, so a denied function can be called without a FuncCall node:
-// ('/etc/passwd'::text).pg_read_file, or t.pg_ls_dir FROM unnest(ARRAY['.'])
-// AS t, whose t is a text. A qualified column that happens to share a denied
-// name, such as t.lo_price, is rejected as well: the parse tree cannot tell.
-
-// checkColumnRef checks rel.f: only the last name can be such a call.
 func checkColumnRef(c *pg_query.ColumnRef) error {
 	fields := c.GetFields()
 	if len(fields) < 2 {
@@ -252,7 +203,6 @@ func checkColumnRef(c *pg_query.ColumnRef) error {
 	return checkFieldCall(fields[len(fields)-1])
 }
 
-// checkIndirection checks (x).f.g: every field name can be such a call.
 func checkIndirection(ind *pg_query.A_Indirection) error {
 	for _, field := range ind.GetIndirection() {
 		if err := checkFieldCall(field); err != nil {
@@ -262,7 +212,6 @@ func checkIndirection(ind *pg_query.A_Indirection) error {
 	return nil
 }
 
-// checkFieldCall rejects field selection .f when f is a denied function.
 func checkFieldCall(field *pg_query.Node) error {
 	name := strings.ToLower(field.GetString_().GetSval())
 	if name != "" && isDenied([]string{name}) {
@@ -271,11 +220,9 @@ func checkFieldCall(field *pg_query.Node) error {
 	return nil
 }
 
-// isDenied reports whether the function named by parts, lower case and
-// optionally schema-qualified, is denied.
 func isDenied(parts []string) bool {
 	if len(parts) == 0 {
-		return true // the parser never produces this; fail closed
+		return true
 	}
 	if len(parts) > 1 && deniedSchemas[parts[len(parts)-2]] {
 		return true
@@ -292,147 +239,104 @@ func isDenied(parts []string) bool {
 	return false
 }
 
-// deniedSchemas belong to extensions whose functions all reach outside the
-// read-only transaction, so a call to any function in them is denied.
 var deniedSchemas = map[string]bool{
-	"net":        true, // pg_net (Supabase): HTTP requests from the server
-	"aws_s3":     true, // aws_s3 (RDS, Aurora): query results to S3, and S3 files into tables
-	"aws_lambda": true, // aws_lambda (RDS, Aurora): invokes Lambda functions
+	"net":        true,
+	"aws_s3":     true,
+	"aws_lambda": true,
 }
 
-// deniedFunctions reach outside the read-only transaction (server files,
-// other sessions, settings, sequences, the network), leave state behind that
-// its rollback does not undo, run SQL passed as a string, which the guard
-// cannot see, or read a relation passed by name, past deniedRelations.
 var deniedFunctions = map[string]bool{
-	// Server files.
-	"pg_read_file":        true,
-	"pg_read_binary_file": true,
-	"pg_stat_file":        true,
-	// Server configuration files, read through catalog functions. The matching
-	// views (pg_hba_file_rules, pg_ident_file_mappings, pg_file_settings) are
-	// denied as relations; see deniedRelations.
-	"pg_show_all_file_settings": true, // postgresql.conf, behind the pg_file_settings view
-	"pg_current_logfile":        true, // the active log file's path
-	"pg_hba_file_rules":         true, // pg_hba.conf, where the view wraps a like-named function
-	"pg_ident_file_mappings":    true, // pg_ident.conf, likewise
-	// Other sessions and the server process; pg_log_backend_memory_contexts
-	// is denied by its prefix.
-	"pg_terminate_backend": true,
-	"pg_cancel_backend":    true,
-	"pg_reload_conf":       true,
-	"pg_rotate_logfile":    true,
-	"pg_promote":           true,
-	// Settings and notifications.
-	"set_config": true,
-	"pg_notify":  true,
-	// The seed of random(), session state that the rollback does not undo:
-	// later calls on the pooled connection would get the sequence it chose.
-	// Every role may execute it.
-	"setseed": true,
-	// Shared buffers, which the rollback does not restore: pg_prewarm reads a
-	// relation into them, evicting the pages other sessions use. Every role
-	// may execute it, on any relation it can read; the extension's
-	// autoprewarm_* functions are denied by their prefix.
-	"pg_prewarm": true,
-	// Sequences, which change outside the transaction.
-	"setval":  true,
-	"nextval": true,
-	// Statistics resets, which are not transactional (pg_stat_statements).
-	"pg_stat_statements_reset": true,
-	// Backup control before PostgreSQL 15, and slot sync on a standby (17).
-	"pg_start_backup":           true,
-	"pg_stop_backup":            true,
-	"pg_sync_replication_slots": true,
-	// HTTP from the server (pgsql-http).
-	"http":        true,
-	"http_get":    true,
-	"http_post":   true,
-	"http_put":    true,
-	"http_patch":  true,
-	"http_delete": true,
-	"http_head":   true,
-	// SQL passed as a string.
-	"query_to_xml":               true,
-	"query_to_xml_and_xmlschema": true,
-	"query_to_xmlschema":         true,
-	"cursor_to_xml":              true,
-	"cursor_to_xmlschema":        true,
-	"ts_stat":                    true,
-	"ts_rewrite":                 true, // ts_rewrite(query, select text) runs the select
-	"connectby":                  true, // tablefunc: builds SQL from its text arguments
-	"xpath_table":                true, // xml2: builds SQL from its text arguments
-	// A relation read by name, past deniedRelations (see checkRelation).
-	"get_raw_page": true, // pageinspect: the relation's raw pages, its rows included
-	// Writes in place, which neither READ ONLY nor the rollback stops.
-	"pg_truncate_visibility_map": true, // pg_visibility: truncates a visibility map
-	"brin_summarize_new_values":  true, // BRIN index maintenance: summarizes ranges
-	"brin_summarize_range":       true,
-	"brin_desummarize_range":     true, // deletes a range's summary
-	"gin_clean_pending_list":     true, // GIN index maintenance: flushes the pending list
-	"pg_nextoid":                 true, // advances the OID counter
-	// A transaction id, which READ ONLY allows and the rollback does not give
-	// back: each call uses one up for good, toward wraparound. Every role may
-	// execute these.
-	"txid_current":       true,
-	"pg_current_xact_id": true,
-	// Catalog writes, which READ ONLY allows too: the rollback undoes them,
-	// but each takes a transaction id. See also pg_restore_ and pg_clear_.
-	"pg_import_system_collations": true, // inserts into pg_collation
+	"pg_read_file":                true,
+	"pg_read_binary_file":         true,
+	"pg_stat_file":                true,
+	"pg_show_all_file_settings":   true,
+	"pg_current_logfile":          true,
+	"pg_hba_file_rules":           true,
+	"pg_ident_file_mappings":      true,
+	"pg_terminate_backend":        true,
+	"pg_cancel_backend":           true,
+	"pg_reload_conf":              true,
+	"pg_rotate_logfile":           true,
+	"pg_promote":                  true,
+	"set_config":                  true,
+	"pg_notify":                   true,
+	"setseed":                     true,
+	"pg_prewarm":                  true,
+	"setval":                      true,
+	"nextval":                     true,
+	"pg_stat_statements_reset":    true,
+	"pg_start_backup":             true,
+	"pg_stop_backup":              true,
+	"pg_sync_replication_slots":   true,
+	"http":                        true,
+	"http_get":                    true,
+	"http_post":                   true,
+	"http_put":                    true,
+	"http_patch":                  true,
+	"http_delete":                 true,
+	"http_head":                   true,
+	"query_to_xml":                true,
+	"query_to_xml_and_xmlschema":  true,
+	"query_to_xmlschema":          true,
+	"cursor_to_xml":               true,
+	"cursor_to_xmlschema":         true,
+	"ts_stat":                     true,
+	"ts_rewrite":                  true,
+	"connectby":                   true,
+	"xpath_table":                 true,
+	"get_raw_page":                true,
+	"pg_truncate_visibility_map":  true,
+	"brin_summarize_new_values":   true,
+	"brin_summarize_range":        true,
+	"brin_desummarize_range":      true,
+	"gin_clean_pending_list":      true,
+	"pg_nextoid":                  true,
+	"txid_current":                true,
+	"pg_current_xact_id":          true,
+	"pg_import_system_collations": true,
 }
 
-// deniedRelations are system catalogs and views that disclose the server's
-// configuration files or credentials. They are referenced as relations, not
-// function calls, so the guard rejects them where it meets a RangeVar.
-// pg_roles and pg_user, which mask passwords, stay allowed.
 var deniedRelations = map[string]bool{
-	// Configuration files: the same disclosure as the denied pg_read_file.
-	"pg_hba_file_rules":      true, // pg_hba.conf, the authentication policy
-	"pg_ident_file_mappings": true, // pg_ident.conf, the user name maps (PostgreSQL 15+)
-	"pg_file_settings":       true, // postgresql.conf and its include files, with their paths
-	// Credentials. Most are superuser-only, which role_check warn admits.
-	"pg_authid":            true, // password verifiers
-	"pg_shadow":            true, // the same, as a view
-	"pg_user_mapping":      true, // foreign-server passwords in umoptions
-	"pg_user_mappings":     true, // the same, shown to the mapped role itself
-	"user_mapping_options": true, // information_schema's view of them, likewise
-	"_pg_user_mappings":    true, // information_schema's base view of them
-	"pg_subscription":      true, // subscription connection strings, passwords included
+	"pg_hba_file_rules":      true,
+	"pg_ident_file_mappings": true,
+	"pg_file_settings":       true,
+	"pg_authid":              true,
+	"pg_shadow":              true,
+	"pg_user_mapping":        true,
+	"pg_user_mappings":       true,
+	"user_mapping_options":   true,
+	"_pg_user_mappings":      true,
+	"pg_subscription":        true,
 }
 
-// deniedPrefixes deny whole function families by name prefix.
 var deniedPrefixes = []string{
-	"dblink",          // dblink, dblink_exec, ...: a second connection, outside the transaction
-	"pg_background",   // pg_background_launch, ...: runs SQL passed as a string in a worker's own transaction
-	"lo_",             // large objects; lo_import and lo_export reach server files
-	"pg_logical_",     // logical decoding messages and slots
-	"pg_log_",         // pg_log_standby_snapshot writes WAL; pg_log_backend_memory_contexts makes another backend log
-	"pg_replication_", // replication origins and slots
-	"pg_create_",      // replication slots and restore points
-	"pg_drop_",        // replication slots
-	"pg_backup_",      // backup control
-	"pg_switch_",      // WAL segment switch
-	"pg_copy_",        // copies of replication slots
-	"pg_wal_replay_",  // pauses or resumes replay on a standby
-	"pg_ls_",          // pg_ls_dir and the other server directory listings
-	"pg_file_",        // adminpack (before PostgreSQL 17): writes, renames and removes server files
-	"pg_stat_reset",   // statistics resets, which are not transactional
-	// Advisory locks. The rollback does not release session ones, so they stay
-	// held on the pooled connection; transaction ones can still hold the
-	// application's own lock keys, read from pg_locks, stalling its job queues
-	// and migrations until statement_timeout. Unlocking is harmless.
+	"dblink",
+	"pg_background",
+	"lo_",
+	"pg_logical_",
+	"pg_log_",
+	"pg_replication_",
+	"pg_create_",
+	"pg_drop_",
+	"pg_backup_",
+	"pg_switch_",
+	"pg_copy_",
+	"pg_wal_replay_",
+	"pg_ls_",
+	"pg_file_",
+	"pg_stat_reset",
 	"pg_advisory_lock",
 	"pg_advisory_xact_lock",
 	"pg_try_advisory_lock",
 	"pg_try_advisory_xact_lock",
-	"database_to_xml", // database_to_xml*: runs a query per table of the database
-	"schema_to_xml",   // schema_to_xml*: runs a query per table of the schema
-	"table_to_xml",    // table_to_xml*: reads the relation it is given by name (see checkRelation)
-	"crosstab",        // tablefunc: crosstab and its wrappers run SQL passed as a string
-	"heap_force_",     // pg_surgery: kills or freezes rows in place, past READ ONLY and the rollback
-	"autoprewarm_",    // pg_prewarm, which PUBLIC may execute: writes a server file, itself or through a worker it starts
-	"pg_restore_",     // pg_restore_relation_stats, pg_restore_attribute_stats (PostgreSQL 18): write planner statistics to the catalogs
-	"pg_clear_",       // pg_clear_relation_stats, pg_clear_attribute_stats (PostgreSQL 18): clear them
+	"database_to_xml",
+	"schema_to_xml",
+	"table_to_xml",
+	"crosstab",
+	"heap_force_",
+	"autoprewarm_",
+	"pg_restore_",
+	"pg_clear_",
 	"pg_buffercache_evict",
 	"pg_get_logical_snapshot_",
 }

@@ -6,7 +6,6 @@ import (
 	"strings"
 )
 
-// maxDefinition is how many characters of a view definition Render shows.
 const maxDefinition = 2000
 
 // Render returns one line per schema: name, relation count and comment.
@@ -48,10 +47,8 @@ func (r Relation) line() string {
 	return r.Schema + "." + r.Name + ": " + strings.Join(facts, ", ") + comment(r.Comment)
 }
 
-// Render returns the description in a compact, DDL-like form: the relation
-// line, its columns, then constraints, indexes, policies, triggers and the
-// view definition when there are any. Indexes that implement a constraint
-// are shown only as the constraint.
+// Render returns the description in a compact, DDL-like form; an index that
+// implements a constraint shows only as the constraint.
 func (t TableDetail) Render() string {
 	lines := []string{t.line()}
 	for _, c := range t.Columns {
@@ -69,8 +66,6 @@ func (t TableDetail) Render() string {
 	return strings.Join(lines, "\n")
 }
 
-// line renders the column as in CREATE TABLE, with its comment and enum
-// labels after "--".
 func (c Column) line() string {
 	s := c.Name + " " + c.Type
 	if c.NotNull {
@@ -125,7 +120,6 @@ func (t TableDetail) policyLines() []string {
 	return lines
 }
 
-// line renders the policy as in CREATE POLICY, without "ON table".
 func (p Policy) line() string {
 	s := p.Name
 	if !p.Permissive {
@@ -163,7 +157,6 @@ func (l MatchList) Lines() []string {
 	return lines
 }
 
-// appendSection appends title and the indented lines, unless there are none.
 func appendSection(lines []string, title string, section []string) []string {
 	if len(section) == 0 {
 		return lines
@@ -175,7 +168,6 @@ func appendSection(lines []string, title string, section []string) []string {
 	return lines
 }
 
-// count returns "1 row" or "<n> rows".
 func count(n int64, unit string) string {
 	if n == 1 {
 		return "1 " + unit
@@ -183,7 +175,6 @@ func count(n int64, unit string) string {
 	return fmt.Sprintf("%d %ss", n, unit)
 }
 
-// comment returns " -- <s>" on one line, or "" when s is empty.
 func comment(s string) string {
 	if s == "" {
 		return ""
@@ -193,13 +184,10 @@ func comment(s string) string {
 
 var lineBreaks = regexp.MustCompile(`\s*\n\s*`)
 
-// oneLine joins the lines of s with single spaces, so multi-line comments and
-// pretty-printed expressions keep to one rendered line.
 func oneLine(s string) string {
 	return lineBreaks.ReplaceAllString(strings.TrimSpace(s), " ")
 }
 
-// quoteAll returns values as comma-separated SQL string literals.
 func quoteAll(values []string) string {
 	quoted := make([]string, len(values))
 	for i, v := range values {
@@ -208,12 +196,10 @@ func quoteAll(values []string) string {
 	return strings.Join(quoted, ", ")
 }
 
-// quote returns s as an SQL string literal.
 func quote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-// clip shortens s to limit characters and says how much was cut.
 func clip(s string, limit int) string {
 	r := []rune(s)
 	if len(r) <= limit {

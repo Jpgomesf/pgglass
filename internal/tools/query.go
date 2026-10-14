@@ -24,8 +24,6 @@ type queryArgs struct {
 	MaxRows     int      `json:"max_rows"`
 }
 
-// query runs pg_query: the guard, the role check, the engine, then the
-// result inline or spilled to a file. With connections, it fans out.
 func (h *Handlers) query(ctx context.Context, raw json.RawMessage, c *call) (string, error) {
 	var args queryArgs
 	if err := decode(raw, &args); err != nil {
@@ -52,8 +50,6 @@ func (h *Handlers) query(ctx context.Context, raw json.RawMessage, c *call) (str
 	return h.spill.OutputWithin("pg_query", args.Connection, res, format, h.room(c))
 }
 
-// checkQuery checks the arguments of a pg_query call that hold for every
-// connection, the guard last, and returns the format.
 func (h *Handlers) checkQuery(args queryArgs) (render.Format, error) {
 	format, err := h.format(args.Format)
 	if err != nil {
@@ -68,9 +64,6 @@ func (h *Handlers) checkQuery(args queryArgs) (render.Format, error) {
 	return format, guard.Check(args.SQL)
 }
 
-// queryOn runs the statement of args, which checkQuery accepted, on conn:
-// the search_path check, the role check, then the engine. It records the
-// role check's notice and the rows in c.
 func (h *Handlers) queryOn(ctx context.Context, conn string, args queryArgs, c *call) (*result.Result, error) {
 	searchPath, err := h.searchPath(conn, args.Schema)
 	if err != nil {
@@ -92,9 +85,6 @@ func (h *Handlers) queryOn(ctx context.Context, conn string, args queryArgs, c *
 	return res, nil
 }
 
-// checkParams accepts strings, numbers, booleans and nulls. Each is sent as
-// text, with numbers exactly as written, and Postgres gives it the type the
-// query implies. An array or object has no such text form.
 func checkParams(params []any) error {
 	for i, p := range params {
 		switch p.(type) {
@@ -106,8 +96,6 @@ func checkParams(params []any) error {
 	return nil
 }
 
-// format returns the format named name, or the configured one when name is
-// empty.
 func (h *Handlers) format(name string) (render.Format, error) {
 	switch {
 	case name == "":
@@ -119,10 +107,6 @@ func (h *Handlers) format(name string) (render.Format, error) {
 	}
 }
 
-// searchPath returns schema, or the connection's default_schema when schema
-// is empty. It refuses a schema longer than Postgres keeps a name and, with a
-// *guard.Violation, one whose functions the guard denies: on the search_path,
-// they could be called unqualified.
 func (h *Handlers) searchPath(conn, schema string) (string, error) {
 	if schema == "" {
 		schema = h.cfg.Connections[conn].DefaultSchema

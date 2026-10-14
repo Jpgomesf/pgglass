@@ -9,9 +9,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// pg_search output stays within InlineMaxBytes, as every tool's does: the
-// 900 matches below, 25 KB, are written to a spill file, one per row, and
-// summarized.
+// pg_search writes matches past InlineMaxBytes, here 900 of them, to a spill
+// file, one per row, and summarizes them.
 func TestSearchSpillsMatchesPastTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_search_spill"
@@ -42,7 +41,6 @@ func TestSearchSpillsMatchesPastTheInlineLimit(t *testing.T) {
 		t.Errorf("audit lines = %+v, want one ok with 900 rows", lines)
 	}
 
-	// Within the limit, the matches come inline, one per line.
 	if got := s.ok(t, "pg_search", map[string]any{"connection": "db", "pattern": "col_899"}); got != "public.wide.col_899_z: text" {
 		t.Errorf("pg_search col_899 = %q", got)
 	}

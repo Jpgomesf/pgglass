@@ -207,9 +207,8 @@ func TestConfigDefaultsToTheUserConfigDirectory(t *testing.T) {
 	}
 }
 
-// The server, configured by --config, serves the tools over stdin and
-// stdout, logs to stderr only, removes stale spill files on start and stops
-// when the client disconnects.
+// The server serves the tools over stdio, logs to stderr only, removes stale
+// spill files on start and stops when the client disconnects.
 func TestStdioServesTheTools(t *testing.T) {
 	dsn := testdb.DSN(t, testdb.RoleClean, testdb.DBApp)
 	path := writeConfig(t, map[string]any{

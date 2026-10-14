@@ -19,62 +19,38 @@ import (
 )
 
 const (
-	inlineMaxCell   = 200 // characters OutputWithin keeps per cell inline
+	inlineMaxCell   = 200
 	cleanupInterval = time.Hour
 	stampLayout     = "20060102T150405Z"
-	maxNamePart     = 32 // bytes kept of the tool and connection names in a file name
+	maxNamePart     = 32
 )
 
-// spillName matches the names a Store gives its files:
-// spill-<tool>-<conn>-<UTC timestamp>-<random>.csv.
 var spillName = regexp.MustCompile(`^spill-[A-Za-z0-9_-]*-[0-9]{8}T[0-9]{6}Z-[A-Za-z0-9]+\.csv$`)
 
 // Store writes oversized outputs under Dir and removes them after TTL. It is
 // safe for concurrent use and must not be copied after first use.
 type Store struct {
-	Dir            string           // created on demand
-	TTL            time.Duration    // spill files older than this are removed by Cleanup; <= 0 keeps them
-	InlineMaxBytes int              // the most a tool response takes; callers pass what their response leaves of it as the limit
-	Now            func() time.Time // clock; nil means time.Now
+	Dir            string
+	TTL            time.Duration
+	InlineMaxBytes int
+	Now            func() time.Time
 
 	mu          sync.Mutex
 	lastCleanup time.Time
 }
 
-// OutputWithin renders res in format f for a tool response, within limit
-// bytes. The inline rendering cuts cells to 200 characters and ends with a
-// footer that counts the rows and says when res was truncated, as in "(1000
-// rows; truncated: max_rows=1000)". When it fits in limit, OutputWithin
-// returns it.
-//
-// Otherwise OutputWithin writes the full result as CSV to a new file under
-// Dir, named spill-<tool>-<conn>-<timestamp>-<random>.csv with tool and conn
-// made safe for file names, and returns a summary instead: row and column
-// counts, the truncation flag and the file path, then the first 20 columns
-// with their types and the first 5 rows, as many of each as fit in limit. In
-// a limit too small for what a summary says of its file, the summary only
-// names the file and counts the rows. If the file cannot be written,
-// OutputWithin returns as many leading rows as fit in limit, with a note
-// saying why.
-//
-// OutputWithin runs Cleanup at most once an hour, ignoring its errors.
+// OutputWithin renders res in format f within limit bytes: inline, cells cut to
+// 200 characters, or else as a summary of a CSV spill file holding all of it.
 func (s *Store) OutputWithin(tool, conn string, res *result.Result, f render.Format, limit int) (string, error) {
 	return s.output(tool, conn, res, f, limit, inlineMaxCell)
 }
 
-// OutputWhole is OutputWithin without the cut of inline cells: a result
-// that fits in limit only with its cells cut goes to the file. It is for a
-// result whose every value counts, such as pg_profile's, and for lines a tool
-// found too large to return inline, which cut to 200 characters might fit,
-// but without their ends.
+// OutputWhole is OutputWithin without cutting inline cells, for results whose
+// every value counts: one that fits only with cells cut goes to the file.
 func (s *Store) OutputWhole(tool, conn string, res *result.Result, f render.Format, limit int) (string, error) {
 	return s.output(tool, conn, res, f, limit, 0)
 }
 
-// output returns res inline, its cells cut to maxCell characters (0 keeps
-// them whole), when that fits in limit bytes. Otherwise it writes res to a
-// file and returns its summary within limit or, when the file cannot be
-// written, as many leading rows as fit in limit, with a note saying why.
 func (s *Store) output(tool, conn string, res *result.Result, f render.Format, limit, maxCell int) (string, error) {
 	s.maybeCleanup()
 	inline, err := inlineText(res, f, maxCell)
@@ -91,8 +67,6 @@ func (s *Store) output(tool, conn string, res *result.Result, f render.Format, l
 	return summary(res, path, len(inline), limit)
 }
 
-// inlineText renders res as it is returned inline: its cells cut to maxCell
-// characters, 0 keeping them whole, then the footer.
 func inlineText(res *result.Result, f render.Format, maxCell int) (string, error) {
 	body, err := render.Render(res, f, maxCell)
 	if err != nil {
@@ -101,9 +75,8 @@ func inlineText(res *result.Result, f render.Format, maxCell int) (string, error
 	return body + footer(res), nil
 }
 
-// Cleanup removes the regular files in Dir that are named like spill files
-// and older than TTL, whichever Store wrote them. It leaves other files,
-// directories and symlinks alone.
+// Cleanup removes the regular files in Dir named like spill files and older
+// than TTL, whichever Store wrote them, and leaves everything else alone.
 func (s *Store) Cleanup() error {
 	if s.TTL <= 0 || s.Dir == "" {
 		return nil
@@ -125,7 +98,6 @@ func (s *Store) Cleanup() error {
 	return errors.Join(errs...)
 }
 
-// removeIfStale removes e if it is a spill file last modified before cutoff.
 func removeIfStale(dir string, e fs.DirEntry, cutoff time.Time) error {
 	if !e.Type().IsRegular() || !spillName.MatchString(e.Name()) {
 		return nil
@@ -135,7 +107,7 @@ func removeIfStale(dir string, e fs.DirEntry, cutoff time.Time) error {
 		err = os.Remove(filepath.Join(dir, e.Name()))
 	}
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil // removed by a concurrent Cleanup
+		return nil
 	}
 	return err
 }
@@ -149,7 +121,7 @@ func (s *Store) maybeCleanup() {
 	}
 	s.mu.Unlock()
 	if due {
-		_ = s.Cleanup() // best effort: the next run retries
+		_ = s.Cleanup()
 	}
 }
 
@@ -160,8 +132,6 @@ func (s *Store) now() time.Time {
 	return time.Now()
 }
 
-// write saves the full result as CSV in a new file under Dir and returns its
-// absolute path.
 func (s *Store) write(tool, conn string, res *result.Result) (string, error) {
 	if s.Dir == "" {
 		return "", errors.New("no spill directory configured")
@@ -193,8 +163,6 @@ func (s *Store) write(tool, conn string, res *result.Result) (string, error) {
 	return file.Name(), nil
 }
 
-// safeName keeps ASCII letters, digits, '-' and '_' of s, replaces anything
-// else with '_', and cuts the result to maxNamePart bytes.
 func safeName(s string) string {
 	name := strings.Map(func(r rune) rune {
 		if r == '-' || r == '_' || ('a' <= r && r <= 'z') || ('A' <= r && r <= 'Z') || ('0' <= r && r <= '9') {
@@ -208,14 +176,10 @@ func safeName(s string) string {
 	return name
 }
 
-// capped renders as many leading rows of res as fit in limit bytes, their
-// cells cut to maxCell characters as inline (0 keeps them whole), for when
-// the spill file could not be written.
 func capped(res *result.Result, f render.Format, cause error, limit, maxCell int) (string, error) {
 	total := len(res.Rows)
 	budget := limit - len(cappedNote(total, res, cause))
 	body, shown := "", 0
-	// Binary search for the most rows whose rendering fits in budget.
 	for lo, hi := 0, total; lo <= hi; {
 		mid := (lo + hi) / 2
 		out, err := render.Render(head(res, mid), f, maxCell)
@@ -236,7 +200,6 @@ func cappedNote(shown int, res *result.Result, cause error) string {
 	return note + truncation(res) + ")"
 }
 
-// footer counts the rows and says when res was truncated.
 func footer(res *result.Result) string {
 	return "(" + count(len(res.Rows), "row") + truncation(res) + ")"
 }
@@ -252,12 +215,10 @@ func truncation(res *result.Result) string {
 	}
 }
 
-// head returns res with only its first n rows.
 func head(res *result.Result, n int) *result.Result {
 	return &result.Result{Columns: res.Columns, Rows: res.Rows[:n]}
 }
 
-// count returns "1 row", "2 rows" and so on.
 func count(n int, noun string) string {
 	if n == 1 {
 		return "1 " + noun

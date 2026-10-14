@@ -20,29 +20,22 @@ import (
 	"github.com/jpgomesf/pgglass/internal/engine"
 )
 
-// longRunning is how long a query must have been running, or a transaction
-// open, to be listed as long-running.
 const longRunning = time.Minute
 
-// insufficientPrivilege is the SQLSTATE of "permission denied".
 const insufficientPrivilege = "42501"
 
 // Line is one line of the report.
 type Line struct {
-	Section string // e.g. "connections"
+	Section string
 	Detail  string
 }
 
-// Check runs every section through q and returns their lines, in order. A
-// section whose query fails in Postgres says so in its line, as not visible
-// to the role when it lacks the privilege; Check itself fails only when q
-// does otherwise, for example when the server is unreachable.
+// Check runs every section through q and returns their lines; a section that
+// fails in Postgres says so in its line, and other failures fail Check.
 func Check(ctx context.Context, q engine.Querier) ([]Line, error) {
 	return check(ctx, q, sections(longRunning))
 }
 
-// section is one part of the report: a query that returns one JSON value,
-// and how to render that value.
 type section struct {
 	name   string
 	sql    string
@@ -50,9 +43,6 @@ type section struct {
 	render func(data []byte, v viewer) ([]string, error)
 }
 
-// sections returns the sections of the report, in order. Queries running for
-// longer than minDuration, and the sessions in a transaction open for longer,
-// are long-running.
 func sections(minDuration time.Duration) []section {
 	return []section{
 		{"connections", connectionsSQL, nil, decoded(connectionLines)},
@@ -88,9 +78,6 @@ func check(ctx context.Context, q engine.Querier, all []section) ([]Line, error)
 	return lines, nil
 }
 
-// run returns the lines of s. When Postgres refuses its query for lack of
-// privilege, the one line says the section is not visible to the role; when
-// the query fails in Postgres otherwise, the line quotes the error.
 func (s section) run(ctx context.Context, q engine.Querier, v viewer) ([]string, error) {
 	data, err := queryValue(ctx, q, s.sql, s.params...)
 	var pgErr *engine.QueryError
@@ -105,8 +92,6 @@ func (s section) run(ctx context.Context, q engine.Querier, v viewer) ([]string,
 	return s.render(data, v)
 }
 
-// decoded returns a render function that decodes a JSON value into a T, then
-// renders it with render.
 func decoded[T any](render func(T, viewer) []string) func([]byte, viewer) ([]string, error) {
 	return func(data []byte, v viewer) ([]string, error) {
 		var value T
@@ -117,8 +102,6 @@ func decoded[T any](render func(T, viewer) []string) func([]byte, viewer) ([]str
 	}
 }
 
-// queryValue runs sql, which returns at most one row holding one JSON value,
-// and returns that value: null when no row or SQL NULL comes back.
 func queryValue(ctx context.Context, q engine.Querier, sql string, params ...any) ([]byte, error) {
 	res, err := q.Query(ctx, engine.Query{SQL: sql, Params: params, SearchPath: "pg_catalog"})
 	if err != nil {
@@ -133,8 +116,6 @@ func queryValue(ctx context.Context, q engine.Querier, sql string, params ...any
 	return []byte(*res.Rows[0][0]), nil
 }
 
-// decode reads the JSON value data into dst. A key the SQL misspells fails
-// loudly.
 func decode(data []byte, dst any) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()

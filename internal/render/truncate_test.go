@@ -20,7 +20,7 @@ func TestTruncate(t *testing.T) {
 		{"hello", 6, "hello", false},
 		{"hello!", 5, "hello…[+1 chars]", true},
 		{"", 3, "", false},
-		{"日本語", 3, "日本語", false}, // 9 bytes but 3 characters
+		{"日本語", 3, "日本語", false},
 		{"日本語です", 4, "日本語で…[+1 chars]", true},
 		{"aé☕b", 2, "aé…[+2 chars]", true},
 		{strings.Repeat("x", 250), 200, strings.Repeat("x", 200) + "…[+50 chars]", true},

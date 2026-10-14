@@ -22,11 +22,6 @@ import (
 
 const pgbouncerImage = "edoburu/pgbouncer:v1.25.2-p0"
 
-// pgbouncerINI runs PgBouncer in transaction mode with 4 server connections.
-// PgBouncer refuses startup parameters it does not know, and the engine sends
-// default_transaction_read_only: tracking it (PgBouncer 1.20+) restores it on
-// whichever server connection serves the client. Adding it to
-// ignore_startup_parameters instead would work too, without that layer.
 const pgbouncerINI = `[databases]
 * = host=pg port=5432
 
@@ -51,9 +46,8 @@ INSERT INTO s2.t VALUES ('s2');
 CREATE TYPE mood AS ENUM ('ok', 'meh');
 `
 
-// In transaction mode PgBouncer hands each transaction to any free server
-// connection, so per-query settings must stay inside the transaction and
-// statements must not outlive it.
+// In transaction mode, PgBouncer hands each transaction to any server
+// connection, so settings and statements must not outlive it.
 func TestThroughPgBouncerInTransactionMode(t *testing.T) {
 	if testing.Short() {
 		t.Skip("integration test skipped under -short")
@@ -62,7 +56,6 @@ func TestThroughPgBouncerInTransactionMode(t *testing.T) {
 	dsn := startPgBouncer(t) + "&pool_max_conns=50"
 	m := newManager(t, config.Defaults{MaxRows: 5}, dsn)
 
-	// 50 clients share 4 server connections; each query sees its own search_path.
 	var wg sync.WaitGroup
 	for i := range 50 {
 		wg.Add(1)
@@ -105,9 +98,6 @@ func TestThroughPgBouncerInTransactionMode(t *testing.T) {
 	}
 }
 
-// startPgBouncer starts Postgres, loaded with bouncerFixture, and PgBouncer
-// in transaction mode in front of it on a shared network. It returns a DSN
-// that reaches the database app through PgBouncer.
 func startPgBouncer(t *testing.T) string {
 	t.Helper()
 	ctx := t.Context()

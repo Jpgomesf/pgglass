@@ -16,10 +16,8 @@ BEGIN
     END IF;
 END $$;`
 
-// A column is NOT NULL only when Postgres has checked every row. From
-// PostgreSQL 18, a NOT VALID not-null constraint sets attnotnull without
-// checking the rows before it; earlier servers have no such constraint. On
-// every version, body, which holds a null, is described as nullable.
+// A column is NOT NULL only once Postgres checked every row: body, under a NOT
+// VALID not-null constraint from PostgreSQL 18, is nullable on every version.
 func TestANotValidNotNullColumnIsNullable(t *testing.T) {
 	const name = "introspect_not_valid"
 	testdb.CreateDatabase(t, name, notValidSQL)

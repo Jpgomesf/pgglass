@@ -8,10 +8,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// The two sides of a schema diff. In public, staging changes items in each
-// way pg_diff_schema compares, has a table prod lacks and lacks one prod
-// has. Its schema extra has one table more than prod's, and it lacks prod's
-// schema archive.
 const (
 	diffProdSQL = `CREATE TABLE items (id int PRIMARY KEY, name text NOT NULL, price numeric(10, 2) CHECK (price >= 0));
 		CREATE VIEW item_names AS SELECT id, name FROM items;
@@ -52,7 +48,6 @@ func TestDiffSchemaComparesTwoConnections(t *testing.T) {
 		"staging":    direct(testdb.DSN(t, testdb.RoleClean, "tools_diff_staging")),
 	}))
 
-	// Without schema, public is compared.
 	want := "schema public, prod → staging: 10 differences (- only in prod, + only in staging)\n" +
 		"+ table fresh\n" +
 		"~ column item_names.id: integer → bigint\n" +
@@ -79,7 +74,6 @@ func TestDiffSchemaComparesTwoConnections(t *testing.T) {
 		"schema archive, prod → prod_again: identical (0 relations)"; got != want {
 		t.Errorf("an empty schema = %q, want %q", got, want)
 	}
-	// The error names the side that lacks the schema.
 	if got, want := s.fails(t, "pg_diff_schema", diffArgs("prod", "staging", "schema", "archive")),
 		`staging: schema "archive" does not exist or the current role lacks USAGE on it`; !strings.HasSuffix(got, want) {
 		t.Errorf("a schema staging lacks = %q, want it to end with %q", got, want)
@@ -108,7 +102,6 @@ func TestDiffSchemaComparesTwoConnections(t *testing.T) {
 // take one line each, with both queries.
 func TestDiffSchemaComparesViewQueries(t *testing.T) {
 	t.Parallel()
-	// Queries that read no table deparse alike on every supported server.
 	testdb.CreateDatabase(t, "tools_diff_views_old", `CREATE VIEW answer AS SELECT 41 AS n;
 		CREATE MATERIALIZED VIEW answers AS SELECT 41 AS n;`)
 	testdb.CreateDatabase(t, "tools_diff_views_new", `CREATE VIEW answer AS SELECT 42 AS n;
@@ -138,7 +131,7 @@ func TestDiffSchemaNamesTheSideOverMaxBytes(t *testing.T) {
 		"small": direct(testdb.DSN(t, testdb.Superuser, "tools_diff_small")),
 		"large": direct(testdb.DSN(t, testdb.Superuser, "tools_diff_large")),
 	})
-	cfg.Defaults.MaxBytes = 1000 // small's structure fits, large's does not
+	cfg.Defaults.MaxBytes = 1000
 	s := connect(t, cfg)
 
 	const want = `large: read the structure of schema "public": catalog result exceeds the configured limits (max_bytes=1000); ` +
@@ -159,7 +152,6 @@ func TestDiffSchemaNamesTheSideOverMaxBytes(t *testing.T) {
 func TestDiffSchemaNamesTheSideOfAPostgresError(t *testing.T) {
 	t.Parallel()
 	testdb.CreateDatabase(t, "tools_diff_fine", "CREATE TABLE items (id int PRIMARY KEY)")
-	// The catalog query calls pg_get_constraintdef, which ro_clean may not call there.
 	testdb.CreateDatabase(t, "tools_diff_broken", `CREATE TABLE items (id int PRIMARY KEY);
 		REVOKE EXECUTE ON FUNCTION pg_catalog.pg_get_constraintdef(oid, boolean) FROM PUBLIC;`)
 	s := connect(t, newConfig(config.RoleCheckOff, map[string]config.Connection{
@@ -180,9 +172,8 @@ func TestDiffSchemaNamesTheSideOfAPostgresError(t *testing.T) {
 	}
 }
 
-// Both connections go through the role check: under warn, findings start
-// the result under the connection's name; under strict, either side with a
-// critical finding refuses the call.
+// Both connections go through the role check: warn puts findings first, under
+// the connection's name; strict refuses a critical finding on either side.
 func TestDiffSchemaChecksBothRoles(t *testing.T) {
 	t.Parallel()
 	warn := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
@@ -215,7 +206,7 @@ func TestDiffSchemaChecksBothRoles(t *testing.T) {
 func TestDiffSchemaNamesTheSideWhoseRoleCheckFails(t *testing.T) {
 	t.Parallel()
 	conns := appConns(t)
-	conns["down"] = direct("postgres://u@127.0.0.1:1/none?sslmode=disable") // nothing listens on port 1
+	conns["down"] = direct("postgres://u@127.0.0.1:1/none?sslmode=disable")
 	s := connect(t, newConfig(config.RoleCheckStrict, conns))
 
 	const want = "down: role check failed, and role_check strict refuses connections it cannot check: "
@@ -249,7 +240,6 @@ func TestDiffSchemaInvalidCalls(t *testing.T) {
 			t.Errorf("%v = %q, want it to contain %q", tc.args, got, tc.want)
 		}
 	}
-	// No connection is recorded until both are known and differ.
 	for _, line := range s.auditLines(t) {
 		if line.Connection != "" || line.Outcome != "error" {
 			t.Errorf("audit line %+v, want an error with no connection", line)
@@ -257,9 +247,8 @@ func TestDiffSchemaInvalidCalls(t *testing.T) {
 	}
 }
 
-// Postgres cuts a name to 63 bytes, so a longer schema argument matched the
-// schema its first 63 bytes name, and the first line repeated it whole. It is
-// refused; a schema of 63 bytes is compared.
+// A schema argument over 63 bytes, which Postgres would cut, is refused; one of
+// 63 bytes is compared.
 func TestDiffSchemaRefusesANameLongerThanPostgresKeeps(t *testing.T) {
 	t.Parallel()
 	schema := strings.Repeat("s", 63)

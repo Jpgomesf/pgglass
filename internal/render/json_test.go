@@ -13,8 +13,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/result"
 )
 
-// firstCell renders v as the only cell of a column of type oid and returns
-// the cell as raw JSON.
 func firstCell(t *testing.T, oid uint32, v *string, maxCell int) string {
 	t.Helper()
 	res := &result.Result{Columns: []result.Column{{Name: "v", TypeOID: oid}}, Rows: [][]*string{{v}}}
@@ -40,7 +38,7 @@ func TestJSONTypesCellsByColumnType(t *testing.T) {
 		oid     uint32
 		v       *string
 		maxCell int
-		want    string // the cell as raw JSON
+		want    string
 	}{
 		{"int2", pgtype.Int2OID, str("-32768"), 0, `-32768`},
 		{"int4", pgtype.Int4OID, str("42"), 0, `42`},

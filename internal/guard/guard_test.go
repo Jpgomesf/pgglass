@@ -45,13 +45,11 @@ func TestCheckRejectsInputItCannotParse(t *testing.T) {
 	for _, c := range []struct{ sql, want string }{
 		{"SELEC 1", `does not parse: syntax error at or near "SELEC" at character 1`},
 		{"SELECT (", "does not parse"},
-		// The lexer fails first, before the parser runs.
 		{"SELECT 'unterminated", "does not parse: unterminated quoted string"},
 		{"", "exactly one statement, got 0"},
 		{" \n\t", "got 0"},
 		{"-- SELECT 1", "got 0"},
 		{";;", "got 0"},
-		// The parser reads a C string, so it would only see "SELECT 1".
 		{"SELECT 1\x00; DROP TABLE app.orders", "NUL byte"},
 		{"SELECT '\xff'", "not valid UTF-8"},
 		{"SELECT 1 -- \xc3", "not valid UTF-8"},
@@ -61,8 +59,6 @@ func TestCheckRejectsInputItCannotParse(t *testing.T) {
 }
 
 func TestCheckRejectsSQLTooDeepToParse(t *testing.T) {
-	// At these depths the parser's stack overflows, and the overflowed
-	// instance can hang the next parse, so they must not reach the parser.
 	for _, sql := range []string{
 		"SELECT 1" + strings.Repeat(" + 1", 8_000),
 		"SELECT " + strings.Repeat("NOT ", 8_000) + "true",
@@ -73,7 +69,6 @@ func TestCheckRejectsSQLTooDeepToParse(t *testing.T) {
 		assertRejected(t, sql, "nested too deeply")
 	}
 
-	// The parser still works, error paths included.
 	if err := guard.Check("SELECT 1"); err != nil {
 		t.Errorf("Check(SELECT 1) = %v, want nil", err)
 	}

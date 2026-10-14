@@ -2,7 +2,7 @@ package introspect_test
 
 import (
 	"context"
-	_ "embed" // profile fixture SQL
+	_ "embed"
 	"errors"
 	"fmt"
 	"reflect"
@@ -14,7 +14,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// profileDB holds the profile fixture.
 const profileDB = "introspect_profile"
 
 //go:embed testdata/profile.sql
@@ -29,7 +28,6 @@ func profile(t *testing.T, q engine.Querier, schema, name, column string) *intro
 	return p
 }
 
-// columns indexes the columns of p by name.
 func columns(p *introspect.TableProfile) map[string]introspect.ColumnProfile {
 	byName := make(map[string]introspect.ColumnProfile, len(p.Columns))
 	for _, c := range p.Columns {
@@ -40,8 +38,6 @@ func columns(p *introspect.TableProfile) map[string]introspect.ColumnProfile {
 
 func ptrTo(s string) *string { return &s }
 
-// equalColumns is equal for columns, showing their statistics rather than
-// pointers to them.
 func equalColumns(t *testing.T, what string, got, want []introspect.ColumnProfile) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {
@@ -80,7 +76,6 @@ func TestProfileReadsPgStats(t *testing.T) {
 			Common: []string{`{"items": 2, "channel": "store"}`, `{"items": 4, "channel": "store"}`, `{"items": 3, "channel": "web"}`, `{"items": 1, "channel": "web"}`},
 			Freqs:  []float64{0.26, 0.24, 0.18, 0.16}}},
 	})
-	// Of the 15 most common values, the first 5.
 	if q := got["quantities"].Stats; q == nil || q.Distinct != -0.3 || len(q.Common) != 5 || len(q.Freqs) != 5 || q.Common[0] != "{1,4}" {
 		t.Errorf("quantities = %+v", q)
 	}
@@ -89,8 +84,6 @@ func TestProfileReadsPgStats(t *testing.T) {
 	equalColumns(t, "status alone", single.Columns, []introspect.ColumnProfile{got["status"]})
 }
 
-// loadProfile creates profileDB for the duration of the test and returns a
-// Querier that reads it as ro_clean.
 func loadProfile(t *testing.T) engine.Querier {
 	t.Helper()
 	testdb.CreateDatabase(t, profileDB, profileFixture)
@@ -104,7 +97,7 @@ func TestProfileSamplesATableNeverAnalyzed(t *testing.T) {
 		Columns: []introspect.ColumnProfile{
 			{Name: "id", Type: "integer", Distinct: 300},
 			{Name: "note", Type: "text", Nulls: 100, Distinct: 7},
-			{Name: "doc", Type: "json", Distinct: 2}, // json has no equality: compared as text
+			{Name: "doc", Type: "json", Distinct: 2},
 		}})
 	single := profile(t, clean, "public", "fresh", "note")
 	equalColumns(t, "fresh.note", single.Columns, []introspect.ColumnProfile{{Name: "note", Type: "text", Nulls: 100, Distinct: 7}})
@@ -117,7 +110,6 @@ func TestProfileSamplesAPartitionedTableByItsPartitionsRows(t *testing.T) {
 	if p.Rows != 40_000 || !p.Sampled || p.Percent != 25 || p.Sample <= 0 || p.Sample > introspect.SampleRows {
 		t.Fatalf("profile of events = %+v", p)
 	}
-	// Reading the first rows instead would find one partition only.
 	got := columns(p)
 	if id, part := got["id"], got["part"]; id.Distinct != p.Sample || id.Nulls != 0 || part.Distinct != 2 {
 		t.Errorf("id = %+v, part = %+v, in a sample of %d rows", id, part, p.Sample)
@@ -131,7 +123,6 @@ func TestProfileShowsOnlyTheColumnsTheRoleCanSelect(t *testing.T) {
 	}
 	equalColumns(t, "secrets", p.Columns, []introspect.ColumnProfile{
 		{Name: "id", Type: "integer", Stats: &introspect.ColumnStats{Distinct: -1, Width: 4, Min: ptrTo("1"), Max: ptrTo("30")}},
-		// Frequencies are real, a float4.
 		{Name: "label", Type: "text", Stats: &introspect.ColumnStats{Distinct: 3, Width: 8,
 			Common: []string{"label 0", "label 1", "label 2"}, Freqs: []float64{0.33333334, 0.33333334, 0.33333334}}},
 	})
@@ -147,7 +138,6 @@ func TestProfileShowsTheFirstColumnsAndCountsTheRest(t *testing.T) {
 		t.Fatalf("profile of wide: %d columns, %d more, %+v", len(p.Columns), p.More, p.Columns)
 	}
 	last := profile(t, clean, "public", "wide", "c60")
-	// Only nulls: no distinct values, and the width of the type.
 	equalColumns(t, "wide.c60", last.Columns, []introspect.ColumnProfile{
 		{Name: "c60", Type: "integer", Stats: &introspect.ColumnStats{NullFrac: 1, Width: 4}},
 	})
@@ -160,9 +150,9 @@ func TestProfileErrors(t *testing.T) {
 	clean := loadProfile(t)
 	for _, tc := range []struct{ name, column, want string }{
 		{"nope", "", `relation "public"."nope" does not exist or is not a table or materialized view`},
-		{"fresh_ids", "", `relation "public"."fresh_ids" does not exist or is not a table or materialized view`}, // a view
-		{"secrets_label_idx", "", `relation "public"."secrets_label_idx" does not exist`},                        // an index
-		{"FRESH", "", `relation "public"."FRESH" does not exist`},                                                // names are exact
+		{"fresh_ids", "", `relation "public"."fresh_ids" does not exist or is not a table or materialized view`},
+		{"secrets_label_idx", "", `relation "public"."secrets_label_idx" does not exist`},
+		{"FRESH", "", `relation "public"."FRESH" does not exist`},
 		{"fresh", "nope", `column "nope" of "public"."fresh" does not exist or the current role cannot SELECT it: ` +
 			"pg_stats shows only the columns a role can SELECT"},
 		{"secrets", "token", `column "token" of "public"."secrets" does not exist or the current role cannot SELECT it`},
@@ -186,7 +176,6 @@ func TestProfileSamplesRowsTheRoleMaySee(t *testing.T) {
 	if tenant := columns(p)["tenant"]; tenant.Distinct != 1 {
 		t.Errorf("tenant = %+v, want only acme", tenant)
 	}
-	// The owner is not subject to its policy.
 	if owner := profile(t, testdb.Querier(t, testdb.Superuser, testdb.DBApp), "app", "tenant_notes", ""); owner.Sampled {
 		t.Errorf("profile of tenant_notes as its owner = %+v, want pg_stats", owner)
 	}

@@ -129,7 +129,6 @@ func TestRenderTableDetailOmitsEmptySections(t *testing.T) {
 		Columns:  []introspect.Column{{Name: "id", Type: "integer"}},
 	}, "app.bare: table\n  id integer")
 
-	// Only indexes that implement a constraint: no indexes section.
 	wantRender(t, "constraint indexes only", introspect.TableDetail{
 		Relation:    introspect.Relation{Schema: "app", Name: "keyed", Kind: "table", Rows: 3},
 		Constraints: []introspect.Constraint{{Name: "keyed_pkey", Kind: "primary key", Definition: "PRIMARY KEY (id)"}},
@@ -145,7 +144,6 @@ func TestRenderTableDetailDefinition(t *testing.T) {
 	}
 	wantRender(t, "view", view, "app.v: view\n  a integer\ndefinition:\n SELECT 1 AS a;")
 
-	// Multi-byte characters count as one character each.
 	view.Definition = strings.Repeat("é", 2500)
 	want := "app.v: view\n  a integer\ndefinition:\n" + strings.Repeat("é", 2000) +
 		"\n-- truncated: 2000 of 2500 characters shown"

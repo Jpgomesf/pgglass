@@ -13,7 +13,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/result"
 )
 
-// script is an engine.Querier that answers the n-th query with the n-th reply.
 type script struct {
 	replies []reply
 	queries int
@@ -33,7 +32,6 @@ func (s *script) Query(context.Context, engine.Query) (*result.Result, error) {
 	return r.res, r.err
 }
 
-// row is a reply of one row holding values; a nil value is NULL.
 func row(values ...any) reply {
 	cells := make([]*string, len(values))
 	for i, v := range values {
@@ -44,7 +42,6 @@ func row(values ...any) reply {
 	return reply{res: &result.Result{Columns: make([]result.Column, len(cells)), Rows: [][]*string{cells}}}
 }
 
-// The queries Audit runs, in order, when the session user is the current user.
 const (
 	usersQuery = iota
 	attributesQuery
@@ -55,7 +52,6 @@ const (
 	warningFunctionsQuery
 )
 
-// clean returns the replies Postgres gives for a role with nothing to report.
 func clean() []reply {
 	return []reply{
 		usersQuery:             row("app", "app"),
@@ -139,7 +135,7 @@ func TestAuditFailsClosed(t *testing.T) {
 	boom := errors.New("connection reset")
 	failures := map[string]struct {
 		reply reply
-		want  string // in the error message
+		want  string
 	}{
 		"query error": {reply{err: boom}, boom.Error()},
 		"nil result":  {reply{}, "no result"},

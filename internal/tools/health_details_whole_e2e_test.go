@@ -9,12 +9,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// pg_health returned its lines through the spill store's Output, which cuts
-// every inline cell to 200 characters, so a finding longer than that lost
-// its end with no file to read it from: the unused index below, on a table
-// whose schema, name and index name take 63 characters each, came back as
-// "... on hhhhh…[+70 chars]", without its table or size, though the whole
-// result takes well under InlineMaxBytes.
+// pg_health returns findings past 200 characters whole, such as an unused index
+// on a table whose names take 63 characters each.
 func TestHealthReturnsLongFindingsWhole(t *testing.T) {
 	t.Parallel()
 	const name = "tools_health_whole"
@@ -32,7 +28,7 @@ func TestHealthReturnsLongFindingsWhole(t *testing.T) {
 		t.Fatalf("pg_health returned %d bytes, limit %d", len(got), config.InlineMaxBytes)
 	}
 	if strings.Contains(got, want) {
-		return // whole, inline
+		return
 	}
 	if !strings.Contains(got, "Full result: ") {
 		t.Fatalf("the unused index finding is cut and no spill file holds it whole:\n%s", got)

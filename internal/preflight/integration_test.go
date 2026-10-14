@@ -1,7 +1,7 @@
 package preflight_test
 
 import (
-	_ "embed" // fixture SQL
+	_ "embed"
 	"testing"
 
 	"github.com/jpgomesf/pgglass/internal/preflight"
@@ -13,7 +13,6 @@ func TestMain(m *testing.M) { testdb.Main(m) }
 //go:embed testdata/fixture.sql
 var fixtureSQL string
 
-// dbFixture holds testdata/fixture.sql: the roles pf_powers, pf_writer and pf_caller.
 const dbFixture = "preflight"
 
 func TestAudit(t *testing.T) {

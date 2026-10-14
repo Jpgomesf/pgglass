@@ -15,28 +15,17 @@ import (
 	"github.com/jpgomesf/pgglass/internal/result"
 )
 
-// maxFanout is the most connections one pg_query call may fan out to.
 const maxFanout = 10
 
-// fanoutColumn starts every row of a fanned-out result: the connection
-// the row came from.
 var fanoutColumn = result.Column{Name: "connection", TypeOID: pgtype.TextOID, TypeName: "text"}
 
-// fanoutResult is what the statement of a fanned-out call did on one
-// connection.
 type fanoutResult struct {
 	conn   string
-	res    *result.Result // nil when err is set
-	notice string         // the role check's, as a single call starts with
+	res    *result.Result
+	notice string
 	err    error
 }
 
-// fanout runs pg_query on each of args.Connections at once, the way a single
-// call runs on one: the guard once, then on each connection the role check
-// and the engine, with its limits. It writes one audit line per connection.
-// The rows come back under a first column, connection, unless the columns
-// differ; each connection that failed adds a line, and the call fails only
-// when every connection did.
 func (h *Handlers) fanout(ctx context.Context, args queryArgs, c *call) (string, error) {
 	if err := h.checkFanout(args); err != nil {
 		return "", err
@@ -59,8 +48,6 @@ func (h *Handlers) fanout(ctx context.Context, args queryArgs, c *call) (string,
 	return h.fanoutText(results, format, h.room(c))
 }
 
-// checkFanout checks that args name, in place of connection, 1 to maxFanout
-// configured connections, each once.
 func (h *Handlers) checkFanout(args queryArgs) error {
 	if args.Connection != "" {
 		return errors.New("pass connection or connections, not both")
@@ -79,8 +66,6 @@ func (h *Handlers) checkFanout(args queryArgs) error {
 	return nil
 }
 
-// queryEach runs the statement of args on every connection at once and
-// audits each run.
 func (h *Handlers) queryEach(ctx context.Context, args queryArgs, c *call) []fanoutResult {
 	results := make([]fanoutResult, len(args.Connections))
 	var wg sync.WaitGroup
@@ -98,15 +83,12 @@ func (h *Handlers) queryEach(ctx context.Context, args queryArgs, c *call) []fan
 	return results
 }
 
-// on returns a copy of c for its run on the connection conn.
 func (c *call) on(conn string) *call {
 	cc := *c
 	cc.connection = conn
 	return &cc
 }
 
-// fanoutNotices joins the role check notices of results, each after the
-// name of its connection.
 func fanoutNotices(results []fanoutResult) string {
 	var b strings.Builder
 	for _, r := range results {
@@ -117,11 +99,6 @@ func fanoutNotices(results []fanoutResult) string {
 	return b.String()
 }
 
-// fanoutText renders results within room bytes: the rows of the connections
-// that succeeded, then a line for each that failed, its error as a single
-// call reports it. The lines share half of room, each cut to its share, and
-// the rows take the rest. When none succeeded, it fails with the lines, which
-// then share all of room.
 func (h *Handlers) fanoutText(results []fanoutResult, format render.Format, room int) (string, error) {
 	var ok, failed []fanoutResult
 	for _, r := range results {
@@ -145,29 +122,15 @@ func (h *Handlers) fanoutText(results []fanoutResult, format render.Format, room
 	return text + lines, nil
 }
 
-// failureLines renders a line for each of failed: its connection, then its
-// error as a single call reports it, cut in the middle to an equal share of
-// room.
 func failureLines(failed []fanoutResult, room int) string {
 	lines := make([]string, len(failed))
 	for i, r := range failed {
 		line := r.conn + ": " + strings.ReplaceAll(errorText(r.err), "\n", "\n  ")
-		lines[i] = cutMiddle(line, room/len(failed)-1) // less its line break
+		lines[i] = cutMiddle(line, room/len(failed)-1)
 	}
 	return strings.Join(lines, "\n")
 }
 
-// fanoutRows renders ok, results that all succeeded, within room bytes:
-// merged when their columns match, otherwise one section per connection.
-// Either way, what does not fit is spilled to a file. A section names its
-// file even past its share, so the sections can take more than room, as long
-// connection names and a long spill directory path can make them. Then,
-// since a section that fit its share came back inline with its cells cut,
-// they are rendered again with no room, so that every section spills and
-// each connection's rows are whole in a file; the first files of those that
-// had spilled already are left to the spill TTL. If the sections still take
-// more than room, they go to one more file, a line each, and fanoutRows
-// returns its summary.
 func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format, room int) (string, error) {
 	names := make([]string, len(ok))
 	for i, r := range ok {
@@ -186,11 +149,6 @@ func (h *Handlers) fanoutRows(ok []fanoutResult, format render.Format, room int)
 	return h.linesOutput("pg_query", strings.Join(names, "_"), "line", strings.Split(text, "\n"), "", room)
 }
 
-// fanoutSections renders ok, results whose columns differ, as a section per
-// connection under its name, after a line that says why. The sections share
-// room with their names and that line: a section past its share is spilled
-// to a file of its own, which it names even when its share is too small for
-// that.
 func (h *Handlers) fanoutSections(ok []fanoutResult, format render.Format, room int) (string, error) {
 	sections := []string{"Columns differ across connections, so each has its own result."}
 	room -= len(sections[0])
@@ -207,9 +165,6 @@ func (h *Handlers) fanoutSections(ok []fanoutResult, format render.Format, room 
 	return strings.Join(sections, "\n\n"), nil
 }
 
-// sameFanoutColumns reports whether the results in ok have the same
-// columns, by name and type name: an enum or another user-defined type has a
-// different OID in each database.
 func sameFanoutColumns(ok []fanoutResult) bool {
 	first := ok[0].res.Columns
 	for _, r := range ok[1:] {
@@ -222,9 +177,6 @@ func sameFanoutColumns(ok []fanoutResult) bool {
 	return true
 }
 
-// mergeFanout returns the rows of ok, results with the same columns, in
-// their order, each after the name of its connection. The merged result is
-// truncated when any of ok is, and says which.
 func mergeFanout(ok []fanoutResult) *result.Result {
 	merged := &result.Result{Columns: append([]result.Column{fanoutColumn}, ok[0].res.Columns...)}
 	var cut []string

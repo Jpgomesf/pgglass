@@ -12,7 +12,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// fanoutArgs are the arguments of a pg_query call on conns.
 func fanoutArgs(conns []string, sql string, more ...any) map[string]any {
 	a := args("", sql, more...)
 	delete(a, "connection")
@@ -20,7 +19,6 @@ func fanoutArgs(conns []string, sql string, more ...any) map[string]any {
 	return a
 }
 
-// fanoutLine is the audit line of a pg_query call that ran sql on conn.
 func fanoutLine(conn, sql string, rows int, truncated bool, outcome, sqlState string) auditLine {
 	return auditLine{Msg: "tool call", Tool: "pg_query", Connection: conn, SQLSHA256: sha12(sql), SQLLen: len(sql),
 		Rows: rows, Truncated: truncated, Outcome: outcome, SQLState: sqlState}
@@ -33,13 +31,6 @@ func checkFanoutAudit(t *testing.T, got, want []auditLine) {
 	}
 }
 
-// fanoutConns creates two databases whose items tables share id and name,
-// the second's with a price too, and returns connections to them and to the
-// app fixture:
-//
-//   - one and two: ro_clean on each database
-//   - netted: ro_clean on the second, with default_schema net
-//   - leaky and super: ro_leaky and the superuser on the app fixture
 func fanoutConns(t *testing.T) map[string]config.Connection {
 	t.Helper()
 	const one, two = "tools_fanout_one", "tools_fanout_two"
@@ -136,7 +127,6 @@ func testFanoutLimits(t *testing.T, s *session) {
 	}
 	checkFanoutAudit(t, lines, []auditLine{fanoutLine("one", sql, 2, true, "ok", ""), fanoutLine("two", sql, 2, false, "ok", "")})
 
-	// Each connection keeps max_rows (1000) rows; together they spill.
 	summary := s.ok(t, "pg_query", fanoutArgs([]string{"one", "two"}, "SELECT g FROM generate_series(1, 1500) g"))
 	if len(summary) > config.InlineMaxBytes ||
 		!strings.Contains(summary, "2000 rows × 2 columns, truncated=true (one max_rows=1000, two max_rows=1000).") {
@@ -198,8 +188,6 @@ func testFanoutGuard(t *testing.T, s *session) {
 		fanoutLine("two", deleteSQL, 0, false, "guard_reject", ""),
 	})
 
-	// netted's default_schema is net, which the guard refuses as the
-	// search_path: only netted fails.
 	const sql = "SELECT count(*) AS n FROM items"
 	text, isErr, lines = s.auditedCall(t, "pg_query", fanoutArgs([]string{"netted", "one"}, sql))
 	if want := "connection\tn\none\t3\n(1 row)\n\n" +
@@ -209,8 +197,6 @@ func testFanoutGuard(t *testing.T, s *session) {
 	checkFanoutAudit(t, lines, []auditLine{fanoutLine("netted", sql, 0, false, "guard_reject", ""), fanoutLine("one", sql, 1, false, "ok", "")})
 }
 
-// Run one after the other, the second query would start after the first
-// ended.
 func testFanoutInParallel(t *testing.T, s *session) {
 	text := s.ok(t, "pg_query", fanoutArgs([]string{"one", "two"},
 		"SELECT extract(epoch FROM now()) AS started, extract(epoch FROM clock_timestamp()) AS ended FROM pg_sleep(1)"))
@@ -233,9 +219,8 @@ func testFanoutInParallel(t *testing.T, s *session) {
 	}
 }
 
-// Arguments that name no connection to run on fail with one audit line for
-// no connection; from the guard on, every connection gets its own. These
-// fail before any query, so they need no database.
+// Arguments naming no connection fail with one audit line; from the guard on,
+// each connection gets its own. No database is needed.
 func TestFanoutArgumentErrors(t *testing.T) {
 	conns := map[string]config.Connection{}
 	var eleven []string

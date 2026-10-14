@@ -7,11 +7,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// CREATE EXTENSION pg_prewarm leaves autoprewarm_dump_now, which writes
-// $PGDATA/autoprewarm.blocks, and autoprewarm_start_worker, which starts a
-// worker that rewrites it, executable by PUBLIC. So ro_clean, which has
-// nothing else to report, gets a critical finding there, and role_check
-// strict refuses it.
+// pg_prewarm lets PUBLIC execute autoprewarm_*, which write a server file, so
+// ro_clean gets a critical finding, which role_check strict refuses.
 func TestAuditFlagsAutoprewarm(t *testing.T) {
 	const database = "preflight_prewarm"
 	testdb.CreateDatabase(t, database, "CREATE EXTENSION pg_prewarm")

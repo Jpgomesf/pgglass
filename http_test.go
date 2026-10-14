@@ -171,9 +171,8 @@ func listConnections(t *testing.T, session *mcp.ClientSession) string {
 
 const unusedDSN = "postgres://127.0.0.1:1/none?sslmode=disable"
 
-// Over Streamable HTTP, a client gets the same tools as over stdio, on the
-// newest protocol revision, each call is audited on stderr, and a call in
-// flight when the server is told to stop still gets its result.
+// Over Streamable HTTP, a client gets the stdio tools on the newest revision,
+// each call is audited on stderr, and a call in flight at shutdown completes.
 func TestHTTPServesTheTools(t *testing.T) {
 	dsn := testdb.DSN(t, testdb.RoleClean, testdb.DBApp)
 	isolateHome(t)
@@ -287,9 +286,8 @@ func TestHTTPRequiresTheBearerToken(t *testing.T) {
 	}
 }
 
-// A browser page on another origin, or one that rebinds its own name to
-// 127.0.0.1, must not reach the server: requests with a foreign Origin or
-// Host are refused with 403.
+// A page on another origin, or one rebinding its name to 127.0.0.1, gets 403:
+// requests with a foreign Origin or Host are refused.
 func TestHTTPRefusesForeignOriginsAndHosts(t *testing.T) {
 	isolateHome(t)
 	t.Setenv(authEnv, "")

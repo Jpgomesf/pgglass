@@ -15,9 +15,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/config"
 )
 
-// primeSecret puts a secret, under no AWS profile, in the shared cache with
-// the given age, and removes it when the test ends. Each test uses a unique
-// name so the shared cache never crosses tests.
 func primeSecret(t *testing.T, name string, value map[string]string, age time.Duration) {
 	t.Helper()
 	awsSecrets.mu.Lock()
@@ -26,8 +23,6 @@ func primeSecret(t *testing.T, name string, value map[string]string, age time.Du
 	t.Cleanup(func() { awsSecrets.Invalidate("", name) })
 }
 
-// fakeSecrets stands in for AWS Secrets Manager: it holds a secret per AWS
-// profile and name, and counts the fetches.
 type fakeSecrets struct {
 	secrets map[secretKey]map[string]string
 	fetches int
@@ -42,8 +37,6 @@ func (f *fakeSecrets) fetch(_ context.Context, awsProfile, secretName string) (m
 	return maps.Clone(secret), nil
 }
 
-// fakeAWS makes the shared cache fetch from secrets instead of AWS, until the
-// test ends and drops what it cached. Tests that call it must not be parallel.
 func fakeAWS(t *testing.T, secrets map[secretKey]map[string]string) *fakeSecrets {
 	t.Helper()
 	f := &fakeSecrets{secrets: secrets}
@@ -58,12 +51,10 @@ func fakeAWS(t *testing.T, secrets map[secretKey]map[string]string) *fakeSecrets
 	return f
 }
 
-// dbSecret is a complete secret that holds password.
 func dbSecret(password string) map[string]string {
 	return map[string]string{"host": "db.example.internal", "db_name": "app", "user": "ro", "password": password}
 }
 
-// resolvedPassword resolves conn and returns the password of its DSN.
 func resolvedPassword(t *testing.T, conn config.Connection) string {
 	t.Helper()
 	dsn, err := AWSSecretsSource{}.Resolve(t.Context(), "c", conn)
@@ -130,7 +121,7 @@ func TestAWSSecretsCacheKeysByProfileAndName(t *testing.T) {
 		return config.Connection{Source: "aws_secrets_manager", AWSProfile: profile, SecretName: name}
 	}
 
-	for round := range 2 { // the second round comes from the cache
+	for round := range 2 {
 		for _, profile := range profiles {
 			if got := resolvedPassword(t, conn(profile)); got != "pw-"+profile {
 				t.Errorf("round %d, profile %q: password = %q, want pw-%s", round, profile, got, profile)
@@ -156,7 +147,6 @@ func TestAWSSecretsCacheGetReturnsCachedValue(t *testing.T) {
 	want := map[string]string{"host": "h", "user": "u"}
 	primeSecret(t, "resolver_test_get", want, time.Minute)
 
-	// A fresh entry is returned without contacting AWS (no profile needed).
 	got, err := awsSecrets.Get(t.Context(), "", "resolver_test_get")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
@@ -166,8 +156,6 @@ func TestAWSSecretsCacheGetReturnsCachedValue(t *testing.T) {
 	}
 }
 
-// resolveSecret resolves a connection whose cached secret is secret, and
-// parses the DSN as pgx does.
 func resolveSecret(t *testing.T, name string, secret map[string]string) *pgconn.Config {
 	t.Helper()
 	primeSecret(t, name, secret, time.Minute)
@@ -188,7 +176,7 @@ func TestAWSSecretsSourceResolveFromCache(t *testing.T) {
 		"has space",
 		`it's`,
 		`back\slash`,
-		"x dbname=other host=elsewhere", // must not set other parameters
+		"x dbname=other host=elsewhere",
 		"p@ss:w/rd?#%",
 	} {
 		got := resolveSecret(t, fmt.Sprintf("resolver_test_full_%d", i), map[string]string{
@@ -200,7 +188,6 @@ func TestAWSSecretsSourceResolveFromCache(t *testing.T) {
 		}
 	}
 
-	// Port defaults to 5432 when the secret omits it; an IPv6 host keeps its colons.
 	got := resolveSecret(t, "resolver_test_noport", map[string]string{"host": "::1", "db_name": "d", "user": "u", "password": "p"})
 	if got.Host != "::1" || got.Port != 5432 {
 		t.Errorf("without a port: host %s, port %d; want ::1 and 5432", got.Host, got.Port)
@@ -213,7 +200,6 @@ func TestSecretValue(t *testing.T) {
 		t.Errorf("secretValue of a JSON string = %v, %v", got, err)
 	}
 
-	// A binary secret has no string value: an error, not a panic.
 	_, err = secretValue("bin", &secretsmanager.GetSecretValueOutput{SecretBinary: []byte{1, 2, 3}})
 	if err == nil || !strings.Contains(err.Error(), "binary secrets are not supported") {
 		t.Errorf("secretValue of a binary secret: err = %v", err)
@@ -227,13 +213,11 @@ func TestSecretValue(t *testing.T) {
 
 func TestAWSSecretsSourceResolveValidates(t *testing.T) {
 	var s AWSSecretsSource
-	// No secret_name: rejected before any AWS call.
 	if _, err := s.Resolve(t.Context(), "c", config.Connection{}); err == nil ||
 		!strings.Contains(err.Error(), "missing required fields: secret_name") {
 		t.Errorf("Resolve without secret_name: err = %v", err)
 	}
 
-	// A cached secret missing required fields is reported, not used.
 	primeSecret(t, "resolver_test_partial", map[string]string{"host": "h"}, time.Minute)
 	_, err := s.Resolve(t.Context(), "c", config.Connection{SecretName: "resolver_test_partial"})
 	if err == nil || !strings.Contains(err.Error(), "missing required fields") {

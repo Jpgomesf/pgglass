@@ -19,8 +19,6 @@ import (
 
 func TestMain(m *testing.M) { testdb.Main(m) }
 
-// recorder is a Querier that records the query it is given and fails it, so
-// Run stops there.
 type recorder struct{ got engine.Query }
 
 var errRecorded = errors.New("recorded")
@@ -84,7 +82,6 @@ func TestNewRejects(t *testing.T) {
 	}
 }
 
-// run explains sql through q.
 func run(t *testing.T, q engine.Querier, sql string, analyze bool) (string, error) {
 	t.Helper()
 	stmt, err := explain.New(sql, analyze)
@@ -94,8 +91,6 @@ func run(t *testing.T, q engine.Querier, sql string, analyze bool) (string, erro
 	return stmt.Run(t.Context(), q, "")
 }
 
-// summaryOf runs sql and checks its summary against the lines of want, each
-// a regular expression.
 func summaryOf(t *testing.T, q engine.Querier, sql string, analyze bool, want ...string) {
 	t.Helper()
 	got, err := run(t, q, sql, analyze)
@@ -130,7 +125,6 @@ func TestUnindexedFilterIsFlaggedAsASeqScan(t *testing.T) {
 		`  Seq Scan on app.events: full scan of ~20000 rows`)
 }
 
-// flagsOf runs sql and returns the flag lines of its summary.
 func flagsOf(t *testing.T, q engine.Querier, sql string, analyze bool) []string {
 	t.Helper()
 	got, err := run(t, q, sql, analyze)
@@ -144,8 +138,6 @@ func flagsOf(t *testing.T, q engine.Querier, sql string, analyze bool) []string 
 	return strings.Split(flags, "\n")
 }
 
-// wantFlags checks that each of want, a regular expression, matches one of
-// flags in order.
 func wantFlags(t *testing.T, flags []string, want ...string) {
 	t.Helper()
 	if len(flags) != len(want) {
@@ -213,11 +205,8 @@ func TestALimitStopsTheScanEarly(t *testing.T) {
 	}
 }
 
-// A Limit does not hide a scan that reads the whole relation: one that finds
-// no row to return, one under a sort, which reads every row before the Limit
-// stops it, and one that the offset makes read 15010 rows, or 15005 when an
-// outer Limit reads 5 rows of the offset's Limit, which skips its 15000 rows
-// all the same.
+// A Limit does not hide a scan that reads the whole relation: one finding no
+// row, one under a sort, and one an offset makes read past 15000 rows.
 func TestALimitStillFlagsAFullScan(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	for _, sql := range []string{
@@ -232,10 +221,8 @@ func TestALimitStillFlagsAFullScan(t *testing.T) {
 	}
 }
 
-// Without analyze, the scan under an outer Limit and an offset's Limit costs
-// the 15000 rows the offset skips and the 5 the outer Limit reads; neither
-// Limit costs more than a fraction of its own, as EXPLAIN costs them: nothing
-// from PostgreSQL 16, and 0.05 for the outer one on 15.
+// Without analyze, a scan under an outer Limit and an offset's Limit is costed
+// for the 15000 rows skipped plus the 5 read, the Limits as EXPLAIN costs them.
 func TestAnOffsetUnderALimitIsCostedInFull(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	summaryOf(t, q, "SELECT * FROM (SELECT id FROM app.events OFFSET 15000 LIMIT 100) s LIMIT 5", false,
@@ -248,15 +235,8 @@ func TestAnOffsetUnderALimitIsCostedInFull(t *testing.T) {
 		`  Seq Scan on app\.events: full scan of ~20000 rows`)
 }
 
-// With analyze, a Limit returns fewer rows than it planned whether it ran out
-// of rows or something stopped it first: it runs once per outer row and some
-// rows have fewer matches (9.43 rows per loop where 3 of 53 customers have no
-// event), an EXISTS reads its first row only, a LIMIT 1 above reads one row
-// of a CTE of 100, or its count is no constant and planned as 10% of its
-// input. EXPLAIN does not say which, so the scan under it returns fewer rows
-// than planned without a flag, even when the Limit ran out of rows: in the
-// last query no event matches, and the index scan reads all 20000 rows for
-// none.
+// With analyze, a scan under a Limit that returns fewer rows than planned is
+// not flagged: EXPLAIN does not say whether the Limit stopped it or it ran out.
 func TestAScanALimitIsPlannedToStopIsNotFlaggedForTooFewRows(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	for _, sql := range []string{
@@ -278,11 +258,8 @@ func TestAScanALimitIsPlannedToStopIsNotFlaggedForTooFewRows(t *testing.T) {
 	}
 }
 
-// count(*) OVER () reads the whole partition before its first row, so the
-// Limit above it does not stop the scan under it. With analyze, the rows the
-// scan read flag it on every version. Without, PostgreSQL 17 and later cost
-// the window's startup to cover the scan, which is then costed and flagged in
-// full; earlier planners give the window no such startup cost.
+// A Limit above count(*) OVER () cannot stop the scan under it, which is
+// flagged with analyze on every version, and without it from PostgreSQL 17.
 func TestALimitAboveAWindowOverTheWholePartition(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	const sql = "SELECT id, count(*) OVER () FROM app.events LIMIT 10"
@@ -348,8 +325,6 @@ func TestErrorPositionsPointIntoTheSelect(t *testing.T) {
 	}
 }
 
-// limited returns a Querier on the app fixture, as ro_clean, with defaults
-// changed by set.
 func limited(t *testing.T, set func(*config.Defaults)) engine.Querier {
 	t.Helper()
 	defaults := config.Defaults{}.WithDefaults()
@@ -408,13 +383,8 @@ func TestPlanLargerThanMaxBytesIsAnError(t *testing.T) {
 	}
 }
 
-// An EXISTS reads its subquery up to its first row, and the planner charges
-// it that row: run once or once per outer row, the scan under one is costed
-// for that row and flagged neither as a full scan nor, with analyze, for
-// returning one row. One planned to find a single row, like one that finds
-// none, reads all of it, and so does a count over a materialized CTE that
-// selects no column: both are flagged. The startup cost of a Limit holds only
-// that first row of an EXISTS, so the scan its offset skips is still flagged.
+// A scan under an EXISTS is costed for its first row and not flagged, unless it
+// reads the whole relation, as one finding no row or planned for one does.
 func TestAnExistsReadsItsSubqueryUpToItsFirstRow(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	const initplan = "SELECT EXISTS (SELECT 1 FROM app.events WHERE kind = 'click')"
@@ -443,9 +413,8 @@ func TestAnExistsReadsItsSubqueryUpToItsFirstRow(t *testing.T) {
 	}
 }
 
-// From PostgreSQL 18, EXPLAIN reports where a window aggregate kept its
-// rows: 500k of them do not fit in the default work_mem of 4MB, and the
-// window is flagged. Earlier versions do not report it.
+// From PostgreSQL 18, a window aggregate whose 500k rows overflow the default
+// 4MB work_mem is flagged; earlier versions do not report where rows were kept.
 func TestAnalyzeFlagsAWindowThatSpilled(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	const sql = "SELECT g, count(*) OVER () FROM generate_series(1, 500000) g"
@@ -458,9 +427,8 @@ func TestAnalyzeFlagsAWindowThatSpilled(t *testing.T) {
 	wantFlags(t, flagsOf(t, q, sql, true), `WindowAgg: spilled to disk \(\d+ kB\)`)
 }
 
-// From PostgreSQL 18, EXPLAIN gives the rows of each loop to two decimals:
-// 4 in 5 events have an active customer, so the LIMIT 1 returns 0.8 rows per
-// event, which earlier versions round to 1.
+// From PostgreSQL 18, the rows of each loop keep two decimals: the LIMIT 1
+// returns 0.8 rows per event, which earlier versions round to 1.
 func TestAnalyzeShowsTheRowsOfEachLoop(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	const sql = `SELECT e.id FROM app.events e CROSS JOIN LATERAL

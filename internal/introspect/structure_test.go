@@ -2,7 +2,7 @@ package introspect_test
 
 import (
 	"context"
-	_ "embed" // changes to the app fixture
+	_ "embed"
 	"errors"
 	"fmt"
 	"maps"
@@ -20,8 +20,6 @@ import (
 //go:embed testdata/app_changes.sql
 var appChangesSQL string
 
-// structure reads the structure of schema through q, failing the test on an
-// error.
 func structure(t *testing.T, q engine.Querier, schema string) introspect.SchemaStructure {
 	t.Helper()
 	s, err := introspect.Structure(t.Context(), q, schema)
@@ -74,9 +72,6 @@ func TestStructureQueryPinsSearchPathAndDecodes(t *testing.T) {
 func TestStructureOfApp(t *testing.T) {
 	q := testdb.Querier(t, testdb.RoleClean, testdb.DBApp)
 	got := structure(t, q, "app")
-	// The view and the materialized view have their query as Table reads it,
-	// which TestTableDescribesViews checks; how the server version spells the
-	// materialized view's varies.
 	query := func(name string) string { return describe(t, q, "app", name).Definition }
 	equal(t, "Structure(app)", got, introspect.SchemaStructure{
 		"audit_log": {
@@ -107,8 +102,6 @@ func TestStructureOfApp(t *testing.T) {
 				"profile":     "json",
 			},
 			Constraints: defs{"customers_pkey": "PRIMARY KEY (id)"},
-			// The primary key's index is left out, but not
-			// customers_email_key: a unique index with no constraint.
 			Indexes: defs{
 				"customers_email_key":      "CREATE UNIQUE INDEX customers_email_key ON app.customers USING btree (email)",
 				"customers_lower_name_idx": "CREATE INDEX customers_lower_name_idx ON app.customers USING btree (lower(name))",
@@ -166,7 +159,6 @@ func TestStructureOfApp(t *testing.T) {
 func TestStructureOfLab(t *testing.T) {
 	loadLab(t)
 	got := structure(t, testdb.Querier(t, testdb.RoleClean, labDB), "lab")
-	// As in FirstTables: no partitions, and not lab.hidden, which ro_clean cannot read.
 	equal(t, "relations", slices.Sorted(maps.Keys(got)),
 		[]string{"Mixed Case", "child", "measurements", "parent", "remote_items", "secrets", "wide"})
 	equal(t, "child", got["child"], introspect.RelationStructure{
@@ -187,14 +179,12 @@ func TestStructureOfLab(t *testing.T) {
 			"child_parent_mood_key": "UNIQUE (parent_id, mood)",
 			"child_qty_positive":    "CHECK (qty > 0)",
 		},
-		// Each index implements a constraint, so none is listed.
 		Policies: defs{
 			"child_guard":  "AS RESTRICTIVE FOR ALL TO public USING (price >= 0::numeric) WITH CHECK (price < 1000::numeric)",
 			"child_insert": "FOR INSERT TO public WITH CHECK (qty < 100)",
 			"child_read":   "FOR SELECT TO ro_clean, ro_leaky USING (qty > 0)",
 		},
 	})
-	// The exclusion constraint's index is not listed either.
 	equal(t, "parent", got["parent"], introspect.RelationStructure{
 		Kind:    "table",
 		Columns: defs{"id": "integer NOT NULL", "name": "text NOT NULL", "active": "tstzrange"},
@@ -214,10 +204,8 @@ func TestStructureOfLab(t *testing.T) {
 	} {
 		equal(t, name, got[name], want)
 	}
-	// ro_clean may not read secrets.token.
 	equal(t, "secrets columns", got["secrets"].Columns, defs{"id": "integer NOT NULL", "label": "text"})
 
-	// The superuser reads lab.hidden and secrets.token; partitions are still left out.
 	got = structure(t, testdb.Querier(t, testdb.Superuser, labDB), "lab")
 	equal(t, "relations as the superuser", slices.Sorted(maps.Keys(got)),
 		[]string{"Mixed Case", "child", "hidden", "measurements", "parent", "remote_items", "secrets", "wide"})
@@ -246,7 +234,6 @@ func TestDiffFindsChangesToACopyOfTheAppFixture(t *testing.T) {
 	app := structure(t, testdb.Querier(t, testdb.RoleClean, testdb.DBApp), "app")
 	changed := structure(t, testdb.Querier(t, testdb.RoleClean, name), "app")
 
-	// The view's query on one line, before and after the change.
 	const (
 		leftJoin = "SELECT c.id AS customer_id, c.email, count(o.id) AS order_count, " +
 			"COALESCE(sum(o.total), 0::numeric) AS total_spent FROM app.customers c " +
@@ -291,7 +278,6 @@ func TestDiffFindsChangesToACopyOfTheAppFixture(t *testing.T) {
 		t.Errorf("Diff(changed, app) =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(reversed, "\n"))
 	}
 
-	// Read again, as the superuser, who sees what ro_clean does there, the copy matches.
 	if got := introspect.Diff(changed, structure(t, testdb.Querier(t, testdb.Superuser, name), "app")); len(got) != 0 {
 		t.Errorf("the copy against itself:\n%s", strings.Join(got, "\n"))
 	}

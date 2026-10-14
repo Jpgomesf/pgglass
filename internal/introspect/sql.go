@@ -1,27 +1,14 @@
 package introspect
 
-// The catalog queries. Each returns one JSON value whose keys are the names
-// of the Go fields it decodes into (see queryJSON). Names are ordered by the
-// name type, whose C collation makes the order the same on every server.
-
-// tableLike keeps pg_class c to tables, partitioned tables, views,
-// materialized views and foreign tables.
 const tableLike = `c.relkind IN ('r', 'p', 'v', 'm', 'f')`
 
-// readable keeps pg_class c to relations the current role can SELECT at
-// least one column of.
 const readable = `has_any_column_privilege(c.oid, 'SELECT')`
 
-// listed keeps pg_class c to the relations that are listed and searched.
 const listed = tableLike + ` AND NOT c.relispartition AND ` + readable
 
-// userSchema keeps pg_namespace n to the schemas the current role may use,
-// leaving out information_schema and the reserved pg_ schemas (pg_catalog,
-// pg_toast, pg_temp_N, pg_toast_temp_N).
 const userSchema = `n.nspname <> 'information_schema' AND n.nspname !~ '^pg_'
 	AND has_schema_privilege(n.oid, 'USAGE')`
 
-// relKind names the kind of a tableLike pg_class c.
 const relKind = `CASE c.relkind
 		WHEN 'r' THEN 'table'
 		WHEN 'p' THEN 'partitioned table'
@@ -30,14 +17,8 @@ const relKind = `CASE c.relkind
 		WHEN 'f' THEN 'foreign table'
 	END`
 
-// clipped is the comment txt cut to 200 characters, with a note of how many
-// it drops, "...[+1234 chars]", so that long comments do not take a listing
-// of 500 relations, or the description of a wide relation, past max_bytes.
-// The SQL is ASCII, which every server encoding holds.
 const clipped = `CASE WHEN length(txt) > 200 THEN left(txt, 200) || '...[+' || length(txt) - 200 || ' chars]' ELSE txt END`
 
-// relationJSON is a Relation for pg_class c in pg_namespace n. A partitioned
-// table has no storage of its own, so its size sums its partitions.
 const relationJSON = `json_build_object(
 	'Schema', n.nspname,
 	'Name', c.relname,
@@ -50,7 +31,6 @@ const relationJSON = `json_build_object(
 	'RLS', c.relrowsecurity,
 	'Comment', (SELECT ` + clipped + ` FROM obj_description(c.oid, 'pg_class') txt))`
 
-// schemasSQL lists the first $1 schemas and counts them all.
 const schemasSQL = `
 SELECT json_build_object(
 	'Schemas', coalesce(json_agg(json_build_object(
@@ -61,9 +41,6 @@ SELECT json_build_object(
 	'Total', (SELECT count(*) FROM pg_namespace n WHERE ` + userSchema + `))
 FROM (SELECT n.oid, n.nspname FROM pg_namespace n WHERE ` + userSchema + ` ORDER BY n.nspname LIMIT $1) n`
 
-// tablesSQL lists the first $2 relations of schema $1 and counts them all.
-// It returns no row when the schema does not exist or the role lacks USAGE
-// on it.
 const tablesSQL = `
 SELECT json_build_object(
 	'Relations', (SELECT coalesce(json_agg(` + relationJSON + ` ORDER BY c.relname), '[]')
@@ -78,8 +55,6 @@ WHERE n.nspname = $1 AND has_schema_privilege(n.oid, 'USAGE')`
 const notNull = `(a.attnotnull AND NOT EXISTS (SELECT FROM pg_constraint k
 	WHERE k.conrelid = a.attrelid AND k.contype = 'n' AND k.conkey[1] = a.attnum AND NOT k.convalidated))`
 
-// columnsSQL lists the columns of pg_class c the role can SELECT. A generated
-// column keeps its expression in pg_attrdef, so it has no default.
 const columnsSQL = `SELECT json_agg(json_build_object(
 		'Name', a.attname,
 		'Type', format_type(a.atttypid, a.atttypmod),
@@ -101,8 +76,6 @@ const columnsSQL = `SELECT json_agg(json_build_object(
 	WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
 		AND has_column_privilege(c.oid, a.attnum, 'SELECT')`
 
-// constraintsSQL lists the constraints of pg_class c, primary key first.
-// NOT NULL constraints show on their columns instead.
 const constraintsSQL = `SELECT json_agg(json_build_object(
 		'Name', k.conname,
 		'Kind', CASE k.contype
@@ -117,7 +90,6 @@ const constraintsSQL = `SELECT json_agg(json_build_object(
 	FROM pg_constraint k
 	WHERE k.conrelid = c.oid AND k.contype IN ('p', 'u', 'c', 'f', 'x')`
 
-// indexesSQL lists the indexes of pg_class c, primary key first.
 const indexesSQL = `SELECT json_agg(json_build_object(
 		'Name', ic.relname,
 		'Definition', pg_get_indexdef(i.indexrelid, 0, true),
@@ -128,8 +100,6 @@ const indexesSQL = `SELECT json_agg(json_build_object(
 	JOIN pg_class ic ON ic.oid = i.indexrelid
 	WHERE i.indrelid = c.oid`
 
-// policiesSQL lists the row-level security policies of pg_class c. Role 0
-// in polroles is PUBLIC.
 const policiesSQL = `SELECT json_agg(json_build_object(
 		'Name', p.polname,
 		'Command', CASE p.polcmd
@@ -148,8 +118,6 @@ const policiesSQL = `SELECT json_agg(json_build_object(
 	FROM pg_policy p
 	WHERE p.polrelid = c.oid`
 
-// tableSQL returns no row when relation $1.$2 does not exist or the role
-// cannot read it.
 const tableSQL = `
 SELECT ` + relationJSON + `::jsonb || jsonb_build_object(
 	'Columns', (` + columnsSQL + `),
@@ -164,10 +132,6 @@ JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = $1 AND c.relname = $2 AND ` + tableLike + `
 	AND has_schema_privilege(n.oid, 'USAGE') AND ` + readable
 
-// searchSQL matches the ILIKE pattern $1 against relation, column and
-// function names and keeps the first $2 hits: relations, then columns, then
-// functions, each by schema and name. The label, a function's name and
-// arguments, orders overloaded functions.
 const searchSQL = `
 SELECT coalesce(json_agg(json_build_object('Schema', nsp, 'Table', label, 'Column', col, 'Type', typ)
 	ORDER BY grp, nsp, rel, col, label), '[]')

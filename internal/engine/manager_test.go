@@ -16,7 +16,6 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// closedPort returns a local TCP port with nothing listening on it.
 func closedPort(t *testing.T) int {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
@@ -39,8 +38,6 @@ func TestNewResolvesNothingUntilFirstUse(t *testing.T) {
 		t.Fatalf("New resolved the DSN %d times, want 0", n)
 	}
 
-	// The first query opens the pool, which resolves once, and each attempt
-	// to connect resolves again; the second query reuses the pool.
 	for _, want := range []int{2, 3} {
 		_, err := m.Query(t.Context(), name, engine.Query{SQL: "SELECT 1"})
 		var qe *engine.QueryError
@@ -54,8 +51,7 @@ func TestNewResolvesNothingUntilFirstUse(t *testing.T) {
 }
 
 // Each new database connection resolves the DSN again, so a rotated password
-// reaches it without a restart. pool_max_conn_lifetime=1ms retires every
-// connection after one use.
+// reaches it without a restart.
 func TestEachNewConnectionResolvesTheDSNAgain(t *testing.T) {
 	const role, envVar = "engine_rotating", "PGGLASS_ENGINE_ROTATING_DSN"
 	admin := testdb.Conn(t, testdb.Superuser, testdb.DBApp)
@@ -89,10 +85,9 @@ func TestEachNewConnectionResolvesTheDSNAgain(t *testing.T) {
 		t.Errorf("after the rotation: current_user = %s, want %s", got, role)
 	}
 
-	// The old password now fails: that query did connect anew.
 	t.Setenv(envVar, dsn("first"))
 	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
-	wantSQLState(t, err, "28P01") // invalid_password
+	wantSQLState(t, err, "28P01")
 }
 
 // A DSN that comes to name another user, database or host fails each new
@@ -119,7 +114,6 @@ func TestNewConnectionRefusesAnotherUserDatabaseOrHost(t *testing.T) {
 		}
 	}
 
-	// Only those connections failed: the first DSN still connects.
 	t.Setenv(envVar, first)
 	if got := value(t, m, "SELECT current_user"); got != testdb.RoleClean {
 		t.Errorf("first DSN again: current_user = %s, want %s", got, testdb.RoleClean)
@@ -147,7 +141,7 @@ func TestClosedManagerRefusesQueries(t *testing.T) {
 	name := stub.reset("closed")
 	m := engine.New(&config.Config{Connections: map[string]config.Connection{name: {Source: "stub", DSN: unreachableDSN(t)}}})
 	m.Close()
-	m.Close() // idempotent
+	m.Close()
 
 	_, err := m.Query(t.Context(), name, engine.Query{SQL: "SELECT 1"})
 	if err == nil || !strings.Contains(err.Error(), "closed") {
@@ -164,7 +158,6 @@ func TestQueryWaitingOnOpenDoesNotOpenAfterClose(t *testing.T) {
 	name := stub.reset("open-after-close")
 	release := stub.hold(name)
 	defer release()
-	// The first open fails after Resolve, leaving the connection unopened.
 	m := engine.New(&config.Config{Connections: map[string]config.Connection{name: {Source: "stub", DSN: "postgres://u:p@localhost:notaport/db"}}})
 	t.Cleanup(m.Close)
 
@@ -179,13 +172,13 @@ func TestQueryWaitingOnOpenDoesNotOpenAfterClose(t *testing.T) {
 	first := query()
 	eventually(t, "the first query to start opening", func() bool { return stub.callCount(name) == 1 })
 	second := query()
-	time.Sleep(50 * time.Millisecond) // let the second query wait on the open
+	time.Sleep(50 * time.Millisecond)
 
 	closed := make(chan struct{})
 	go func() { m.Close(); close(closed) }()
 	eventually(t, "Close to start", func() bool {
 		_, err := m.Query(t.Context(), "other", engine.Query{SQL: "SELECT 1"})
-		return strings.Contains(err.Error(), "closed") // until then: unknown connection
+		return strings.Contains(err.Error(), "closed")
 	})
 	release()
 	<-closed
@@ -296,7 +289,7 @@ func TestOpeningOneConnectionBlocksNoOther(t *testing.T) {
 	})
 
 	var wg sync.WaitGroup
-	defer wg.Wait() // after release, on every path: the queries call t.Errorf
+	defer wg.Wait()
 	release := stub.hold(slow)
 	defer release()
 	for range 5 {
@@ -323,7 +316,6 @@ func TestOpeningOneConnectionBlocksNoOther(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Errorf("query on %s waited for %s to open", fast, slow)
 	}
-	// The other first uses wait for that open instead of opening too.
 	if n := stub.callCount(slow); n != 1 {
 		t.Errorf("concurrent first uses resolved %s %d times while it was opening, want once", slow, n)
 	}

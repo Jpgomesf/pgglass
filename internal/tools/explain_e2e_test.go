@@ -66,7 +66,6 @@ func TestExplainRejectsBeforeTheDatabase(t *testing.T) {
 func TestExplainSummarizesThePlan(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
-	// kind has no index; default_schema app resolves events.
 	const sql = "SELECT id FROM events WHERE kind = 'click'"
 	for _, tc := range []struct {
 		args map[string]any
@@ -94,12 +93,10 @@ flags: none`},
 		}
 	}
 
-	// The schema argument replaces default_schema.
 	if got := s.fails(t, "pg_explain", args("clean", sql, "schema", "public")); !strings.HasPrefix(got,
 		`ERROR: relation "events" does not exist (SQLSTATE 42P01) at character 16`) {
 		t.Errorf("events in public: %s", got)
 	}
-	// Positions point into the SELECT, as with pg_query.
 	if got := s.fails(t, "pg_explain", args("clean", "SELECT nam FROM customers", "analyze", true)); !strings.HasPrefix(got,
 		`ERROR: column "nam" does not exist (SQLSTATE 42703) at character 8`) {
 		t.Errorf("a misspelled column: %s", got)
@@ -164,10 +161,8 @@ func TestExplainFlagsWhatALimitDoesNotStop(t *testing.T) {
 	}
 }
 
-// With analyze, the scan under a Limit that runs once per customer returns
-// 9.43 rows per loop where 100 are planned, since 3 of the 53 customers have
-// no event: the Limit stopped it early in the others, and EXPLAIN does not
-// say in which, so it is not flagged for too few rows.
+// With analyze, a scan a per-customer Limit stops early returns fewer rows than
+// planned, and is not flagged: EXPLAIN does not say which loops it stopped.
 func TestExplainDoesNotFlagAScanALimitIsPlannedToStop(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
@@ -179,10 +174,8 @@ func TestExplainDoesNotFlagAScanALimitIsPlannedToStop(t *testing.T) {
 	}
 }
 
-// count(*) OVER () reads the whole partition before its first row, so the
-// Limit above it does not stop the seq scan under it: with analyze the scan
-// is flagged, and without it too from PostgreSQL 17, whose planner costs the
-// window's startup to cover the scan.
+// A Limit above count(*) OVER () cannot stop the seq scan under it, flagged
+// with analyze, and without it from PostgreSQL 17.
 func TestExplainUnderAWindowOverTheWholePartition(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
@@ -192,7 +185,7 @@ func TestExplainUnderAWindowOverTheWholePartition(t *testing.T) {
 		t.Errorf("analyze:\n%s", got)
 	}
 	if testdb.ServerVersion(t) < 170000 {
-		return // earlier planners give the window no startup cost that shows it
+		return
 	}
 	got := s.ok(t, "pg_explain", args("clean", sql))
 	if !regexp.MustCompile(`\n  Seq Scan on app\.events: cost [0-9.]+, ~20000 rows\n`).MatchString(got) || !strings.HasSuffix(got, flag) {
@@ -200,9 +193,8 @@ func TestExplainUnderAWindowOverTheWholePartition(t *testing.T) {
 	}
 }
 
-// A summary over the inline limit is saved to a file, one line per row: here
-// 250 subqueries, each scanning app.events, which EXPLAIN tells apart by
-// alias.
+// A summary over the inline limit, here of 250 subqueries scanning app.events,
+// is saved to a file, one line per row.
 func TestLargeExplainSummarySpills(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
@@ -266,10 +258,8 @@ func TestExplainGoesThroughTheRoleCheck(t *testing.T) {
 	}
 }
 
-// An EXISTS reads its subquery up to its first row, as the planner charges
-// it: the seq scan under one ranked above the total cost and was flagged as a
-// full scan and, with analyze, for returning 1 row of the 5000 planned. Now it
-// costs its first row, and neither flag is raised.
+// The seq scan under an EXISTS costs only its first row, as the planner charges
+// it, and is not flagged as a full scan or for too few rows.
 func TestExplainChargesAnExistsItsFirstRow(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))
@@ -283,9 +273,8 @@ func TestExplainChargesAnExistsItsFirstRow(t *testing.T) {
 	}
 }
 
-// From PostgreSQL 18, pg_explain flags a window aggregate that kept its rows
-// on disk and shows the rows of each loop to two decimals, as EXPLAIN reports
-// them; earlier versions report neither.
+// From PostgreSQL 18, pg_explain flags a window aggregate that spilled to disk
+// and shows rows per loop to two decimals; earlier versions report neither.
 func TestExplainShowsWhatPostgreSQL18Reports(t *testing.T) {
 	t.Parallel()
 	s := connect(t, newConfig(config.RoleCheckWarn, appConns(t)))

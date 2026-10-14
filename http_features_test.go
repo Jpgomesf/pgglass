@@ -30,10 +30,8 @@ func awaitLog(t *testing.T, srv httpServer, fragment string) {
 	}
 }
 
-// Over Streamable HTTP, a client that gives up on a call drops its request:
-// the server then ends the call, which cancels its query on Postgres at once,
-// as over stdio, logs it and serves the next call. It used to run the query
-// on until the statement timeout.
+// Over Streamable HTTP, a dropped request cancels its query at once, as over
+// stdio; the call is logged and the next one is served.
 func TestHTTPCancellingACallCancelsItsQuery(t *testing.T) {
 	srv := startApp(t, direct(testdb.DSN(t, testdb.RoleClean, testdb.DBApp)))
 	session, err := connectHTTP(t, srv.url, nil)
@@ -68,10 +66,8 @@ func TestHTTPCancellingACallCancelsItsQuery(t *testing.T) {
 	}
 }
 
-// Over Streamable HTTP, which keeps no session, a confirm connection asks a
-// client on the newest revision through the call's result, and runs the
-// statement once the client accepts. The server cannot ask an older client
-// in the middle of a call there, so it refuses that call and runs nothing.
+// Over HTTP, a confirm connection asks a client on the newest revision through
+// the call's result, running once it accepts; an older client is refused.
 func TestHTTPAsksBeforeRunningOnConfirmConnections(t *testing.T) {
 	conn := direct(testdb.DSN(t, testdb.RoleClean, testdb.DBApp))
 	conn["confirm"] = true

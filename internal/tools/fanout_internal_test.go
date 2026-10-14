@@ -22,7 +22,6 @@ var (
 	fanoutNameColumn = result.Column{Name: "name", TypeOID: pgtype.TextOID, TypeName: "text"}
 )
 
-// fanoutOK is a fanoutResult whose rows hold one value each.
 func fanoutOK(conn string, col result.Column, values ...string) fanoutResult {
 	res := &result.Result{Columns: []result.Column{col}}
 	for _, v := range values {
@@ -64,7 +63,7 @@ func TestCheckFanout(t *testing.T) {
 func TestSameFanoutColumns(t *testing.T) {
 	status := result.Column{Name: "status", TypeOID: 16385, TypeName: "order_status"}
 	statusElsewhere := status
-	statusElsewhere.TypeOID = 24601 // the same enum, created in another database
+	statusElsewhere.TypeOID = 24601
 	for _, tc := range []struct {
 		name string
 		cols [][]result.Column
@@ -161,9 +160,8 @@ func TestFanoutText(t *testing.T) {
 	}
 }
 
-// Sections share the inline limit, less the line that introduces them and
-// their names: one that would fit alone spills when it does not fit its
-// share.
+// Sections share the inline limit, less their heading and names: one that fits
+// alone spills when it exceeds its share.
 func TestFanoutSectionsShareTheInlineLimit(t *testing.T) {
 	h := &Handlers{spill: &spill.Store{Dir: t.TempDir(), InlineMaxBytes: 1000}}
 	var values []string
@@ -183,10 +181,6 @@ func TestFanoutSectionsShareTheInlineLimit(t *testing.T) {
 	if got, err = h.fanoutText(ok, render.TSV, 1000); err != nil {
 		t.Fatal(err)
 	}
-	// Each gets a tenth of 1000 bytes, less the first line (62 bytes) and the
-	// names with their colons and blank lines (88): 85, too few for what a
-	// summary says of its file, which made the ten sections take about 1,100
-	// bytes. A section that spills now only names its file and counts its rows.
 	files := regexp.MustCompile(`(?m)^(ids|names):\nFull result: (\S+)\n\(60 rows\)$`).FindAllStringSubmatch(got, -1)
 	if len(got) > 1000 || len(files) != 2 || strings.Count(got, "Full result: ") != 2 ||
 		!strings.HasSuffix(got, "\n\nmore7:\nname\nx\n(1 row)") {

@@ -9,12 +9,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// Under role_check warn, a fan-out's first call starts with the report of
-// each connection whose role has findings: ten reports of a role that may
-// write twelve long-named tables, each a table_write warning naming ten of
-// them, took 12 kB before any row. Now they take at most half the inline
-// limit, then point to pg_list_connections, whose spill file holds every
-// report whole, and the rows follow.
+// Under role_check warn, a fan-out's role check reports take at most half the
+// inline limit, pointing to pg_list_connections for the rest, and rows follow.
 func TestFanoutRoleCheckNoticesStayWithinTheInlineLimit(t *testing.T) {
 	t.Parallel()
 	const name = "tools_fanout_notices_bound"
@@ -45,8 +41,6 @@ func TestFanoutRoleCheckNoticesStayWithinTheInlineLimit(t *testing.T) {
 	}
 }
 
-// countReports counts, in the spill file of pg_list_connections, the
-// reports of ro_clean and their table_write findings, whole.
 func countReports(records [][]string) (reports, whole int) {
 	for _, r := range records {
 		switch {

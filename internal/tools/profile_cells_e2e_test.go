@@ -7,9 +7,8 @@ import (
 	"github.com/jpgomesf/pgglass/internal/testdb"
 )
 
-// Five uuids and their shares take 218 characters in pg_profile's common
-// cell. The spill store cut every inline cell to 200 characters, so the
-// fifth value was lost; pg_profile's cells now come back whole.
+// pg_profile's cells come back whole, such as a common cell of five uuids and
+// their shares, 218 characters.
 func TestProfileShowsLongCommonValuesWhole(t *testing.T) {
 	t.Parallel()
 	testdb.CreateDatabase(t, "tools_profile_uuids", `CREATE TABLE tokens (id uuid);

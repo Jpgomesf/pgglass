@@ -10,7 +10,7 @@ func TestSamplePercentTargetsSampleRows(t *testing.T) {
 		rows int64
 		want float64
 	}{
-		{-1, 100}, // never analyzed: read as far as the LIMIT
+		{-1, 100},
 		{0, 100},
 		{SampleRows, 100},
 		{2 * SampleRows, 50},
@@ -40,9 +40,9 @@ func TestProfileCells(t *testing.T) {
 	for _, tc := range []struct{ got, want string }{
 		{distinct(4), "4"},
 		{distinct(1234), "1234"},
-		{distinct(-1), "100%"}, // a share of the rows: every value differs
+		{distinct(-1), "100%"},
 		{distinct(-0.3), "30%"},
-		{distinct(0), ""}, // unknown
+		{distinct(0), ""},
 		{percent(0), "0%"},
 		{percent(0.26), "26%"},
 		{percent(1.0 / 3), "33.3%"},
@@ -58,8 +58,6 @@ func TestProfileCells(t *testing.T) {
 	}
 }
 
-// rows renders the header and rows of p.Result() as tab-separated lines,
-// NULL as \N.
 func rows(p *TableProfile) []string {
 	res := p.Result()
 	names := make([]string, len(res.Columns))
@@ -86,7 +84,7 @@ func TestProfileRendersStats(t *testing.T) {
 		{Name: "id", Type: "bigint", Stats: &ColumnStats{Distinct: -1, Width: 8, Min: &low, Max: &high}},
 		{Name: "status", Type: "app.order_status", Stats: &ColumnStats{NullFrac: 0.1, Distinct: 2, Width: 4,
 			Common: []string{"paid", "shipped"}, Freqs: []float64{0.6, 0.3}}},
-		{Name: "added", Type: "text"}, // no pg_stats row
+		{Name: "added", Type: "text"},
 	}}
 	if got, want := p.Summary(), "app.orders: ~50 rows, from pg_stats"; got != want {
 		t.Errorf("Summary() = %q, want %q", got, want)

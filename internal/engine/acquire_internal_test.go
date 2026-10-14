@@ -13,11 +13,11 @@ func TestAuthFailedIsTheServerRefusingCredentials(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{&pgconn.PgError{Code: "28P01"}, true}, // invalid_password
-		{&pgconn.PgError{Code: "28000"}, true}, // invalid_authorization_specification
+		{&pgconn.PgError{Code: "28P01"}, true},
+		{&pgconn.PgError{Code: "28000"}, true},
 		{fmt.Errorf("failed to connect: %w", &pgconn.PgError{Code: "28P01"}), true},
-		{&pgconn.PgError{Code: "3D000"}, false}, // invalid_catalog_name: no such database
-		{&pgconn.PgError{Code: "53300"}, false}, // too_many_connections
+		{&pgconn.PgError{Code: "3D000"}, false},
+		{&pgconn.PgError{Code: "53300"}, false},
 		{errors.New("dial tcp: connection refused"), false},
 		{nil, false},
 	} {

