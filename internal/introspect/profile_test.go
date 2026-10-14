@@ -204,3 +204,36 @@ func TestProfileQueriesThroughTheQuerier(t *testing.T) {
 	_, err = introspect.Profile(context.Background(), &fakeQuerier{res: &result.Result{}}, "app", "orders", "")
 	wantErr(t, err, fmt.Sprintf("relation %q.%q does not exist or is not a table or materialized view", "app", "orders"))
 }
+
+type sequence []*fakeQuerier
+
+func (s *sequence) Query(ctx context.Context, q engine.Query) (*result.Result, error) {
+	if len(*s) == 0 {
+		return nil, errors.New("a query past the sequence")
+	}
+	next := (*s)[0]
+	*s = (*s)[1:]
+	return next.Query(ctx, q)
+}
+
+// Without pg_stats, Profile samples the table: a sample that fails, or that
+// counts other columns than it profiles, fails Profile, naming the relation.
+func TestProfileFailsWhenTheSampleDoes(t *testing.T) {
+	noStats := oneValue(`{"Rows": 5, "Readable": 1, "Columns": [{"Name": "id", "Type": "integer"}]}`)
+	for _, tc := range []struct {
+		sample *fakeQuerier
+		want   string
+	}{
+		{&fakeQuerier{err: errors.New("canceling statement due to statement timeout")},
+			`sample relation "app"."orders": canceling statement due to statement timeout`},
+		{&fakeQuerier{res: oneValue(`{"Rows": 5, "Columns": []}`)},
+			`sample relation "app"."orders": sample counted 0 columns, want 1`},
+	} {
+		q := &sequence{{res: noStats}, tc.sample}
+		p, err := introspect.Profile(context.Background(), q, "app", "orders", "")
+		wantErr(t, err, tc.want)
+		if p != nil || len(*q) != 0 {
+			t.Errorf("Profile = %+v with %d replies unread; want nil after both queries", p, len(*q))
+		}
+	}
+}
