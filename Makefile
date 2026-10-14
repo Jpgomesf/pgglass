@@ -1,7 +1,7 @@
 BINARY := pgglass
 MODULE := github.com/jpgomesf/pgglass
 
-.PHONY: build lint vet test test-short clean all release-local bench bench-baseline
+.PHONY: build lint vet vulncheck test test-short clean all release-local bench bench-baseline
 
 all: lint build
 
@@ -14,6 +14,11 @@ lint:
 
 vet:
 	go vet ./...
+
+# Fails when the code calls a function with a known vulnerability, in a module
+# or in the standard library of the Go that go.mod requires.
+vulncheck:
+	go run golang.org/x/vuln/cmd/govulncheck@v1.8.0 ./...
 
 # Unit and integration tests. Integration tests run Postgres in Docker
 # (image from PGGLASS_PG_IMAGE, default postgres:17-alpine) and fail without it.
