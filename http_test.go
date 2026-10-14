@@ -404,8 +404,9 @@ func TestListenNetwork(t *testing.T) {
 		"[::]:8411":              "tcp",
 		"[::1]:8411":             "tcp",
 		"[fe80::1%lo0]:8411":     "tcp",
-		"localhost:8411":         "tcp",
-		"db-tools.internal:8411": "tcp",
+		"localhost:8411":         "tcp4",
+		"db-tools.internal:8411": "tcp4",
+		"0:8411":                 "tcp4",
 	} {
 		if got := listenNetwork(addr); got != want {
 			t.Errorf("listenNetwork(%q) = %s, want %s", addr, got, want)
@@ -414,40 +415,66 @@ func TestListenNetwork(t *testing.T) {
 }
 
 // --http with an IPv4 address listens on IPv4 alone: 0.0.0.0 is every IPv4
-// address of the machine, not every IPv6 address as well.
+// address of the machine, not every IPv6 address as well. So is 0, which the
+// system resolver of macOS reads as 0.0.0.0, as inet_aton does; where the
+// resolver does not, as on Linux, the server does not start.
 func TestHTTPListensOnIPv4AloneForTheIPv4Wildcard(t *testing.T) {
 	isolateHome(t)
 	t.Setenv(authEnv, testToken)
+	for _, host := range []string{"0.0.0.0", "0", "0.0", "00"} {
+		t.Run(host, func(t *testing.T) {
+			port, listening := listenOn(t, host)
+			if !listening {
+				if host == "0.0.0.0" {
+					t.Error("--http 0.0.0.0:0 did not listen")
+				}
+				return
+			}
+			if conn, err := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", port), 2*time.Second); err != nil {
+				t.Errorf("IPv4 connection refused: %v", err)
+			} else {
+				_ = conn.Close()
+			}
+			if conn, err := net.DialTimeout("tcp6", net.JoinHostPort("::1", port), 2*time.Second); err == nil {
+				_ = conn.Close()
+				t.Errorf("--http %s:%s also accepts IPv6 connections, on [::1]:%s", host, port, port)
+			}
+		})
+	}
+}
+
+func listenOn(t *testing.T, host string) (string, bool) {
+	t.Helper()
 	logs := &lockedBuffer{}
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan int, 1)
+	code, stopped := 0, make(chan struct{})
 	go func() {
-		done <- run(ctx, []string{"--config", writeConfig(t, connections(map[string]any{})), "--http", "0.0.0.0:0"}, strings.NewReader(""), io.Discard, logs)
+		code = run(ctx, []string{"--config", writeConfig(t, connections(map[string]any{})), "--http", host + ":0"}, strings.NewReader(""), io.Discard, logs)
+		close(stopped)
 	}()
 	t.Cleanup(func() {
 		cancel()
-		<-done
+		<-stopped
 	})
-	url := awaitURL(logs)
-	if url == "" {
-		t.Fatalf("not listening after 10s\nstderr:\n%s", logs)
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		select {
+		case <-stopped:
+			if code != 1 {
+				t.Errorf("--http %s:0 = %d without listening, want 1\nstderr:\n%s", host, code, logs)
+			}
+			return "", false
+		default:
+		}
+		if url := listeningURL(logs.String()); url != "" {
+			_, port, err := net.SplitHostPort(strings.TrimSuffix(strings.TrimPrefix(url, "http://"), mcpPath))
+			if want := "http://0.0.0.0:" + port + mcpPath; err != nil || url != want {
+				t.Errorf("--http %s:0 listens on %s, want http://0.0.0.0:<port>%s", host, url, mcpPath)
+			}
+			return port, true
+		}
 	}
-	_, port, err := net.SplitHostPort(strings.TrimSuffix(strings.TrimPrefix(url, "http://"), mcpPath))
-	if err != nil {
-		t.Fatalf("listening URL %q: %v", url, err)
-	}
-	if want := "http://0.0.0.0:" + port + mcpPath; url != want {
-		t.Errorf("listening on %s, want %s", url, want)
-	}
-	if conn, err := net.DialTimeout("tcp4", net.JoinHostPort("127.0.0.1", port), 2*time.Second); err != nil {
-		t.Errorf("IPv4 connection refused: %v", err)
-	} else {
-		_ = conn.Close()
-	}
-	if conn, err := net.DialTimeout("tcp6", net.JoinHostPort("::1", port), 2*time.Second); err == nil {
-		_ = conn.Close()
-		t.Errorf("--http 0.0.0.0:%s also accepts IPv6 connections, on [::1]:%s", port, port)
-	}
+	t.Fatalf("--http %s:0: not listening after 10s\nstderr:\n%s", host, logs)
+	return "", false
 }
 
 func TestHTTPReportsAnAddressItCannotListenOn(t *testing.T) {
