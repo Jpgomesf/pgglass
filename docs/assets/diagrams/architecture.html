@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pgglass architecture</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;   /* white-smoke */
+      --color-ink:     #2d3142;   /* jet-black */
+      --color-muted:   #4f5d75;   /* blue-slate */
+      --color-accent:  #336791;   /* postgres-blue */
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif KR', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; }
+    /* The SVG holds its readable width (min-width == the viewBox width, so the
+       type ramp is never silently scaled down). This wrapper lets a narrow
+       screen scroll the diagram instead of the whole page. */
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 960px; display: block; }
+    /* Paper has no scrollbar, so the local scroller would clip instead of
+       scroll. Let the diagram scale down to the sheet: smaller but whole
+       beats sharp but cut off. Must come after the svg rule above - a media
+       query adds no specificity, so a later plain rule would win. */
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · pgglass</p>
+    <h1>How one tool call runs</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="architecture-title architecture-desc">
+        <title id="architecture-title">How one pgglass tool call runs</title>
+        <desc id="architecture-desc">An MCP client's tool call reaches the tool handlers over stdio or Streamable HTTP; for pg_query the handlers check the SQL with the parser-based guard, audit the connection's role on its first use, and run the statement through the engine, which resolves credentials and queries PostgreSQL in a read-only transaction it always rolls back, then return the result inline up to 10 KB or as a CSV spill file summary, while the catalog, plan and health tools query through the same engine.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#336791"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1f7a70"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- Actor: MCP client (outside pgglass, drawn as text) -->
+        <text x="120" y="128" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">MCP client</text>
+        <text x="120" y="142" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">an AI agent</text>
+
+        <!-- Arrows first (behind boxes) -->
+        <path d="M 148,156 V 232" fill="none" stroke="#1f7a70" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+        <path d="M 92,232 V 156" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <line x1="200" y1="268" x2="232" y2="268" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <line x1="376" y1="76" x2="472" y2="76" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <line x1="376" y1="172" x2="472" y2="172" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <line x1="376" y1="268" x2="472" y2="268" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <line x1="376" y1="364" x2="472" y2="364" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <line x1="376" y1="460" x2="472" y2="460" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <line x1="572" y1="208" x2="572" y2="232" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <line x1="572" y1="328" x2="572" y2="304" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 672,256 H 708 Q 716,256 716,248 V 180 Q 716,172 724,172 H 760" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <line x1="672" y1="280" x2="760" y2="280" stroke="#1f7a70" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+
+        <!-- Arrow labels -->
+        <rect x="154" y="188" width="64" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="186" y="197" fill="#1f7a70" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">TOOLS/CALL</text>
+        <rect x="42" y="188" width="44" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="64" y="197" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">RESULT</text>
+        <rect x="390" y="58" width="68" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="424" y="67" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">1 CHECK SQL</text>
+        <rect x="390" y="154" width="68" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="424" y="163" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">2 FIRST USE</text>
+        <rect x="392" y="250" width="64" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="424" y="259" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">3 PG_QUERY</text>
+        <rect x="384" y="346" width="80" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="424" y="355" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">3 OTHER TOOLS</text>
+        <rect x="386" y="442" width="76" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="424" y="451" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">4 FIT OUTPUT</text>
+        <rect x="578" y="214" width="68" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="612" y="223" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">VIA QUERIER</text>
+        <rect x="578" y="310" width="68" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="612" y="319" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">VIA QUERIER</text>
+        <rect x="722" y="208" width="28" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="736" y="217" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">DSN</text>
+        <rect x="678" y="286" width="76" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="716" y="295" fill="#1f7a70" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">READ ONLY TX</text>
+
+        <!-- Node: Transport -->
+        <rect x="40" y="232" width="160" height="72" rx="6" fill="#f5f5f5"/>
+        <rect x="40" y="232" width="160" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="120" y="253" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Transport</text>
+        <text x="120" y="267" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">serve.go · http.go</text>
+        <text x="120" y="283" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">stdio, or HTTP at /mcp</text>
+        <text x="120" y="296" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">Origin and token checks</text>
+
+        <!-- Node: Tool handlers -->
+        <rect x="232" y="40" width="144" height="456" rx="6" fill="#f5f5f5"/>
+        <rect x="232" y="40" width="144" height="456" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="304" y="246.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Tool handlers</text>
+        <text x="304" y="260.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">internal/tools</text>
+        <text x="304" y="276.5" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">8 tools + resources</text>
+        <text x="304" y="289.5" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">audit line per call</text>
+        <text x="304" y="302.5" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">10 KB inline bound</text>
+
+        <!-- Node: SQL guard -->
+        <rect x="472" y="40" width="200" height="72" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="40" width="200" height="72" rx="6" fill="rgba(51,103,145,0.08)" stroke="#336791" stroke-width="1.2"/>
+        <text x="572" y="61" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">SQL guard</text>
+        <text x="572" y="75" fill="#336791" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">internal/guard</text>
+        <text x="572" y="91" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">libpg_query via WASM, pure Go</text>
+        <text x="572" y="104" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">one read-only statement only</text>
+
+        <!-- Node: Role check -->
+        <rect x="472" y="136" width="200" height="72" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="136" width="200" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="572" y="157" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Role check</text>
+        <text x="572" y="171" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">internal/preflight</text>
+        <text x="572" y="187" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">audits what the role can do</text>
+        <text x="572" y="200" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">role_check: strict, warn, off</text>
+
+        <!-- Node: Query engine -->
+        <rect x="472" y="232" width="200" height="72" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="232" width="200" height="72" rx="6" fill="rgba(51,103,145,0.08)" stroke="#336791" stroke-width="1.2"/>
+        <text x="572" y="253" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Query engine</text>
+        <text x="572" y="267" fill="#336791" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">internal/engine</text>
+        <text x="572" y="283" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">pgx pool · READ ONLY tx</text>
+        <text x="572" y="296" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">always rolled back · limits</text>
+
+        <!-- Node: Catalog, plan, health -->
+        <rect x="472" y="328" width="200" height="72" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="328" width="200" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="572" y="349" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Catalog, plan, health</text>
+        <text x="572" y="363" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">introspect · explain · health</text>
+        <text x="572" y="379" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">pg_catalog, statistics views</text>
+        <text x="572" y="392" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">EXPLAIN (FORMAT JSON)</text>
+
+        <!-- Node: Output -->
+        <rect x="472" y="424" width="200" height="72" rx="6" fill="#f5f5f5"/>
+        <rect x="472" y="424" width="200" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="572" y="445" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Output</text>
+        <text x="572" y="459" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">internal/spill · render</text>
+        <text x="572" y="475" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">TSV, JSON or Markdown inline</text>
+        <text x="572" y="488" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">past 10 KB: CSV file + summary</text>
+
+        <!-- Node: Credentials -->
+        <rect x="760" y="136" width="160" height="72" rx="6" fill="#f5f5f5"/>
+        <rect x="760" y="136" width="160" height="72" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="840" y="157" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Credentials</text>
+        <text x="840" y="171" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">internal/resolver</text>
+        <text x="840" y="187" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">direct · env · dotenv</text>
+        <text x="840" y="200" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif" text-anchor="middle">AWS Secrets Manager</text>
+
+        <!-- Node: PostgreSQL -->
+        <rect x="760" y="232" width="160" height="72" rx="6" fill="#f5f5f5"/>
+        <rect x="760" y="232" width="160" height="72" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+        <text x="840" y="267.5" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">PostgreSQL</text>
+        <text x="840" y="281.5" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">configured connections</text>
+
+        <!-- Legend strip -->
+        <line x1="40" y1="536" x2="920" y2="536" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+        <text x="40" y="568" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+        <rect x="112" y="560" width="14" height="10" rx="2" fill="rgba(51,103,145,0.08)" stroke="#336791" stroke-width="1"/>
+        <text x="132" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Read-only enforcement</text>
+        <rect x="260" y="560" width="14" height="10" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="280" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Go package</text>
+        <rect x="364" y="560" width="14" height="10" rx="2" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+        <text x="384" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Database</text>
+        <line x1="456" y1="565" x2="484" y2="565" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <text x="492" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Call · 1–4 is pg_query order</text>
+        <line x1="656" y1="565" x2="684" y2="565" stroke="#1f7a70" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+        <text x="692" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">MCP or Postgres wire</text>
+        <line x1="820" y1="565" x2="848" y2="565" stroke="#4f5d75" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <text x="856" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Return</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

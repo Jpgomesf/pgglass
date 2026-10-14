@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pgglass fan-out</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #2d3142;   /* deep warm charcoal */
+      --color-ink:     #f5f5f5;   /* warm off-white */
+      --color-muted:   #bfc0c0;
+      --color-accent:  #78a6d4;
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif KR', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; }
+    /* The SVG holds its readable width (min-width == the viewBox width, so the
+       type ramp is never silently scaled down). This wrapper lets a narrow
+       screen scroll the diagram instead of the whole page. */
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 960px; display: block; }
+    /* Paper has no scrollbar, so the local scroller would clip instead of
+       scroll. Let the diagram scale down to the sheet: smaller but whole
+       beats sharp but cut off. Must come after the svg rule above - a media
+       query adds no specificity, so a later plain rule would win. */
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · pgglass</p>
+    <h1>Many databases, one call</h1>
+
+    <!-- Replace fan-out-dark with a unique slug for this diagram before export. -->
+    <div class="diagram-container">
+      <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="fan-out-dark-title fan-out-dark-desc">
+        <title id="fan-out-dark-title">pg_query fan-out: many databases, one call</title>
+        <desc id="fan-out-dark-desc">One pg_query call runs the same read-only statement on prod-eu, prod-us and staging in parallel and returns one result whose rows sit under a connection column, with a failed connection's error line after the rows and a result over 10 KB spilled to one CSV file.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bfc0c0"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#78a6d4"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5cb8ab"/></marker>
+
+          <!-- OPTIONAL: dot-pattern background. Uncomment and add <rect fill="url(#dots)"/> after the paper rect to enable. -->
+          <!--
+          <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.9" fill="rgba(245,245,245,0.08)"/>
+          </pattern>
+          -->
+        </defs>
+
+        <rect width="100%" height="100%" fill="#2d3142"/>
+
+        <!-- Fan-out: one call, three connections, in parallel -->
+        <path d="M 256,120 V 140 Q 256,148 248,148 H 160 Q 152,148 152,156 V 176" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 336,120 V 176" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 416,120 V 140 Q 416,148 424,148 H 512 Q 520,148 520,156 V 176" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <!-- Fan-in: rows from prod-eu and staging, an error line from prod-us -->
+        <path d="M 152,240 V 260 Q 152,268 160,268 H 284 Q 292,268 292,276 V 296" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 336,240 V 296" fill="none" stroke="#bfc0c0" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <path d="M 520,240 V 260 Q 520,268 512,268 H 388 Q 380,268 380,276 V 296" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <!-- Bounded: inline up to 10 KB, else one CSV spill file -->
+        <path d="M 336,360 V 392" fill="none" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 424,328 H 656" fill="none" stroke="#bfc0c0" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <!-- Arrow labels -->
+        <rect x="344" y="142" width="64" height="12" rx="2" fill="#2d3142"/>
+        <text x="376" y="151" fill="#bfc0c0" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">IN PARALLEL</text>
+        <rect x="292" y="248" width="36" height="12" rx="2" fill="#2d3142"/>
+        <text x="310" y="257" fill="#bfc0c0" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">ERROR</text>
+        <rect x="344" y="370" width="72" height="12" rx="2" fill="#2d3142"/>
+        <text x="380" y="379" fill="#bfc0c0" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">UP TO 10 KB</text>
+        <rect x="508" y="308" width="64" height="12" rx="2" fill="#2d3142"/>
+        <text x="540" y="317" fill="#bfc0c0" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">OVER 10 KB</text>
+        <!-- Node: the pg_query call -->
+        <rect x="176" y="40" width="320" height="80" rx="6" fill="#2d3142"/>
+        <rect x="176" y="40" width="320" height="80" rx="6" fill="rgba(191,192,192,0.10)" stroke="#8e98ac" stroke-width="1"/>
+        <rect x="184" y="46" width="32" height="12" rx="2" fill="transparent" stroke="rgba(142,152,172,0.40)" stroke-width="0.8"/>
+        <text x="200" y="55" fill="#8e98ac" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">CALL</text>
+        <text x="336" y="72" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">pg_query</text>
+        <text x="336" y="88" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">connections: [prod-eu, prod-us, staging]</text>
+        <text x="336" y="102" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">SELECT status, count(*) FROM orders GROUP BY 1</text>
+        <text x="488" y="55" fill="#8e98ac" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">up to 10 connections</text>
+        <!-- Nodes: three connections, each its own read-only transaction -->
+        <rect x="72" y="176" width="160" height="64" rx="6" fill="#2d3142"/>
+        <rect x="72" y="176" width="160" height="64" rx="6" fill="rgba(245,245,245,0.05)" stroke="#bfc0c0" stroke-width="1"/>
+        <rect x="80" y="182" width="24" height="12" rx="2" fill="transparent" stroke="rgba(191,192,192,0.50)" stroke-width="0.8"/>
+        <text x="92" y="191" fill="#bfc0c0" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DB</text>
+        <text x="152" y="210" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">prod-eu</text>
+        <text x="152" y="226" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">read-only tx · 2 rows</text>
+        <rect x="256" y="176" width="160" height="64" rx="6" fill="#2d3142"/>
+        <rect x="256" y="176" width="160" height="64" rx="6" fill="rgba(245,245,245,0.05)" stroke="#bfc0c0" stroke-width="1"/>
+        <rect x="264" y="182" width="24" height="12" rx="2" fill="transparent" stroke="rgba(191,192,192,0.50)" stroke-width="0.8"/>
+        <text x="276" y="191" fill="#bfc0c0" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DB</text>
+        <text x="336" y="210" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">prod-us</text>
+        <text x="336" y="226" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">read-only tx · timeout</text>
+        <rect x="440" y="176" width="160" height="64" rx="6" fill="#2d3142"/>
+        <rect x="440" y="176" width="160" height="64" rx="6" fill="rgba(245,245,245,0.05)" stroke="#bfc0c0" stroke-width="1"/>
+        <rect x="448" y="182" width="24" height="12" rx="2" fill="transparent" stroke="rgba(191,192,192,0.50)" stroke-width="0.8"/>
+        <text x="460" y="191" fill="#bfc0c0" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DB</text>
+        <text x="520" y="210" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">staging</text>
+        <text x="520" y="226" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">read-only tx · 1 row</text>
+        <!-- Node: merge (focal) -->
+        <rect x="248" y="296" width="176" height="64" rx="6" fill="#2d3142"/>
+        <rect x="248" y="296" width="176" height="64" rx="6" fill="rgba(120,166,212,0.12)" stroke="#78a6d4" stroke-width="1"/>
+        <rect x="256" y="302" width="32" height="12" rx="2" fill="transparent" stroke="rgba(120,166,212,0.50)" stroke-width="0.8"/>
+        <text x="272" y="311" fill="#78a6d4" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">MERGE</text>
+        <text x="336" y="330" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">One result</text>
+        <text x="336" y="346" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">same columns → one table</text>
+        <!-- Node: spill file -->
+        <rect x="656" y="296" width="224" height="64" rx="6" fill="#2d3142"/>
+        <rect x="656" y="296" width="224" height="64" rx="6" fill="rgba(245,245,245,0.05)" stroke="#bfc0c0" stroke-width="1"/>
+        <rect x="664" y="302" width="28" height="12" rx="2" fill="transparent" stroke="rgba(191,192,192,0.50)" stroke-width="0.8"/>
+        <text x="678" y="311" fill="#bfc0c0" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">FILE</text>
+        <text x="768" y="330" fill="#f5f5f5" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">CSV spill file</text>
+        <text x="768" y="346" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">summary returned instead</text>
+        <!-- Node: the returned TSV -->
+        <rect x="72" y="392" width="528" height="128" rx="6" fill="#2d3142"/>
+        <rect x="72" y="392" width="528" height="128" rx="6" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+        <rect x="80" y="398" width="64" height="12" rx="2" fill="transparent" stroke="rgba(245,245,245,0.40)" stroke-width="0.8"/>
+        <text x="112" y="407" fill="#f5f5f5" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">RESULT · TSV</text>
+        <rect x="84" y="416" width="104" height="56" rx="2" fill="rgba(120,166,212,0.14)"/>
+        <text x="92" y="428" fill="#78a6d4" font-size="10" font-family="'Geist Mono', monospace" font-weight="600">connection</text>
+        <text x="196" y="428" fill="#bfc0c0" font-size="10" font-family="'Geist Mono', monospace">status</text>
+        <text x="268" y="428" fill="#bfc0c0" font-size="10" font-family="'Geist Mono', monospace">count</text>
+        <text x="92" y="441" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">prod-eu</text>
+        <text x="196" y="441" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">paid</text>
+        <text x="268" y="441" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">98311</text>
+        <text x="92" y="454" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">prod-eu</text>
+        <text x="196" y="454" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">shipped</text>
+        <text x="268" y="454" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">40215</text>
+        <text x="92" y="467" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">staging</text>
+        <text x="196" y="467" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">paid</text>
+        <text x="268" y="467" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">1204</text>
+        <text x="92" y="480" fill="#bfc0c0" font-size="10" font-family="'Geist Mono', monospace">(3 rows)</text>
+        <text x="92" y="506" fill="#f5f5f5" font-size="10" font-family="'Geist Mono', monospace">prod-us: ERROR: canceling statement due to statement timeout (SQLSTATE 57014)</text>
+        <!-- Callout 1: what each connection gets -->
+        <text x="920" y="68" fill="#f5f5f5" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="end">Checked once, then run on each</text>
+        <text x="920" y="86" fill="#f5f5f5" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="end">connection with its own role check,</text>
+        <text x="920" y="104" fill="#f5f5f5" font-size="14" font-style="italic" font-family="'Instrument Serif', serif" text-anchor="end">search_path, limits and audit line.</text>
+        <path d="M 760,120 Q 700,200 608,208" fill="none" stroke="rgba(245,245,245,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+        <circle cx="606" cy="208" r="2" fill="#f5f5f5"/>
+        <!-- Callout 2: partial failure -->
+        <text x="656" y="478" fill="#f5f5f5" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">The call fails only when</text>
+        <text x="656" y="496" fill="#f5f5f5" font-size="14" font-style="italic" font-family="'Instrument Serif', serif">every connection fails.</text>
+        <path d="M 648,492 Q 628,502 608,502" fill="none" stroke="rgba(245,245,245,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+        <circle cx="606" cy="502" r="2" fill="#f5f5f5"/>
+        <!-- Legend strip -->
+        <line x1="40" y1="540" x2="920" y2="540" stroke="rgba(245,245,245,0.10)" stroke-width="0.8"/>
+        <text x="40" y="568" fill="#bfc0c0" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+        <rect x="112" y="560" width="14" height="10" rx="2" fill="rgba(120,166,212,0.12)" stroke="#78a6d4" stroke-width="1"/>
+        <text x="132" y="568" fill="#bfc0c0" font-size="10" font-family="'Geist', sans-serif">One result (focal)</text>
+        <rect x="252" y="560" width="14" height="10" rx="2" fill="rgba(191,192,192,0.10)" stroke="#8e98ac" stroke-width="1"/>
+        <text x="272" y="568" fill="#bfc0c0" font-size="10" font-family="'Geist', sans-serif">Tool call</text>
+        <rect x="348" y="560" width="14" height="10" rx="2" fill="rgba(245,245,245,0.05)" stroke="#bfc0c0" stroke-width="1"/>
+        <text x="368" y="568" fill="#bfc0c0" font-size="10" font-family="'Geist', sans-serif">Connection · file</text>
+        <rect x="480" y="560" width="14" height="10" rx="2" fill="#393e53" stroke="#f5f5f5" stroke-width="1"/>
+        <text x="500" y="568" fill="#bfc0c0" font-size="10" font-family="'Geist', sans-serif">Returned text</text>
+        <line x1="600" y1="565" x2="628" y2="565" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <text x="636" y="568" fill="#bfc0c0" font-size="10" font-family="'Geist', sans-serif">Statement · rows</text>
+        <line x1="752" y1="565" x2="780" y2="565" stroke="#bfc0c0" stroke-width="1" stroke-dasharray="4,3" marker-end="url(#arrow)"/>
+        <text x="788" y="568" fill="#bfc0c0" font-size="10" font-family="'Geist', sans-serif">Only when it happens</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

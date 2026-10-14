@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HTTP access checks</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;   /* white-smoke */
+      --color-ink:     #2d3142;   /* jet-black */
+      --color-muted:   #4f5d75;   /* blue-slate */
+      --color-accent:  #336791;   /* postgres-blue */
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif KR', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; min-width: 0; }
+    /* The SVG holds its readable width (min-width == the viewBox width, so the
+       type ramp is never silently scaled down). This wrapper lets a narrow
+       screen scroll the diagram instead of the whole page. */
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 960px; display: block; }
+    /* Paper has no scrollbar, so the local scroller would clip instead of
+       scroll. Let the diagram scale down to the sheet: smaller but whole
+       beats sharp but cut off. Must come after the svg rule above - a media
+       query adds no specificity, so a later plain rule would win. */
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Flowchart · pgglass</p>
+    <h1>What a request passes before the tools</h1>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="http-access-title http-access-desc">
+        <title id="http-access-title">What a request passes before the tools</title>
+        <desc id="http-access-desc">Flowchart of pgglass serving Streamable HTTP: at startup an address beyond loopback without a token refuses to start; each request then gets 403 for an Origin that is not loopback, 401 for a missing or wrong bearer token when a token is set, and 403 from the Go SDK for a loopback address reached under another Host name, and only then does the stateless handler serve the MCP call.</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/></marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#336791"/></marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#1f7a70"/></marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- Zone: startup (painted first) -->
+        <rect x="40" y="40" width="248" height="196" rx="8" fill="#ececec" stroke="rgba(45,49,66,0.12)" stroke-width="1"/>
+
+        <!-- Arrows (drawn before nodes) -->
+        <!-- Startup: NO -> listening -->
+        <line x1="268" y1="104" x2="400" y2="104" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <!-- Startup: YES -> refuses -->
+        <line x1="164" y1="144" x2="164" y2="172" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <!-- Listening -> Origin check (each request) -->
+        <line x1="480" y1="128" x2="480" y2="156" stroke="#1f7a70" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+        <!-- Origin: NO -> token check -->
+        <line x1="480" y1="236" x2="480" y2="264" stroke="#1f7a70" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+        <!-- Origin: YES -> 403 -->
+        <path d="M 584 196 H 784 Q 792 196 792 204 V 280" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <!-- Token: YES -> 401 -->
+        <line x1="376" y1="304" x2="252" y2="304" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <!-- Token: NO -> Host check -->
+        <line x1="480" y1="344" x2="480" y2="372" stroke="#1f7a70" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+        <!-- Host: YES -> 403 -->
+        <path d="M 584 412 H 784 Q 792 412 792 404 V 328" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <!-- Host: NO -> handler -->
+        <line x1="480" y1="452" x2="480" y2="480" stroke="#1f7a70" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+
+        <!-- Arrow labels (masked, 8px clear of their stroke) -->
+        <rect x="322" y="84" width="24" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="334" y="93" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">NO</text>
+
+        <rect x="172" y="152" width="24" height="12" rx="2" fill="#ececec"/>
+        <text x="184" y="161" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">YES</text>
+
+        <rect x="488" y="136" width="72" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="524" y="145" fill="#1f7a70" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">EACH REQUEST</text>
+
+        <rect x="488" y="244" width="24" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="500" y="253" fill="#1f7a70" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">NO</text>
+
+        <rect x="672" y="176" width="24" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="684" y="185" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">YES</text>
+
+        <rect x="302" y="284" width="24" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="314" y="293" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">YES</text>
+
+        <rect x="488" y="352" width="24" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="500" y="361" fill="#1f7a70" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">NO</text>
+
+        <rect x="672" y="392" width="24" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="684" y="401" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">YES</text>
+
+        <rect x="488" y="460" width="24" height="12" rx="2" fill="#f5f5f5"/>
+        <text x="500" y="469" fill="#1f7a70" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.06em">NO</text>
+
+        <!-- Zone eyebrow -->
+        <text x="52" y="56" fill="#4f5d75" font-size="8" font-weight="500" font-family="'Geist Mono', monospace" letter-spacing="0.18em">AT STARTUP</text>
+
+        <!-- Decision: address beyond loopback without a token? -->
+        <polygon points="164,64 268,104 164,144 60,104" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="164" y="102" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Beyond loopback</text>
+        <text x="164" y="116" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">and no token?</text>
+
+        <!-- End: refuses to start -->
+        <rect x="76" y="172" width="176" height="48" rx="20" fill="#ececec"/>
+        <rect x="76" y="172" width="176" height="48" rx="20" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text x="164" y="193" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Refuses to start</text>
+        <text x="164" y="207" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">exit 1</text>
+
+        <!-- Step: listening -->
+        <rect x="400" y="80" width="160" height="48" rx="6" fill="#f5f5f5"/>
+        <rect x="400" y="80" width="160" height="48" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="480" y="101" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Listening</text>
+        <text x="480" y="115" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">http://ADDR/mcp</text>
+
+        <!-- Decision: Origin -->
+        <polygon points="480,156 584,196 480,236 376,196" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="480" y="194" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Origin present</text>
+        <text x="480" y="208" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">and not loopback?</text>
+
+        <!-- Decision: bearer token (focal) -->
+        <polygon points="480,264 584,304 480,344 376,304" fill="#f5f5f5"/>
+        <polygon points="480,264 584,304 480,344 376,304" fill="rgba(51,103,145,0.08)" stroke="#336791" stroke-width="1.2"/>
+        <text x="480" y="302" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Token set, bearer</text>
+        <text x="480" y="316" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">missing or wrong?</text>
+
+        <!-- End: 401 -->
+        <rect x="76" y="280" width="176" height="48" rx="20" fill="#f5f5f5"/>
+        <rect x="76" y="280" width="176" height="48" rx="20" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text x="164" y="301" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">401 Unauthorized</text>
+        <text x="164" y="315" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">WWW-Authenticate: Bearer</text>
+
+        <!-- End: 403 (Origin or Host) -->
+        <rect x="704" y="280" width="176" height="48" rx="20" fill="#f5f5f5"/>
+        <rect x="704" y="280" width="176" height="48" rx="20" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text x="792" y="301" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">403 Forbidden</text>
+        <text x="792" y="315" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">bad Origin or Host</text>
+
+        <!-- Decision: Host (DNS rebinding, Go SDK) -->
+        <polygon points="480,372 584,412 480,452 376,412" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="480" y="410" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Loopback address,</text>
+        <text x="480" y="424" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">other Host name?</text>
+
+        <!-- End: handler serves the call (focal) -->
+        <rect x="384" y="480" width="192" height="48" rx="20" fill="#f5f5f5"/>
+        <rect x="384" y="480" width="192" height="48" rx="20" fill="rgba(51,103,145,0.08)" stroke="#336791" stroke-width="1.2"/>
+        <text x="480" y="501" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', sans-serif" text-anchor="middle">Serves the MCP call</text>
+        <text x="480" y="515" fill="#4f5d75" font-size="9" font-family="'Geist Mono', monospace" text-anchor="middle">stateless Streamable HTTP</text>
+
+        <!-- Annotation callouts (bottom-left margin) -->
+        <text x="56" y="380" fill="#2d3142" font-size="16" font-style="italic" font-family="'Instrument Serif', serif">bearer compared in constant time</text>
+        <path d="M 260 374 Q 388 372 402 314" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+        <circle cx="402" cy="314" r="2" fill="#2d3142"/>
+
+        <text x="56" y="468" fill="#2d3142" font-size="16" font-style="italic" font-family="'Instrument Serif', serif">the Go SDK's DNS-rebinding guard</text>
+        <path d="M 264 462 Q 388 460 402 422" fill="none" stroke="rgba(45,49,66,0.40)" stroke-width="1" stroke-dasharray="4,3"/>
+        <circle cx="402" cy="422" r="2" fill="#2d3142"/>
+
+        <!-- Legend -->
+        <line x1="40" y1="548" x2="920" y2="548" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+        <text x="40" y="568" fill="#4f5d75" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.18em">LEGEND</text>
+        <rect x="112" y="560" width="20" height="10" rx="5" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text x="140" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Start / end</text>
+        <rect x="232" y="560" width="14" height="10" rx="2" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="252" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Step</text>
+        <polygon points="312,565 320,560 328,565 320,570" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="336" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Decision</text>
+        <rect x="412" y="560" width="14" height="10" rx="2" fill="rgba(51,103,145,0.08)" stroke="#336791" stroke-width="1"/>
+        <text x="432" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Focal</text>
+        <line x1="492" y1="565" x2="520" y2="565" stroke="#1f7a70" stroke-width="1.2" marker-end="url(#arrow-link)"/>
+        <text x="528" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">HTTP request</text>
+        <line x1="632" y1="565" x2="660" y2="565" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <text x="668" y="568" fill="#4f5d75" font-size="10" font-family="'Geist', sans-serif">Branch</text>
+      </svg>
+    </div>
+  </div>
+</body>
+</html>

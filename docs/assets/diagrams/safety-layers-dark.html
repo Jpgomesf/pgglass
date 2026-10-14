@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Safety layers: the server, not the model, holds the line</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Sans+KR:wght@400;500;600&family=Noto+Serif+KR:wght@400&family=Noto+Sans+TC:wght@400;500;600&family=Noto+Serif+TC:wght@400&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #2d3142;
+      --color-ink:     #f5f5f5;
+      --color-muted:   #bfc0c0;
+      --color-accent:  #78a6d4;   /* postgres-blue */
+      --font-sans:     'Geist', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif KR', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1200px; width: 100%; }
+    /* The SVG holds its readable width (min-width == the viewBox width, so the
+       type ramp is never silently scaled down). This wrapper lets a narrow
+       screen scroll the diagram instead of the whole page. */
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 1.5rem;
+    }
+
+    svg { width: 100%; min-width: 960px; display: block; }
+    /* Paper has no scrollbar, so the local scroller would clip instead of
+       scroll. Let the diagram scale down to the sheet: smaller but whole
+       beats sharp but cut off. Must come after the svg rule above - a media
+       query adds no specificity, so a later plain rule would win. */
+    @media print {
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Layer stack · pgglass safety model</p>
+    <h1>The server, not the model, holds the line</h1>
+
+    <div class="diagram-container">
+        <svg viewBox="0 0 960 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="safety-layers-dark-title safety-layers-dark-desc">
+        <title id="safety-layers-dark-title">Safety layers: the server, not the model, holds the line</title>
+        <desc id="safety-layers-dark-desc">Layer stack showing an agent's untrusted SQL passing four layers in order (the Postgres parser, a role check on first use, a read-only transaction that is always rolled back, and the database role as the real boundary), what each layer lets past, the residual risk only the role's grants stop, and the output side where results are bounded and every call is audited.</desc>
+        <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#bfc0c0"/></marker>
+        <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#78a6d4"/></marker>
+        <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#5cb8ab"/></marker>
+        </defs>
+        <rect width="100%" height="100%" fill="#2d3142"/>
+        <!-- Row guides across the rail -->
+        <line x1="560" y1="204" x2="920" y2="204" stroke="rgba(245,245,245,0.08)" stroke-width="1"/>
+        <line x1="560" y1="280" x2="920" y2="280" stroke="rgba(245,245,245,0.08)" stroke-width="1"/>
+        <line x1="560" y1="356" x2="920" y2="356" stroke="rgba(245,245,245,0.08)" stroke-width="1"/>
+        <!-- Connectors -->
+        <line x1="164" y1="96" x2="164" y2="128" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <line x1="164" y1="432" x2="164" y2="472" stroke="#bfc0c0" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 560 68 H 584 Q 592 68 592 76 V 472" fill="none" stroke="#bfc0c0" stroke-width="1.2" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+        <!-- Untrusted input -->
+        <rect x="40" y="40" width="520" height="56" rx="6" fill="#2d3142"/>
+<rect x="40" y="40" width="520" height="56" rx="6" fill="rgba(191,192,192,0.10)" stroke="#8e98ac" stroke-width="1"/>
+        <rect x="56" y="61" width="48" height="14" rx="2" fill="none" stroke="rgba(245,245,245,0.40)" stroke-width="0.8"/>
+<text x="80.0" y="71" fill="#bfc0c0" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.08em" text-anchor="middle">INPUT</text>
+        <text x="144" y="64" fill="#f5f5f5" font-size="16" font-family="'Geist', sans-serif" font-weight="600">Agent's SQL: untrusted</text>
+        <text x="144" y="82" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">MCP tool call · prompt injection can steer it</text>
+        <text x="608" y="63" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">could write, act outside the transaction,</text>
+        <text x="608" y="80" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">read credentials or run long</text>
+        <text x="608" y="116" fill="#8e98ac" font-size="8" font-family="'Geist Mono', monospace" font-weight="500" letter-spacing="0.18em">WHAT EACH LAYER LETS PAST</text>
+        <!-- Layer stack -->
+        <rect x="40" y="128" width="520" height="304" fill="#393e53"/>
+        <text x="56" y="161" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" font-weight="600" letter-spacing="0.08em">L1</text>
+        <text x="56" y="175" fill="#8e98ac" font-size="8" font-family="'Geist Mono', monospace" font-weight="500" letter-spacing="0.14em">STATEMENT</text>
+        <text x="144" y="159" fill="#f5f5f5" font-size="16" font-family="'Geist', sans-serif" font-weight="600">Parsed by the Postgres parser</text>
+        <text x="144" y="178" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">libpg_query · exactly one SELECT, EXPLAIN or SHOW</text>
+        <text x="144" y="193" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">denylisted functions and catalogs refused</text>
+        <circle cx="592" cy="166" r="3" fill="#bfc0c0"/>
+        <text x="608" y="162" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">what hides behind a name: a function that</text>
+        <text x="608" y="179" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">calls dblink, a view on a denied catalog</text>
+        <line x1="40" y1="204" x2="560" y2="204" stroke="rgba(245,245,245,0.12)" stroke-width="1"/>
+        <text x="56" y="237" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" font-weight="600" letter-spacing="0.08em">L2</text>
+        <text x="56" y="251" fill="#8e98ac" font-size="8" font-family="'Geist Mono', monospace" font-weight="500" letter-spacing="0.14em">CONNECTION</text>
+        <text x="144" y="235" fill="#f5f5f5" font-size="16" font-family="'Geist', sans-serif" font-weight="600">Role checked on first use</text>
+        <text x="144" y="254" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">role_check strict refuses critical findings</text>
+        <text x="144" y="269" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">warn (the default) reports them</text>
+        <circle cx="592" cy="242" r="3" fill="#bfc0c0"/>
+        <text x="608" y="238" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">functions it does not list; under warn,</text>
+        <text x="608" y="255" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">what it finds is reported, not refused</text>
+        <line x1="40" y1="280" x2="560" y2="280" stroke="rgba(245,245,245,0.12)" stroke-width="1"/>
+        <text x="56" y="313" fill="#bfc0c0" font-size="9" font-family="'Geist Mono', monospace" font-weight="600" letter-spacing="0.08em">L3</text>
+        <text x="56" y="327" fill="#8e98ac" font-size="8" font-family="'Geist Mono', monospace" font-weight="500" letter-spacing="0.14em">TRANSACTION</text>
+        <text x="144" y="311" fill="#f5f5f5" font-size="16" font-family="'Geist', sans-serif" font-weight="600">READ ONLY, always rolled back</text>
+        <text x="144" y="330" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">one statement per transaction</text>
+        <text x="144" y="345" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">statement_timeout · lock_timeout</text>
+        <circle cx="592" cy="318" r="3" fill="#bfc0c0"/>
+        <text x="608" y="314" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">what acts outside the transaction, writes</text>
+        <text x="608" y="331" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">in place or outlives the rollback</text>
+        <rect x="40" y="356" width="520" height="76" fill="rgba(120,166,212,0.12)"/>
+        <line x1="40" y1="356" x2="560" y2="356" stroke="rgba(245,245,245,0.12)" stroke-width="1"/>
+        <text x="56" y="389" fill="#78a6d4" font-size="9" font-family="'Geist Mono', monospace" font-weight="600" letter-spacing="0.08em">L4</text>
+        <text x="56" y="403" fill="#78a6d4" font-size="8" font-family="'Geist Mono', monospace" font-weight="500" letter-spacing="0.14em">DATABASE</text>
+        <text x="144" y="387" fill="#f5f5f5" font-size="16" font-family="'Geist', sans-serif" font-weight="600">Database role: the real boundary</text>
+        <text x="144" y="406" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">the agent never gets more than this role</text>
+        <text x="144" y="421" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">row-level security applies</text>
+        <circle cx="592" cy="394" r="3" fill="#bfc0c0"/>
+        <text x="608" y="390" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">whatever the role may SELECT or EXECUTE;</text>
+        <text x="608" y="407" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">what it can read, the agent can repeat</text>
+        <rect x="40" y="128" width="520" height="304" fill="none" stroke="rgba(191,192,192,0.25)" stroke-width="1"/>
+        <rect x="40" y="356" width="520" height="76" fill="none" stroke="#78a6d4" stroke-width="1.2"/>
+        <!-- Output side -->
+        <rect x="40" y="472" width="248" height="80" rx="6" fill="#2d3142"/>
+<rect x="40" y="472" width="248" height="80" rx="6" fill="rgba(245,245,245,0.05)" stroke="#bfc0c0" stroke-width="1"/>
+        <rect x="52" y="482" width="56" height="14" rx="2" fill="none" stroke="rgba(245,245,245,0.40)" stroke-width="0.8"/>
+<text x="80.0" y="492" fill="#bfc0c0" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.08em" text-anchor="middle">OUTPUT</text>
+        <text x="52" y="510" fill="#f5f5f5" font-size="14" font-family="'Geist', sans-serif" font-weight="600">Results bounded</text>
+        <text x="52" y="527" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">max_rows · max_bytes</text>
+        <text x="52" y="541" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">over 10 KB: private CSV + summary</text>
+        <rect x="304" y="472" width="240" height="80" rx="6" fill="#2d3142"/>
+<rect x="304" y="472" width="240" height="80" rx="6" fill="rgba(245,245,245,0.05)" stroke="#bfc0c0" stroke-width="1"/>
+        <rect x="316" y="482" width="56" height="14" rx="2" fill="none" stroke="rgba(245,245,245,0.40)" stroke-width="0.8"/>
+<text x="344.0" y="492" fill="#bfc0c0" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.08em" text-anchor="middle">RECORD</text>
+        <text x="316" y="510" fill="#f5f5f5" font-size="14" font-family="'Geist', sans-serif" font-weight="600">Every call audited</text>
+        <text x="316" y="527" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">one JSON line on stderr</text>
+        <text x="316" y="541" fill="#bfc0c0" font-size="11" font-family="'Geist Mono', monospace">SQL text and values never logged</text>
+        <!-- Residual risk -->
+        <rect x="560" y="472" width="360" height="80" rx="6" fill="#2d3142"/>
+<rect x="560" y="472" width="360" height="80" rx="6" fill="rgba(120,166,212,0.12)" stroke="#78a6d4" stroke-width="1"/>
+        <rect x="576" y="482" width="68" height="14" rx="2" fill="none" stroke="rgba(120,166,212,0.50)" stroke-width="0.8"/>
+<text x="610.0" y="492" fill="#78a6d4" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.08em" text-anchor="middle">RESIDUAL</text>
+        <text x="576" y="510" fill="#f5f5f5" font-size="14" font-family="'Geist', sans-serif" font-weight="600">A function the role may EXECUTE</text>
+        <text x="576" y="527" fill="#bfc0c0" font-size="12" font-family="'Geist', sans-serif">that calls dblink, typically SECURITY DEFINER,</text>
+        <text x="576" y="542" fill="#f5f5f5" font-size="12" font-family="'Geist', sans-serif">passes L1–L3: only the role's grants stop it</text>
+        </svg>
+    </div>
+  </div>
+</body>
+</html>
