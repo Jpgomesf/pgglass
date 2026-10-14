@@ -346,13 +346,11 @@ func TestOpeningOneConnectionBlocksNoOther(t *testing.T) {
 	release := stub.hold(slow)
 	defer release()
 	for range 5 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if _, err := m.Query(t.Context(), slow, engine.Query{SQL: "SELECT 1"}); err != nil {
 				t.Errorf("query on %s: %v", slow, err)
 			}
-		}()
+		})
 	}
 	eventually(t, "the first query to start opening "+slow, func() bool { return stub.callCount(slow) == 1 })
 

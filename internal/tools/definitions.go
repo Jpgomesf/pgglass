@@ -18,9 +18,9 @@ const instructions = `pgglass gives read-only access to PostgreSQL: pg_query run
 
 var annotations = &mcp.ToolAnnotations{
 	ReadOnlyHint:    true,
-	DestructiveHint: ptr(false),
+	DestructiveHint: new(false),
 	IdempotentHint:  true,
-	OpenWorldHint:   ptr(false),
+	OpenWorldHint:   new(false),
 }
 
 var connectionArg = prop("string", "Connection name, from pg_list_connections.")
@@ -156,5 +156,3 @@ func object(required []string, props map[string]any) map[string]any {
 func prop(typ, description string) map[string]any {
 	return map[string]any{"type": typ, "description": description}
 }
-
-func ptr[T any](v T) *T { return &v }

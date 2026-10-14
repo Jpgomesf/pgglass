@@ -26,7 +26,7 @@ var (
 func fanoutOK(conn string, col result.Column, values ...string) fanoutResult {
 	res := &result.Result{Columns: []result.Column{col}}
 	for _, v := range values {
-		res.Rows = append(res.Rows, []*string{ptr(v)})
+		res.Rows = append(res.Rows, []*string{new(v)})
 	}
 	return fanoutResult{conn: conn, res: res}
 }
@@ -234,7 +234,7 @@ func TestFanoutSectionsFitTogether(t *testing.T) {
 		for range 50 {
 			row := make([]*string, len(res.Columns))
 			for c := range row {
-				row[c] = ptr("value")
+				row[c] = new("value")
 			}
 			res.Rows = append(res.Rows, row)
 		}

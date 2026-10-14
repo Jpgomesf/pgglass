@@ -93,8 +93,7 @@ func (h *Handlers) handle(tool string, run toolFunc) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		c := &call{tool: tool, start: time.Now(), answers: req.Params.InputResponses, canAsk: canAsk(req)}
 		text, err := run(ctx, req.Params.Arguments, c)
-		var ask *confirmRequest
-		if errors.As(err, &ask) {
+		if ask, ok := errors.AsType[*confirmRequest](err); ok {
 			return ask.result(), nil
 		}
 		if !c.audited {

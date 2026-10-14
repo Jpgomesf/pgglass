@@ -68,8 +68,7 @@ func (h *Handlers) gatePair(ctx context.Context, left, right string, c *call) er
 		if notice != "" {
 			c.notice += conn + ": " + notice
 		}
-		var blocked *blockedError
-		if errors.As(err, &blocked) {
+		if _, ok := errors.AsType[*blockedError](err); ok {
 			return err
 		}
 		if err != nil {

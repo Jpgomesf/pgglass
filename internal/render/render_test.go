@@ -18,8 +18,6 @@ import (
 
 var update = flag.Bool("update", false, "rewrite the golden files in testdata")
 
-func str(v string) *string { return &v }
-
 const goldenMaxCell = 20
 
 func fixture() *result.Result {
@@ -33,12 +31,12 @@ func fixture() *result.Result {
 			{Name: "doc", TypeOID: pgtype.JSONBOID, TypeName: "jsonb"},
 		},
 		Rows: [][]*string{
-			{str("1"), nil, str(""), str("12.50"), str("t"), str(`{"a": [1, 2]}`)},
-			{str("2"), str("NULL"), str(`\N`), str("NaN"), str("f"), nil},
-			{str("3"), str("tab\there"), str("two\nlines\r\n"), str("-0.001"), nil, str(`"x<y & z"`)},
-			{str("4"), str("pipe|here"), str(`say "hi", ok`), str("-Infinity"), str("t"), str("null")},
-			{str("5"), str(`back\slash`), str("café ☕ 日本語"), str("123456789012345678901234567890"), str("f"), str("[true, null]")},
-			{str("6"), str("a cell wider than twenty chars"), str("日本語のテキストは二十文字を超えると切られます"), nil, str("t"), str(`{"k": "v"}`)},
+			{new("1"), nil, new(""), new("12.50"), new("t"), new(`{"a": [1, 2]}`)},
+			{new("2"), new("NULL"), new(`\N`), new("NaN"), new("f"), nil},
+			{new("3"), new("tab\there"), new("two\nlines\r\n"), new("-0.001"), nil, new(`"x<y & z"`)},
+			{new("4"), new("pipe|here"), new(`say "hi", ok`), new("-Infinity"), new("t"), new("null")},
+			{new("5"), new(`back\slash`), new("café ☕ 日本語"), new("123456789012345678901234567890"), new("f"), new("[true, null]")},
+			{new("6"), new("a cell wider than twenty chars"), new("日本語のテキストは二十文字を超えると切られます"), nil, new("t"), new(`{"k": "v"}`)},
 		},
 	}
 }
@@ -85,8 +83,8 @@ func TestEveryFormatKeepsNullEmptyAndTextNullApart(t *testing.T) {
 	col := result.Column{Name: "v", TypeOID: pgtype.TextOID, TypeName: "text"}
 	for _, f := range []render.Format{render.TSV, render.CSV, render.Markdown, render.JSON} {
 		null := renderOne(t, f, col, nil)
-		empty := renderOne(t, f, col, str(""))
-		text := renderOne(t, f, col, str("NULL"))
+		empty := renderOne(t, f, col, new(""))
+		text := renderOne(t, f, col, new("NULL"))
 		if null == empty || null == text || empty == text {
 			t.Errorf("%s: NULL %q, empty %q and 'NULL' %q are not all distinct", f, null, empty, text)
 		}
@@ -97,7 +95,7 @@ func TestMaxCellZeroKeepsEveryCharacter(t *testing.T) {
 	wide := strings.Repeat("é", 5000)
 	col := result.Column{Name: "v", TypeOID: pgtype.TextOID, TypeName: "text"}
 	for _, f := range []render.Format{render.TSV, render.CSV, render.Markdown, render.JSON} {
-		if out := renderOne(t, f, col, str(wide)); !strings.Contains(out, wide) || strings.Contains(out, "…") {
+		if out := renderOne(t, f, col, new(wide)); !strings.Contains(out, wide) || strings.Contains(out, "…") {
 			t.Errorf("%s: maxCell 0 changed a wide cell", f)
 		}
 	}
@@ -106,7 +104,7 @@ func TestMaxCellZeroKeepsEveryCharacter(t *testing.T) {
 func TestMaxCellCutsLongCellsByCharacter(t *testing.T) {
 	res := &result.Result{
 		Columns: []result.Column{{Name: "v", TypeOID: pgtype.TextOID, TypeName: "text"}},
-		Rows:    [][]*string{{str("añb")}, {str("añbc")}, {str("añbcdé")}},
+		Rows:    [][]*string{{new("añb")}, {new("añbc")}, {new("añbcdé")}},
 	}
 	got, err := render.Render(res, render.TSV, 4)
 	if err != nil {
@@ -159,9 +157,9 @@ func TestRenderErrors(t *testing.T) {
 		{"unknown format", fixture(), render.Format("xml"), `render: unknown format "xml"`},
 		{"empty format", fixture(), render.Format(""), `render: unknown format ""`},
 		{"nil result", nil, render.TSV, "render: nil result"},
-		{"short row", &result.Result{Columns: cols, Rows: [][]*string{{str("1"), str("2")}, {str("1")}}}, render.TSV,
+		{"short row", &result.Result{Columns: cols, Rows: [][]*string{{new("1"), new("2")}, {new("1")}}}, render.TSV,
 			"render: row 2 has 1 values for 2 columns"},
-		{"long row", &result.Result{Columns: cols, Rows: [][]*string{{str("1"), str("2"), str("3")}}}, render.JSON,
+		{"long row", &result.Result{Columns: cols, Rows: [][]*string{{new("1"), new("2"), new("3")}}}, render.JSON,
 			"render: row 1 has 3 values for 2 columns"},
 	}
 	for _, tt := range tests {

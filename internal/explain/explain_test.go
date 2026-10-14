@@ -82,25 +82,23 @@ func (s *script) Query(context.Context, engine.Query) (*result.Result, error) {
 	return &result.Result{Columns: []result.Column{{Name: "json"}}, Rows: [][]*string{{r.value}}}, nil
 }
 
-func text(s string) *string { return &s }
-
 // Run summarizes only a plan and relation sizes it read whole: anything else
 // fails it, naming what it was reading, and stops it there.
 func TestRunFailsOnWhatItCannotRead(t *testing.T) {
-	seqScan := text(`[{"Plan": {"Node Type": "Seq Scan", "Schema": "app", "Relation Name": "events", "Total Cost": 1, "Plan Rows": 1}}]`)
+	seqScan := new(`[{"Plan": {"Node Type": "Seq Scan", "Schema": "app", "Relation Name": "events", "Total Cost": 1, "Plan Rows": 1}}]`)
 	for _, tc := range []struct {
 		name    string
 		replies script
 		want    string
 	}{
-		{"plan that is not JSON", script{{value: text("QUERY PLAN")}}, "read the plan: invalid character"},
+		{"plan that is not JSON", script{{value: new("QUERY PLAN")}}, "read the plan: invalid character"},
 		{"no plan", script{{}}, "read the plan: no value came back"},
 		{"plan over the limits", script{{truncated: true}}, "read the plan: it exceeds max_bytes=100"},
 		{"sizes that fail", script{{value: seqScan}, {err: errors.New("connection reset by peer")}}, "connection reset by peer"},
 		{"sizes over the limits", script{{value: seqScan}, {truncated: true}},
 			"read relation sizes: it exceeds max_bytes=100"},
 		{"no sizes", script{{value: seqScan}, {}}, "read relation sizes: no value came back"},
-		{"sizes that are not JSON", script{{value: seqScan}, {value: text("{")}}, "read relation sizes: unexpected end of JSON input"},
+		{"sizes that are not JSON", script{{value: seqScan}, {value: new("{")}}, "read relation sizes: unexpected end of JSON input"},
 	} {
 		stmt, err := explain.New("SELECT * FROM app.events", false)
 		if err != nil {

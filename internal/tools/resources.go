@@ -118,8 +118,7 @@ func (h *Handlers) resourceError(uri string, err error, c *call) error {
 	room := h.room(c)
 	if errors.Is(err, errNoResource) || errors.Is(err, introspect.ErrNotFound) {
 		notFound := mcp.ResourceNotFoundError(uri)
-		var wire *jsonrpc.Error
-		if errors.As(notFound, &wire) {
+		if wire, ok := errors.AsType[*jsonrpc.Error](notFound); ok {
 			wire.Message = c.notice + wire.Message
 		}
 		return notFound

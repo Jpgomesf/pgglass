@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"strings"
@@ -125,9 +126,7 @@ type withHeader http.Header
 
 func (h withHeader) RoundTrip(req *http.Request) (*http.Response, error) {
 	req = req.Clone(req.Context())
-	for key, values := range h {
-		req.Header[key] = values
-	}
+	maps.Copy(req.Header, h)
 	return http.DefaultTransport.RoundTrip(req)
 }
 
@@ -267,9 +266,7 @@ func TestHTTPRequiresTheBearerToken(t *testing.T) {
 			t.Errorf("%s: connect error = %v, want Unauthorized", name, err)
 		}
 		edit := func(req *http.Request) {
-			for key, values := range header {
-				req.Header[key] = values
-			}
+			maps.Copy(req.Header, header)
 		}
 		if status := ping(t, srv.url, edit); status != http.StatusUnauthorized {
 			t.Errorf("%s: status %d, want 401", name, status)

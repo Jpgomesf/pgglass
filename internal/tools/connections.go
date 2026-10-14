@@ -20,7 +20,7 @@ func (h *Handlers) listConnections(_ context.Context, raw json.RawMessage, c *ca
 	lines := []string{fmt.Sprintf("Connections (%d):", len(names))}
 	for _, name := range names {
 		lines = append(lines, fmt.Sprintf("  %s [%s]", name, strings.Join(flags(h.cfg.Connections[name]), ", ")))
-		for _, line := range strings.Split(h.checks.status(name), "\n") {
+		for line := range strings.SplitSeq(h.checks.status(name), "\n") {
 			lines = append(lines, "    "+line)
 		}
 	}

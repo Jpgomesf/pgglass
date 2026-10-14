@@ -112,9 +112,7 @@ func TestCheckAllowsLargeFlatSQL(t *testing.T) {
 func TestCheckIsSafeForConcurrentUse(t *testing.T) {
 	var wg sync.WaitGroup
 	for range 4 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for _, c := range guardtest.Rejected[:20] {
 				if guard.Check(c.SQL) == nil {
 					t.Errorf("Check(%q) = nil, want a *Violation", c.SQL)
@@ -125,7 +123,7 @@ func TestCheckIsSafeForConcurrentUse(t *testing.T) {
 					t.Errorf("Check(%q) = %v, want nil", sql, err)
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 }
@@ -142,8 +140,7 @@ func FuzzCheck(f *testing.F) {
 	f.Fuzz(func(t *testing.T, sql string) {
 		err := guard.Check(sql)
 		if err != nil {
-			var v *guard.Violation
-			if !errors.As(err, &v) {
+			if _, ok := errors.AsType[*guard.Violation](err); !ok {
 				t.Fatalf("Check(%q) = %v (%T), want a *Violation", sql, err, err)
 			}
 			return

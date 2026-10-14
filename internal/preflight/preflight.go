@@ -197,7 +197,7 @@ func roleMemberships(ctx context.Context, q engine.Querier, role string) ([]Find
 		return nil, err
 	}
 	var found []Finding
-	for _, granted := range strings.Fields(text(row[0])) {
+	for granted := range strings.FieldsSeq(text(row[0])) {
 		found = append(found, Finding{Severity: serverRoles[granted], Check: "role_membership", Detail: "member of " + granted})
 	}
 	return found, nil

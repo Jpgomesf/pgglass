@@ -376,9 +376,7 @@ func TestParallelQueriesUseSeparateConnections(t *testing.T) {
 		pids = map[string]bool{}
 	)
 	for i := range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			res, err := m.Query(t.Context(), db, engine.Query{
 				SQL:    "SELECT $1::int, pg_backend_pid(), count(*), pg_sleep(0.05) FROM app.events WHERE id % 20 = $1",
 				Params: []any{i},
@@ -394,7 +392,7 @@ func TestParallelQueriesUseSeparateConnections(t *testing.T) {
 			mu.Lock()
 			pids[deref(row[1])] = true
 			mu.Unlock()
-		}()
+		})
 	}
 	wg.Wait()
 	if len(pids) < 2 {

@@ -22,8 +22,6 @@ func equal[T any](t *testing.T, got, want T) {
 	}
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func TestConnectionLines(t *testing.T) {
 	c := connections{Max: 100, Used: 9, States: []stateCount{{"idle", 5}, {"active", 2}, {"", 2}}}
 	equal(t, connectionLines(c, super), []string{"9 of max_connections 100: idle 5, active 2, no state 2"})
@@ -89,7 +87,7 @@ func TestStatisticsLines(t *testing.T) {
 	equal(t, deadTupleLines(nil, clean), []string{"none"})
 	equal(t, deadTupleLines([]table{
 		{Name: "app.orders", Dead: 25, Live: 75},
-		{Name: `app."Order Lines"`, Dead: 10, Live: 1000, AutovacuumSecondsAgo: ptr[int64](7200)},
+		{Name: `app."Order Lines"`, Dead: 10, Live: 1000, AutovacuumSecondsAgo: new(int64(7200))},
 	}, clean), []string{
 		"app.orders: 25.0% dead (25 dead, 75 live), never autovacuumed",
 		`app."Order Lines": 1.0% dead (10 dead, 1000 live), autovacuumed 2h0m0s ago`,
@@ -104,7 +102,7 @@ func TestStatisticsLines(t *testing.T) {
 
 	equal(t, replicationLines(replication{}, clean), []string{"not a replica"})
 	equal(t, replicationLines(replication{Replica: true}, clean), []string{"replica: no transaction replayed yet"})
-	equal(t, replicationLines(replication{Replica: true, ReplayedSecondsAgo: ptr[int64](3), UnreplayedBytes: ptr[int64](8192)}, clean),
+	equal(t, replicationLines(replication{Replica: true, ReplayedSecondsAgo: new(int64(3)), UnreplayedBytes: new(int64(8192))}, clean),
 		[]string{"replica: last transaction replayed 3s ago, 8192 bytes of received WAL not replayed yet"})
 }
 
@@ -131,7 +129,7 @@ func TestSectionRun(t *testing.T) {
 		q    *fakeQuerier
 		want []string
 	}{
-		{&fakeQuerier{value: ptr(`{"Database": "app", "Hit": 1, "Read": 1}`)}, []string{"50.00% in database app"}},
+		{&fakeQuerier{value: new(`{"Database": "app", "Hit": 1, "Read": 1}`)}, []string{"50.00% in database app"}},
 		{&fakeQuerier{err: &engine.QueryError{SQLState: "42501", Message: "permission denied for view pg_stat_database"}},
 			[]string{"not visible to role ro_clean"}},
 		{&fakeQuerier{err: &engine.QueryError{SQLState: "57014", Message: "canceling statement due to statement timeout"}},
@@ -150,8 +148,8 @@ func TestSectionRun(t *testing.T) {
 	boom := errors.New("dial tcp: connection refused")
 	for _, q := range []*fakeQuerier{
 		{err: boom},
-		{value: ptr(`{"Database": "app", "Hits": 1}`)},
-		{value: ptr(`{}`), truncated: true},
+		{value: new(`{"Database": "app", "Hits": 1}`)},
+		{value: new(`{}`), truncated: true},
 	} {
 		if got, err := s.run(context.Background(), q, clean); err == nil {
 			t.Errorf("run = %q, want an error", got)
@@ -168,8 +166,8 @@ func TestCheckFailsOnWhatPostgresDidNotRaise(t *testing.T) {
 		queries int
 	}{
 		{&fakeQuerier{err: errors.New("dial tcp: connection refused")}, "health: current role: dial tcp: connection refused", 1},
-		{&fakeQuerier{value: ptr(`{"Role": "ro_clean", "Superuser": true}`)}, `health: current role: json: unknown field "Superuser"`, 1},
-		{&fakeQuerier{value: ptr(`{"Role": "ro_clean", "AllStats": false}`)}, `health: connections: json: unknown field "Role"`, 2},
+		{&fakeQuerier{value: new(`{"Role": "ro_clean", "Superuser": true}`)}, `health: current role: json: unknown field "Superuser"`, 1},
+		{&fakeQuerier{value: new(`{"Role": "ro_clean", "AllStats": false}`)}, `health: connections: json: unknown field "Role"`, 2},
 	} {
 		lines, err := check(context.Background(), tc.q, sections(longRunning))
 		if lines != nil || err == nil || err.Error() != tc.want {

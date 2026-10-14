@@ -253,8 +253,7 @@ func TestGateStrict(t *testing.T) {
 	rc, calls := fakeChecks(config.RoleCheckStrict, report(blockReport))
 	for range 2 {
 		_, err := rc.gate(t.Context(), "su")
-		var blocked *blockedError
-		if !errors.As(err, &blocked) {
+		if _, ok := errors.AsType[*blockedError](err); !ok {
 			t.Errorf("gate = %v, want a *blockedError", err)
 		}
 	}
@@ -386,13 +385,11 @@ func TestGateAuditsOnceUnderConcurrency(t *testing.T) {
 		notices atomic.Int32
 	)
 	for range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			if notice, _ := rc.gate(context.Background(), "reader"); notice != "" {
 				notices.Add(1)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if calls.Load() != 1 || notices.Load() != 1 {

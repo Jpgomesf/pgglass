@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/jpgomesf/pgglass/internal/engine"
@@ -36,8 +37,6 @@ func columns(p *introspect.TableProfile) map[string]introspect.ColumnProfile {
 	return byName
 }
 
-func ptrTo(s string) *string { return &s }
-
 func equalColumns(t *testing.T, what string, got, want []introspect.ColumnProfile) {
 	t.Helper()
 	if !reflect.DeepEqual(got, want) {
@@ -46,17 +45,17 @@ func equalColumns(t *testing.T, what string, got, want []introspect.ColumnProfil
 }
 
 func showColumns(cols []introspect.ColumnProfile) string {
-	var s string
+	var s strings.Builder
 	for _, c := range cols {
-		s += fmt.Sprintf("\n  %s %s nulls=%d distinct=%d", c.Name, c.Type, c.Nulls, c.Distinct)
+		fmt.Fprintf(&s, "\n  %s %s nulls=%d distinct=%d", c.Name, c.Type, c.Nulls, c.Distinct)
 		if st := c.Stats; st != nil {
-			s += fmt.Sprintf(" stats=%+v", *st)
+			fmt.Fprintf(&s, " stats=%+v", *st)
 			if st.Min != nil && st.Max != nil {
-				s += fmt.Sprintf(" min=%q max=%q", *st.Min, *st.Max)
+				fmt.Fprintf(&s, " min=%q max=%q", *st.Min, *st.Max)
 			}
 		}
 	}
-	return s
+	return s.String()
 }
 
 // The app fixture is analyzed, and every row is in ANALYZE's sample, so its
@@ -71,7 +70,7 @@ func TestProfileReadsPgStats(t *testing.T) {
 		{Name: "status", Type: "app.order_status", Stats: &introspect.ColumnStats{Distinct: 4, Width: 4,
 			Common: []string{"paid", "shipped", "pending", "cancelled"}, Freqs: []float64{0.26, 0.26, 0.24, 0.24}}},
 		{Name: "total", Type: "numeric(12,2)", Stats: &introspect.ColumnStats{Distinct: -1, Width: 6,
-			Min: ptrTo("12.34"), Max: ptrTo("617.00")}},
+			Min: new("12.34"), Max: new("617.00")}},
 		{Name: "metadata", Type: "jsonb", Stats: &introspect.ColumnStats{NullFrac: 0.16, Distinct: 4, Width: 45,
 			Common: []string{`{"items": 2, "channel": "store"}`, `{"items": 4, "channel": "store"}`, `{"items": 3, "channel": "web"}`, `{"items": 1, "channel": "web"}`},
 			Freqs:  []float64{0.26, 0.24, 0.18, 0.16}}},
@@ -122,7 +121,7 @@ func TestProfileShowsOnlyTheColumnsTheRoleCanSelect(t *testing.T) {
 		t.Fatalf("profile of secrets = %+v", p)
 	}
 	equalColumns(t, "secrets", p.Columns, []introspect.ColumnProfile{
-		{Name: "id", Type: "integer", Stats: &introspect.ColumnStats{Distinct: -1, Width: 4, Min: ptrTo("1"), Max: ptrTo("30")}},
+		{Name: "id", Type: "integer", Stats: &introspect.ColumnStats{Distinct: -1, Width: 4, Min: new("1"), Max: new("30")}},
 		{Name: "label", Type: "text", Stats: &introspect.ColumnStats{Distinct: 3, Width: 8,
 			Common: []string{"label 0", "label 1", "label 2"}, Freqs: []float64{0.33333334, 0.33333334, 0.33333334}}},
 	})

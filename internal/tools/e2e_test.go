@@ -363,9 +363,7 @@ func TestParallelQueriesOnOneConnection(t *testing.T) {
 		pids = map[string]bool{}
 	)
 	for i := range 20 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			res, err := s.CallTool(t.Context(), &mcp.CallToolParams{Name: "pg_query", Arguments: args("clean",
 				"SELECT $1::int AS i, count(*) AS n, pg_backend_pid() AS pid, pg_sleep(0.05) FROM events WHERE id % 20 = $1",
 				"params", []any{i})})
@@ -383,7 +381,7 @@ func TestParallelQueriesOnOneConnection(t *testing.T) {
 			mu.Lock()
 			pids[m[2]] = true
 			mu.Unlock()
-		}()
+		})
 	}
 	wg.Wait()
 	if len(pids) < 2 {

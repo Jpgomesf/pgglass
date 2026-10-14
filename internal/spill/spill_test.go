@@ -26,15 +26,13 @@ import (
 
 var t0 = time.Date(2026, 10, 12, 10, 15, 30, 0, time.UTC)
 
-func str(v string) *string { return &v }
-
 func people() *result.Result {
 	return &result.Result{
 		Columns: []result.Column{
 			{Name: "id", TypeOID: pgtype.Int4OID, TypeName: "int4"},
 			{Name: "name", TypeOID: pgtype.TextOID, TypeName: "text"},
 		},
-		Rows: [][]*string{{str("1"), str("Ada")}, {str("2"), nil}, {str("3"), str("")}},
+		Rows: [][]*string{{new("1"), new("Ada")}, {new("2"), nil}, {new("3"), new("")}},
 	}
 }
 
@@ -46,9 +44,9 @@ func numbered(n int) *result.Result {
 	for i := 1; i <= n; i++ {
 		var label *string
 		if i%10 != 0 {
-			label = str(fmt.Sprintf("label, \"number\" %d", i))
+			label = new(fmt.Sprintf("label, \"number\" %d", i))
 		}
-		res.Rows = append(res.Rows, []*string{str(strconv.Itoa(i)), label})
+		res.Rows = append(res.Rows, []*string{new(strconv.Itoa(i)), label})
 	}
 	return res
 }
@@ -73,7 +71,7 @@ func inlineOf(t *testing.T, res *result.Result, f render.Format, footer string) 
 
 func spillPath(t *testing.T, out string) string {
 	t.Helper()
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if path, ok := strings.CutPrefix(line, "Full result: "); ok {
 			return path
 		}
@@ -143,7 +141,7 @@ func TestOutputFooterCountsRowsAndNotesTruncation(t *testing.T) {
 
 func TestOutputCutsInlineCellsAt200Characters(t *testing.T) {
 	res := people()
-	res.Rows[0][1] = str(strings.Repeat("é", 1000))
+	res.Rows[0][1] = new(strings.Repeat("é", 1000))
 	out, err := newStore(t).OutputWithin("pg_query", "prod", res, render.TSV, 10_000)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +175,7 @@ func TestOutputInlineBoundary(t *testing.T) {
 
 func TestOutputSpillsTheFullResultAsCSV(t *testing.T) {
 	res := numbered(50)
-	res.Rows[0][1] = str(strings.Repeat("wide ", 100))
+	res.Rows[0][1] = new(strings.Repeat("wide ", 100))
 	store := newStore(t)
 
 	out, err := store.OutputWithin("pg_query", "prod", res, render.Markdown, 200)
@@ -237,7 +235,7 @@ func TestOutputSummary(t *testing.T) {
 		cells := make([]*string, len(row))
 		for j, v := range row {
 			if v != "" || j != 2 {
-				cells[j] = str(v)
+				cells[j] = new(v)
 			}
 		}
 		if i == 1 {
@@ -287,7 +285,7 @@ func TestOutputSummaryStaysWithinTheLimit(t *testing.T) {
 	for range 10 {
 		row := make([]*string, len(res.Columns))
 		for j := range row {
-			row[j] = str(strings.Repeat("😀", 100))
+			row[j] = new(strings.Repeat("😀", 100))
 		}
 		res.Rows = append(res.Rows, row)
 	}
@@ -327,7 +325,7 @@ func longNamed() *result.Result {
 	for range 50 {
 		row := make([]*string, len(res.Columns))
 		for j := range row {
-			row[j] = str("value")
+			row[j] = new("value")
 		}
 		res.Rows = append(res.Rows, row)
 	}
@@ -409,7 +407,7 @@ func wholeOf(t *testing.T, res *result.Result, footer string) string {
 func TestOutputWholeKeepsCellsWhole(t *testing.T) {
 	store := newStore(t)
 	res := people()
-	res.Rows[0][1] = str(strings.Repeat("é", 300))
+	res.Rows[0][1] = new(strings.Repeat("é", 300))
 	if out, err := store.OutputWhole("pg_profile", "prod", res, render.TSV, 10_000); err != nil || out != wholeOf(t, res, "(3 rows)") {
 		t.Errorf("OutputWhole = %v:\n%s\nwant the cell whole", err, out)
 	}
@@ -530,11 +528,9 @@ func TestConcurrentSpillsGetUniqueFiles(t *testing.T) {
 	errs := make([]error, n)
 	var wg sync.WaitGroup
 	for i := range n {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			outs[i], errs[i] = store.OutputWithin("pg_query", "prod", res, render.TSV, 10)
-		}()
+		})
 	}
 	wg.Wait()
 

@@ -123,9 +123,7 @@ func TestCacheConcurrentUse(t *testing.T) {
 	var l counter
 	var wg sync.WaitGroup
 	for g := range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range 200 {
 				key := fmt.Sprintf("k%d", (g+i)%8)
 				got, err := c.Get(key, l.load(key))
@@ -137,7 +135,7 @@ func TestCacheConcurrentUse(t *testing.T) {
 					clock.Advance(20 * time.Second)
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if n := l.calls.Load(); n < 8 {

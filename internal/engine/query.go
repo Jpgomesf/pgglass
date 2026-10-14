@@ -193,8 +193,7 @@ func queryError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return fmt.Errorf("query cancelled: %w", ctx.Err())
 	}
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) {
+	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		return &QueryError{
 			SQLState: pgErr.Code,
 			Message:  validUTF8(pgErr.Message),

@@ -58,9 +58,7 @@ func TestThroughPgBouncerInTransactionMode(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for i := range 50 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			schema := "s" + strconv.Itoa(1+i%2)
 			res, err := m.Query(t.Context(), db, engine.Query{
 				SQL:        "SELECT v, $1::int, pg_sleep(0.02) FROM t",
@@ -74,7 +72,7 @@ func TestThroughPgBouncerInTransactionMode(t *testing.T) {
 			if got := deref(res.Rows[0][0]) + " " + deref(res.Rows[0][1]); got != schema+" "+strconv.Itoa(i) {
 				t.Errorf("query %d in %s got %s", i, schema, got)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
