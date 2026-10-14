@@ -25,13 +25,13 @@ func (h *Handlers) explain(ctx context.Context, raw json.RawMessage, c *call) (s
 		return "", err
 	}
 	stmt, err := explain.New(args.SQL, args.Analyze)
-	if err == nil && args.Analyze {
-		err = h.confirm(c, "pg_explain with analyze", []string{args.Connection}, args.SQL, nil)
-	}
 	if err != nil {
 		return "", err
 	}
 	searchPath, err := h.searchPath(args.Connection, args.Schema)
+	if err == nil && args.Analyze {
+		err = h.confirm(c, "pg_explain with analyze", []target{{conn: args.Connection, searchPath: searchPath}}, args.SQL, nil)
+	}
 	if err != nil {
 		return "", err
 	}

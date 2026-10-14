@@ -40,10 +40,15 @@ func (h *Handlers) query(ctx context.Context, raw json.RawMessage, c *call) (str
 	if err != nil {
 		return "", err
 	}
-	if err := h.confirm(c, "pg_query", []string{args.Connection}, args.SQL, args.Params); err != nil {
+	searchPath, err := h.searchPath(args.Connection, args.Schema)
+	if err != nil {
 		return "", err
 	}
-	res, err := h.queryOn(ctx, args.Connection, args, c)
+	on := target{conn: args.Connection, searchPath: searchPath}
+	if err := h.confirm(c, "pg_query", []target{on}, args.SQL, args.Params); err != nil {
+		return "", err
+	}
+	res, err := h.queryOn(ctx, on, args, c)
 	if err != nil {
 		return "", err
 	}
@@ -64,18 +69,15 @@ func (h *Handlers) checkQuery(args queryArgs) (render.Format, error) {
 	return format, guard.Check(args.SQL)
 }
 
-func (h *Handlers) queryOn(ctx context.Context, conn string, args queryArgs, c *call) (*result.Result, error) {
-	searchPath, err := h.searchPath(conn, args.Schema)
-	if err != nil {
+func (h *Handlers) queryOn(ctx context.Context, on target, args queryArgs, c *call) (*result.Result, error) {
+	var err error
+	if c.notice, err = h.checks.gate(ctx, on.conn); err != nil {
 		return nil, err
 	}
-	if c.notice, err = h.checks.gate(ctx, conn); err != nil {
-		return nil, err
-	}
-	res, err := h.engine.Query(ctx, conn, engine.Query{
+	res, err := h.engine.Query(ctx, on.conn, engine.Query{
 		SQL:        args.SQL,
 		Params:     args.Params,
-		SearchPath: searchPath,
+		SearchPath: on.searchPath,
 		MaxRows:    args.MaxRows,
 	})
 	if err != nil {

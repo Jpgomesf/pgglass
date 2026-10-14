@@ -159,21 +159,22 @@ Error positions point into `sql` as written. A summary over 10 KB is written to 
 
 ## Confirmation
 
-A connection with [`confirm`](configuration.md#per-connection-options) set asks the user before a statement runs on it: before each `pg_query`, and each `pg_explain` with `analyze`, which runs the statement. The client shows a form with no fields that names the tool, the connections and the statement, with its `params`:
+A connection with [`confirm`](configuration.md#per-connection-options) set asks the user before a statement runs on it: before each `pg_query`, and each `pg_explain` with `analyze`, which runs the statement. The client shows a form with no fields that names the tool, the connections and the statement, with its `params` and, on each connection where the server sets one, the `search_path` that resolves its unqualified names, quoted as Postgres takes it:
 
 ```
 Allow pg_query to run this statement on prod-app?
 
-SELECT count(*) FROM app.orders WHERE status = $1
+SELECT count(*) FROM orders WHERE status = $1
 
 params: ["paid"]
+search_path on prod-app: "app"
 ```
 
 - Accepted, the call goes on as it would without `confirm`, role check included. Declined or cancelled, it fails with `declined by the user`, and nothing runs.
-- The question comes once the arguments and the guard have passed, and before the role check and the `search_path` check: a statement the guard rejects is not asked about.
-- A fan-out asks once, naming the connections in `connections` that set `confirm`. Declined, the statement runs on none of them.
+- The question comes once the arguments, the guard and the `search_path` check have passed, and before the role check: a statement they reject is not asked about.
+- A fan-out asks once, naming the connections in `connections` that set `confirm`, except those whose `search_path` is refused: they fail as they would alone. Declined, the statement runs on none of them.
 - The client must support form elicitation. Without it, the call is refused before anything runs: `pg_query on prod-app requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation`.
-- From protocol revision 2026-07-28 the question comes back as the result of the call, and the client calls again with the answer; before it, the server asks the client during the call, which it can only do over stdio and for a client that declared form elicitation when it connected, whatever a call's `_meta` claims: over [`--http`](configuration.md#streamable-http), an older client is refused as one without form elicitation is. An answer holds only for the question it answers: a call that brings it back with another statement, other `params` or other connections asks again.
+- From protocol revision 2026-07-28 the question comes back as the result of the call, and the client calls again with the answer; before it, the server asks the client during the call, which it can only do over stdio and for a client that declared form elicitation when it connected, whatever a call's `_meta` claims: over [`--http`](configuration.md#streamable-http), an older client is refused as one without form elicitation is. An answer holds only for the question it answers: a call that brings it back with another statement, other `params`, other connections or another `search_path` asks again.
 - The call writes its audit line once answered, `declined` when the user declines or cancels. A client that fails to ask ends the call with its own error: nothing runs, and no audit line is written.
 - The other tools do not ask: they run only SQL the server writes.
 

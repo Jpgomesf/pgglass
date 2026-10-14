@@ -20,10 +20,11 @@ const maxFanout = 10
 var fanoutColumn = result.Column{Name: "connection", TypeOID: pgtype.TextOID, TypeName: "text"}
 
 type fanoutResult struct {
-	conn   string
-	res    *result.Result
-	notice string
-	err    error
+	conn       string
+	searchPath string
+	res        *result.Result
+	notice     string
+	err        error
 }
 
 func (h *Handlers) fanout(ctx context.Context, args queryArgs, c *call) (string, error) {
@@ -32,8 +33,9 @@ func (h *Handlers) fanout(ctx context.Context, args queryArgs, c *call) (string,
 	}
 	c.audited = true
 	format, err := h.checkQuery(args)
+	results, ready := h.searchPaths(args)
 	if err == nil {
-		err = h.confirm(c, "pg_query", args.Connections, args.SQL, args.Params)
+		err = h.confirm(c, "pg_query", ready, args.SQL, args.Params)
 	}
 	if err != nil {
 		if !asksUser(err) {
@@ -43,9 +45,22 @@ func (h *Handlers) fanout(ctx context.Context, args queryArgs, c *call) (string,
 		}
 		return "", err
 	}
-	results := h.queryEach(ctx, args, c)
+	h.queryEach(ctx, args, results, c)
 	c.notice = fanoutNotices(results)
 	return h.fanoutText(results, format, h.room(c))
+}
+
+func (h *Handlers) searchPaths(args queryArgs) ([]fanoutResult, []target) {
+	results := make([]fanoutResult, len(args.Connections))
+	var ready []target
+	for i, conn := range args.Connections {
+		searchPath, err := h.searchPath(conn, args.Schema)
+		results[i] = fanoutResult{conn: conn, searchPath: searchPath, err: err}
+		if err == nil {
+			ready = append(ready, target{conn: conn, searchPath: searchPath})
+		}
+	}
+	return results, ready
 }
 
 func (h *Handlers) checkFanout(args queryArgs) error {
@@ -66,21 +81,20 @@ func (h *Handlers) checkFanout(args queryArgs) error {
 	return nil
 }
 
-func (h *Handlers) queryEach(ctx context.Context, args queryArgs, c *call) []fanoutResult {
-	results := make([]fanoutResult, len(args.Connections))
+func (h *Handlers) queryEach(ctx context.Context, args queryArgs, results []fanoutResult, c *call) {
 	var wg sync.WaitGroup
-	for i, conn := range args.Connections {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			cc := c.on(conn)
-			res, err := h.queryOn(ctx, conn, args, cc)
-			h.audit(cc, err)
-			results[i] = fanoutResult{conn: conn, res: res, notice: cc.notice, err: err}
-		}()
+	for i := range results {
+		r := &results[i]
+		wg.Go(func() {
+			cc := c.on(r.conn)
+			if r.err == nil {
+				r.res, r.err = h.queryOn(ctx, target{conn: r.conn, searchPath: r.searchPath}, args, cc)
+			}
+			h.audit(cc, r.err)
+			r.notice = cc.notice
+		})
 	}
 	wg.Wait()
-	return results
 }
 
 func (c *call) on(conn string) *call {

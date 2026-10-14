@@ -153,8 +153,8 @@ func TestConfirmRunsNothingWhenTheClientFailsToAsk(t *testing.T) {
 	}
 }
 
-// Only pg_query and pg_explain with analyze ask, once their arguments and
-// the guard pass.
+// Only pg_query and pg_explain with analyze ask, once their arguments, the
+// guard and the search_path check pass.
 func TestConfirmAsksOnlyBeforeAStatementRuns(t *testing.T) {
 	cfg := newConfig(config.RoleCheckOff, map[string]config.Connection{
 		"prod":    confirmed(unusedDSN),
@@ -176,6 +176,10 @@ func TestConfirmAsksOnlyBeforeAStatementRuns(t *testing.T) {
 		{"pg_query", args("prod", "SELECT 1", "format", "csv"), "format must be one of"},
 		{"pg_query", args("prod", "SELECT 1", "verbose", true), `unknown field "verbose"`},
 		{"pg_query", fanoutArgs([]string{"prod", "prod"}, "SELECT 1"), `connections lists "prod" twice`},
+		{"pg_query", args("prod", "SELECT 1", "schema", "net"), "query rejected: schema net is not allowed as the search_path"},
+		{"pg_query", args("prod", "SELECT 1", "schema", strings.Repeat("s", 64)), "schema is 64 bytes"},
+		{"pg_query", fanoutArgs([]string{"prod"}, "SELECT 1", "schema", "aws_s3"), "prod: query rejected: schema aws_s3 is not allowed as the search_path"},
+		{"pg_explain", args("prod", "SELECT 1", "analyze", true, "schema", "net"), "query rejected: schema net is not allowed as the search_path"},
 		{"pg_schema", map[string]any{"connection": "prod"}, "connect"},
 		{"pg_search", map[string]any{"connection": "prod", "pattern": "orders"}, "connect"},
 		{"pg_profile", map[string]any{"connection": "prod", "table": "app.orders"}, "connect"},
@@ -371,5 +375,49 @@ func TestConfirmTakesAnOlderClientAtWhatItDeclaredWhenItConnected(t *testing.T) 
 		if wantLines := []auditLine{toolLine("pg_query", "prod", sql, 0, "error")}; !slices.Equal(lines, wantLines) {
 			t.Errorf("%s: audit lines %+v, want %+v", version, lines, wantLines)
 		}
+	}
+}
+
+// The question shows the search_path that resolves the statement's names on
+// each connection it asks about, so an answer holds for that search_path
+// alone. A connection whose search_path is refused is not asked about: it
+// fails as it would alone.
+func TestConfirmShowsTheSearchPathOfEachConnection(t *testing.T) {
+	cfg := newConfig(config.RoleCheckWarn, map[string]config.Connection{
+		"prod":    {Source: "direct", DSN: unusedDSN, DefaultSchema: "app", Confirm: true},
+		"prod2":   confirmed(unusedDSN),
+		"netted":  {Source: "direct", DSN: unusedDSN, DefaultSchema: "net", Confirm: true},
+		"staging": {Source: "direct", DSN: unusedDSN, DefaultSchema: "app"},
+	})
+	const sql = "SELECT * FROM orders"
+	for _, tc := range []struct {
+		tool     string
+		args     map[string]any
+		question string
+	}{
+		{"pg_query", args("prod", sql), "Allow pg_query to run this statement on prod?\n\n" + sql + "\n\nsearch_path on prod: \"app\""},
+		{"pg_query", args("prod", sql, "schema", "archive", "params", []any{1}),
+			"Allow pg_query to run this statement on prod?\n\n" + sql + "\n\nparams: [1]\nsearch_path on prod: \"archive\""},
+		{"pg_query", args("prod2", sql), "Allow pg_query to run this statement on prod2?\n\n" + sql},
+		{"pg_query", args("prod2", sql, "schema", `a "b", c`), "Allow pg_query to run this statement on prod2?\n\n" + sql + "\n\nsearch_path on prod2: " + `"a ""b"", c"`},
+		{"pg_query", fanoutArgs([]string{"prod2", "netted", "staging", "prod"}, sql),
+			"Allow pg_query to run this statement on prod2, prod?\n\n" + sql + "\n\nsearch_path on prod: \"app\""},
+		{"pg_query", fanoutArgs([]string{"prod2", "prod"}, sql, "schema", "archive"),
+			"Allow pg_query to run this statement on prod2, prod?\n\n" + sql + "\n\nsearch_path on prod2: \"archive\"\nsearch_path on prod: \"archive\""},
+		{"pg_explain", args("prod", sql, "analyze", true), "Allow pg_explain with analyze to run this statement on prod?\n\n" + sql + "\n\nsearch_path on prod: \"app\""},
+	} {
+		s, u := connectUser(t, cfg, "", "decline")
+		if got := s.fails(t, tc.tool, tc.args); got != "declined by the user" {
+			t.Errorf("%s %v = %q, want it declined", tc.tool, tc.args, got)
+		}
+		if got := u.questions(); !slices.Equal(got, []string{tc.question}) {
+			t.Errorf("%s %v: questions\n%q\nwant\n%q", tc.tool, tc.args, got, tc.question)
+		}
+	}
+
+	s, u := connectUser(t, cfg, "", "accept")
+	want := "netted: query rejected: schema net is not allowed as the search_path: its functions are denied"
+	if got := s.fails(t, "pg_query", fanoutArgs([]string{"netted"}, sql)); got != want || len(u.questions()) != 0 {
+		t.Errorf("a fan-out on a refused search_path alone = %q, asked %q; want %q, unasked", got, u.questions(), want)
 	}
 }

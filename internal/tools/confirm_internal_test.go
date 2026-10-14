@@ -33,22 +33,36 @@ func TestFormElicitation(t *testing.T) {
 }
 
 func TestQuestionShowsTheStatementAndItsParams(t *testing.T) {
+	params := []any{json.Number("12345678901234567890.5"), "a<b&c>", nil, true}
 	for _, tc := range []struct {
+		asked  []target
 		params []any
 		want   string
 	}{
-		{nil, "Allow pg_query to run this statement on prod, prod2?\n\nSELECT $1"},
-		{[]any{json.Number("12345678901234567890.5"), "a<b&c>", nil, true}, "Allow pg_query to run this statement on prod, prod2?\n\nSELECT $1\n\n" +
+		{on("prod", "prod2"), nil, "Allow pg_query to run this statement on prod, prod2?\n\nSELECT $1"},
+		{on("prod", "prod2"), params, "Allow pg_query to run this statement on prod, prod2?\n\nSELECT $1\n\n" +
 			`params: [12345678901234567890.5,"a<b&c>",null,true]`},
+		{[]target{{"prod", "app"}, {"prod2", ""}}, nil, "Allow pg_query to run this statement on prod, prod2?\n\nSELECT $1\n\n" +
+			`search_path on prod: "app"`},
+		{[]target{{"prod", `a"b`}, {"prod2", "app"}}, params, "Allow pg_query to run this statement on prod, prod2?\n\nSELECT $1\n\n" +
+			`params: [12345678901234567890.5,"a<b&c>",null,true]` + "\n" + `search_path on prod: "a""b"` + "\n" + `search_path on prod2: "app"`},
 	} {
-		got, err := question("pg_query", "prod, prod2", "SELECT $1", tc.params)
+		got, err := question("pg_query", tc.asked, "SELECT $1", tc.params)
 		if err != nil || got != tc.want {
-			t.Errorf("question with params %v = %q, %v; want %q", tc.params, got, err, tc.want)
+			t.Errorf("question on %v with params %v = %q, %v; want %q", tc.asked, tc.params, got, err, tc.want)
 		}
 	}
-	if _, err := question("pg_query", "prod", "SELECT $1", []any{json.Number("not a number")}); err == nil {
+	if _, err := question("pg_query", on("prod"), "SELECT $1", []any{json.Number("not a number")}); err == nil {
 		t.Error("a param JSON cannot encode: no error")
 	}
+}
+
+func on(conns ...string) []target {
+	targets := make([]target, len(conns))
+	for i, conn := range conns {
+		targets[i] = target{conn: conn}
+	}
+	return targets
 }
 
 func confirmHandlers() *Handlers {
@@ -62,23 +76,23 @@ func confirmHandlers() *Handlers {
 func TestConfirmGoesOnWhenNoConnectionSetsConfirm(t *testing.T) {
 	h := confirmHandlers()
 	for _, c := range []*call{{}, {canAsk: true}} {
-		if err := h.confirm(c, "pg_query", []string{"staging"}, "SELECT 1", nil); err != nil {
+		if err := h.confirm(c, "pg_query", []target{{"staging", "app"}}, "SELECT 1", nil); err != nil {
 			t.Errorf("can ask %t: %v", c.canAsk, err)
 		}
 	}
 }
 
 func TestConfirmRefusesAClientThatCannotAsk(t *testing.T) {
-	err := confirmHandlers().confirm(&call{}, "pg_query", []string{"prod", "staging", "prod2"}, "SELECT 1", nil)
+	err := confirmHandlers().confirm(&call{}, "pg_query", []target{{"prod", "app"}, {"staging", ""}, {"prod2", ""}}, "SELECT 1", nil)
 	want := "pg_query on prod, prod2 requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation"
 	if err == nil || err.Error() != want || asksUser(err) {
 		t.Errorf("confirm = %v, want %q", err, want)
 	}
 }
 
-func askFor(t *testing.T, h *Handlers, conns []string, sql string) *confirmRequest {
+func askFor(t *testing.T, h *Handlers, targets []target, sql string) *confirmRequest {
 	t.Helper()
-	err := h.confirm(&call{canAsk: true}, "pg_query", conns, sql, nil)
+	err := h.confirm(&call{canAsk: true}, "pg_query", targets, sql, nil)
 	var ask *confirmRequest
 	if !errors.As(err, &ask) || !asksUser(err) {
 		t.Fatalf("confirm = %v, want a question", err)
@@ -87,7 +101,7 @@ func askFor(t *testing.T, h *Handlers, conns []string, sql string) *confirmReque
 }
 
 func TestConfirmAsksWhenTheCallBringsNoAnswer(t *testing.T) {
-	ask := askFor(t, confirmHandlers(), []string{"staging", "prod"}, "SELECT 1")
+	ask := askFor(t, confirmHandlers(), on("staging", "prod"), "SELECT 1")
 	q := ask.question
 	if q.Mode != "form" || q.Message != "Allow pg_query to run this statement on prod?\n\nSELECT 1" {
 		t.Errorf("question: mode %q, message %q", q.Mode, q.Message)
@@ -107,7 +121,7 @@ func TestConfirmAsksWhenTheCallBringsNoAnswer(t *testing.T) {
 // A statement whose params the question cannot show is refused, never asked
 // about or run unconfirmed.
 func TestConfirmFailsWhenItCannotWriteTheQuestion(t *testing.T) {
-	err := confirmHandlers().confirm(&call{canAsk: true}, "pg_query", []string{"prod"}, "SELECT $1", []any{json.Number("not a number")})
+	err := confirmHandlers().confirm(&call{canAsk: true}, "pg_query", on("prod"), "SELECT $1", []any{json.Number("not a number")})
 	if err == nil || asksUser(err) || errors.Is(err, errDeclined) {
 		t.Errorf("confirm = %v, want the question's error", err)
 	}
@@ -115,30 +129,36 @@ func TestConfirmFailsWhenItCannotWriteTheQuestion(t *testing.T) {
 
 func TestConfirmKeysEachQuestionByWhatItAsks(t *testing.T) {
 	h := confirmHandlers()
-	first := askFor(t, h, []string{"prod"}, "SELECT 1").key
+	first := askFor(t, h, on("prod"), "SELECT 1").key
 	if !regexp.MustCompile(`^confirm-[0-9a-f]{16}$`).MatchString(first) {
 		t.Errorf("key %q", first)
 	}
-	if again := askFor(t, h, []string{"staging", "prod"}, "SELECT 1").key; again != first {
+	if again := askFor(t, h, []target{{"staging", "app"}, {"prod", ""}}, "SELECT 1").key; again != first {
 		t.Errorf("the same question: key %q, want %q", again, first)
 	}
+	keys := map[string]bool{first: true}
 	for _, tc := range []struct {
-		conns []string
-		sql   string
+		targets []target
+		sql     string
 	}{
-		{[]string{"prod"}, "SELECT 2"},
-		{[]string{"prod2"}, "SELECT 1"},
-		{[]string{"prod", "prod2"}, "SELECT 1"},
+		{on("prod"), "SELECT 2"},
+		{on("prod2"), "SELECT 1"},
+		{on("prod", "prod2"), "SELECT 1"},
+		{[]target{{"prod", "app"}}, "SELECT 1"},
+		{[]target{{"prod", "archive"}}, "SELECT 1"},
+		{[]target{{"prod", "app"}, {"prod2", "app"}}, "SELECT 1"},
 	} {
-		if key := askFor(t, h, tc.conns, tc.sql).key; key == first {
-			t.Errorf("%s on %v: key %q, the first question's", tc.sql, tc.conns, key)
+		key := askFor(t, h, tc.targets, tc.sql).key
+		if keys[key] {
+			t.Errorf("%s on %v: key %q, another question's", tc.sql, tc.targets, key)
 		}
+		keys[key] = true
 	}
 }
 
 func TestConfirmTakesOnlyAnAcceptedAnswerToItsQuestion(t *testing.T) {
 	h := confirmHandlers()
-	ask := askFor(t, h, []string{"prod"}, "SELECT 1")
+	ask := askFor(t, h, on("prod"), "SELECT 1")
 	for _, tc := range []struct {
 		name   string
 		answer mcp.InputResponse
@@ -152,14 +172,16 @@ func TestConfirmTakesOnlyAnAcceptedAnswerToItsQuestion(t *testing.T) {
 		{"an empty answer", nil, errDeclined},
 	} {
 		c := &call{canAsk: true, answers: mcp.InputResponseMap{ask.key: tc.answer}}
-		if err := h.confirm(c, "pg_query", []string{"prod"}, "SELECT 1", nil); !errors.Is(err, tc.want) {
+		if err := h.confirm(c, "pg_query", on("prod"), "SELECT 1", nil); !errors.Is(err, tc.want) {
 			t.Errorf("%s: confirm = %v, want %v", tc.name, err, tc.want)
 		}
 	}
-	other := askFor(t, h, []string{"prod"}, "SELECT 2")
-	c := &call{canAsk: true, answers: mcp.InputResponseMap{other.key: &mcp.ElicitResult{Action: "accept"}}}
-	if err := h.confirm(c, "pg_query", []string{"prod"}, "SELECT 1", nil); !asksUser(err) {
-		t.Errorf("an answer to another question: confirm = %v, want the question asked", err)
+	accept := &mcp.ElicitResult{Action: "accept"}
+	for _, other := range []*confirmRequest{askFor(t, h, on("prod"), "SELECT 2"), askFor(t, h, []target{{"prod", "app"}}, "SELECT 1")} {
+		c := &call{canAsk: true, answers: mcp.InputResponseMap{other.key: accept}}
+		if err := h.confirm(c, "pg_query", on("prod"), "SELECT 1", nil); !asksUser(err) {
+			t.Errorf("an answer to %q: confirm = %v, want the question asked", other.question.Message, err)
+		}
 	}
 }
 

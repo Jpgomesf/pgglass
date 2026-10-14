@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -46,21 +47,24 @@ func formElicitation(caps *mcp.ClientCapabilities) bool {
 	return caps.Elicitation.Form != nil || caps.Elicitation.URL == nil
 }
 
-func (h *Handlers) confirm(c *call, what string, conns []string, sql string, params []any) error {
-	var asked []string
-	for _, conn := range conns {
-		if h.cfg.Connections[conn].Confirm {
-			asked = append(asked, conn)
+type target struct {
+	conn, searchPath string
+}
+
+func (h *Handlers) confirm(c *call, what string, targets []target, sql string, params []any) error {
+	var asked []target
+	for _, t := range targets {
+		if h.cfg.Connections[t.conn].Confirm {
+			asked = append(asked, t)
 		}
 	}
 	if len(asked) == 0 {
 		return nil
 	}
-	on := strings.Join(asked, ", ")
 	if !c.canAsk {
-		return fmt.Errorf("%s on %s requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation", what, on)
+		return fmt.Errorf("%s on %s requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation", what, connNames(asked))
 	}
-	message, err := question(what, on, sql, params)
+	message, err := question(what, asked, sql, params)
 	if err != nil {
 		return err
 	}
@@ -77,16 +81,33 @@ func (h *Handlers) confirm(c *call, what string, conns []string, sql string, par
 	return errDeclined
 }
 
-func question(what, on, sql string, params []any) (string, error) {
-	text := fmt.Sprintf("Allow %s to run this statement on %s?\n\n%s", what, on, sql)
-	if len(params) == 0 {
+func question(what string, asked []target, sql string, params []any) (string, error) {
+	var notes []string
+	if len(params) > 0 {
+		var values strings.Builder
+		enc := json.NewEncoder(&values)
+		enc.SetEscapeHTML(false)
+		if err := enc.Encode(params); err != nil {
+			return "", err
+		}
+		notes = append(notes, "params: "+strings.TrimSuffix(values.String(), "\n"))
+	}
+	for _, t := range asked {
+		if t.searchPath != "" {
+			notes = append(notes, "search_path on "+t.conn+": "+pgx.Identifier{t.searchPath}.Sanitize())
+		}
+	}
+	text := fmt.Sprintf("Allow %s to run this statement on %s?\n\n%s", what, connNames(asked), sql)
+	if len(notes) == 0 {
 		return text, nil
 	}
-	var values strings.Builder
-	enc := json.NewEncoder(&values)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(params); err != nil {
-		return "", err
+	return text + "\n\n" + strings.Join(notes, "\n"), nil
+}
+
+func connNames(targets []target) string {
+	names := make([]string, len(targets))
+	for i, t := range targets {
+		names[i] = t.conn
 	}
-	return text + "\n\nparams: " + strings.TrimSuffix(values.String(), "\n"), nil
+	return strings.Join(names, ", ")
 }
