@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -262,9 +263,18 @@ func TestEveryToolHasAHumanReadableTitleOfItsOwn(t *testing.T) {
 }
 
 func TestServerIdentifiesAsPgglass(t *testing.T) {
-	s := connect(t, newConfig(config.RoleCheckWarn, nil))
-	if info := s.InitializeResult().ServerInfo; info == nil || info.Name != "pgglass" || info.Version != "test" {
-		t.Errorf("server info = %+v, want pgglass, version test", info)
+	want := mcp.Implementation{
+		Name:        "pgglass",
+		Title:       "pgglass",
+		Description: "Read-only PostgreSQL for AI agents across many databases, enforced by the server",
+		Version:     "test",
+		WebsiteURL:  "https://github.com/Jpgomesf/pgglass",
+	}
+	for _, version := range []string{mcp.SupportedProtocolVersions()[0], "2025-11-25"} {
+		s := connectAt(t, newConfig(config.RoleCheckWarn, nil), t.TempDir(), version)
+		if info := s.InitializeResult().ServerInfo; info == nil || !reflect.DeepEqual(*info, want) {
+			t.Errorf("%s: server info = %+v, want %+v", version, info, want)
+		}
 	}
 }
 

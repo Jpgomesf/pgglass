@@ -60,7 +60,13 @@ func New(cfg config.Config, eng *engine.Manager, store *spill.Store, auditLog io
 // NewServer returns an MCP server, named pgglass, that exposes the tools
 // and table resources of h and tells clients how to use the tools well.
 func NewServer(h *Handlers, version string) *mcp.Server {
-	s := mcp.NewServer(&mcp.Implementation{Name: "pgglass", Version: version}, &mcp.ServerOptions{Instructions: instructions})
+	s := mcp.NewServer(&mcp.Implementation{
+		Name:        "pgglass",
+		Title:       "pgglass",
+		Description: "Read-only PostgreSQL for AI agents across many databases, enforced by the server",
+		Version:     version,
+		WebsiteURL:  "https://github.com/Jpgomesf/pgglass",
+	}, &mcp.ServerOptions{Instructions: instructions})
 	s.AddTool(listConnectionsTool, h.handle("pg_list_connections", h.listConnections))
 	s.AddTool(queryTool, h.handle("pg_query", h.query))
 	s.AddTool(schemaTool, h.handle("pg_schema", h.schema))

@@ -9,9 +9,13 @@ import (
 
 type registryEntry struct {
 	Name        string `json:"name"`
+	Title       string `json:"title"`
 	Description string `json:"description"`
 	Version     string `json:"version"`
-	Packages    []struct {
+	Repository  struct {
+		URL string `json:"url"`
+	} `json:"repository"`
+	Packages []struct {
 		RegistryType string `json:"registryType"`
 		Identifier   string `json:"identifier"`
 	} `json:"packages"`
@@ -67,5 +71,23 @@ func TestReleaseLabelsTheImageWithTheServerName(t *testing.T) {
 	label := "io.modelcontextprotocol.server.name: " + entry.Name + "\n"
 	if !strings.Contains(readText(t, ".goreleaser.yml"), label) {
 		t.Errorf(".goreleaser.yml lacks the label %q, which the MCP Registry matches against server.json", strings.TrimSpace(label))
+	}
+}
+
+// The server introduces itself to clients over stdio as server.json does to
+// the MCP Registry: by title, description and website.
+func TestServerInfoMatchesServerJSON(t *testing.T) {
+	isolateHome(t)
+	entry := readRegistryEntry(t)
+	session, logs, done := connectStdio(t, "--config", writeConfig(t, connections(map[string]any{})))
+	info := session.InitializeResult().ServerInfo
+	if info.Name != "pgglass" || info.Title != entry.Title || info.Description != entry.Description || info.WebsiteURL != entry.Repository.URL {
+		t.Errorf("server info = %+v, want pgglass, titled %q, described %q, at %s", info, entry.Title, entry.Description, entry.Repository.URL)
+	}
+	if err := session.Close(); err != nil {
+		t.Errorf("close: %v", err)
+	}
+	if code := exitCode(t, done, logs); code != 0 {
+		t.Errorf("run = %d after the client left, want 0\nstderr:\n%s", code, logs)
 	}
 }
