@@ -231,3 +231,18 @@ func TestQueryErrorKeepsOtherErrors(t *testing.T) {
 		t.Errorf("queryError = %v, want the error unchanged", err)
 	}
 }
+
+// JSON carries each byte that is not UTF-8 as U+FFFD, three bytes, so values
+// and error texts replace them first, to measure what the client decodes.
+func TestValuesAndErrorsReplaceBytesThatAreNotUTF8(t *testing.T) {
+	res, _ := collectAll(limits{MaxRows: 10, MaxBytes: 1000}, rawRow("caf\xe9\xe9", "café", "\x00"))
+	if row := res.Rows[0]; *row[0] != "caf�" || *row[1] != "café" || row[2] != nil {
+		t.Errorf("row = %q, %q, %v; want the run of bytes that are not UTF-8 replaced by one U+FFFD", *row[0], *row[1], row[2])
+	}
+	err := queryError(context.Background(), &pgconn.PgError{Code: "22P02", Message: "bad \"\xff\"", Detail: "d\xfe", Hint: "h\xfd", Position: 3})
+	want := &QueryError{SQLState: "22P02", Message: "bad \"�\"", Detail: "d�", Hint: "h�", Position: 3}
+	var got *QueryError
+	if !errors.As(err, &got) || *got != *want {
+		t.Errorf("queryError = %+v, want %+v", got, want)
+	}
+}

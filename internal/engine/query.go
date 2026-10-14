@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -121,11 +123,15 @@ func textRow(raw [][]byte) []*string {
 	row := make([]*string, len(raw))
 	for i, v := range raw {
 		if v != nil {
-			s := string(v)
+			s := validUTF8(string(v))
 			row[i] = &s
 		}
 	}
 	return row
+}
+
+func validUTF8(s string) string {
+	return strings.ToValidUTF8(s, string(utf8.RuneError))
 }
 
 func columns(types *pgtype.Map, fields []pgconn.FieldDescription) []result.Column {
@@ -190,9 +196,9 @@ func queryError(ctx context.Context, err error) error {
 	if errors.As(err, &pgErr) {
 		return &QueryError{
 			SQLState: pgErr.Code,
-			Message:  pgErr.Message,
-			Detail:   pgErr.Detail,
-			Hint:     pgErr.Hint,
+			Message:  validUTF8(pgErr.Message),
+			Detail:   validUTF8(pgErr.Detail),
+			Hint:     validUTF8(pgErr.Hint),
 			Position: int(pgErr.Position),
 		}
 	}
