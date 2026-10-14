@@ -21,6 +21,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Check that server.json names the tag's version and image
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          jq -e --arg version "$version" --arg identifier "$IMAGE:$version" \
+            '.version == $version and .packages[0].registryType == "oci" and .packages[0].identifier == $identifier' server.json ||
+            { echo "::error file=server.json::server.json must name version $version and the image $IMAGE:$version"; exit 1; }
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod

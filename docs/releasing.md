@@ -23,7 +23,7 @@ Every action the workflows use is pinned to a commit SHA, GoReleaser to an exact
 ## Cut a release
 
 1. Check that CI is green on main.
-2. In [server.json](../server.json), set `version` and the tag in `packages[0].identifier` to the new version, without the `v`, and commit. `go test -run TestServerJSON .` checks that they agree.
+2. In [server.json](../server.json), set `version` and the tag in `packages[0].identifier` to the new version, without the `v`, and commit; a pre-release too, such as `1.1.0-rc.1`. `go test -run TestServerJSON .` checks that they agree. The release workflow checks them against the tag before GoReleaser runs, and fails unless `version` is the tag without its `v` and the identifier is `ghcr.io/jpgomesf/pgglass:<version>`.
 3. Tag and push:
 
    ```bash
