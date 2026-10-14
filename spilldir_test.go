@@ -3,6 +3,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -82,6 +84,17 @@ func wantRefused(t *testing.T) {
 	}
 }
 
+func TestSpillDirReportsWhyItCannotCreateTheTempDirectory(t *testing.T) {
+	t.Setenv("TMPDIR", filepath.Join(noCacheDir(t), "missing"))
+	if dir, err := spillDir(); dir != "" || !errors.Is(err, fs.ErrNotExist) || !strings.HasPrefix(err.Error(), "mkdir ") {
+		t.Errorf("spillDir() under a missing temp directory = %q, %v; want the error of creating its directory", dir, err)
+	}
+}
+
+type ownerless struct{ fs.FileInfo }
+
+func (ownerless) Sys() any { return nil }
+
 func TestPrivateChecksTheOwner(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := os.Mkdir(dir, 0o700); err != nil {
@@ -96,6 +109,11 @@ func TestPrivateChecksTheOwner(t *testing.T) {
 	}
 	if private(info, os.Geteuid()+1) {
 		t.Error("private(another user's directory) = true")
+	}
+	for _, uid := range []int{os.Geteuid(), 0} {
+		if private(ownerless{info}, uid) {
+			t.Errorf("private(a directory whose owner is unknown, uid %d) = true", uid)
+		}
 	}
 }
 

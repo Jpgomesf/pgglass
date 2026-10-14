@@ -251,6 +251,28 @@ func TestStdioServesTheTools(t *testing.T) {
 	checkStderr(t, logs.String(), dsn)
 }
 
+// A spill directory the server cannot clean up is logged, and the server
+// serves anyway.
+func TestServeWarnsWhenSpillCleanupFails(t *testing.T) {
+	isolateHome(t)
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(cache, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cache, "pgglass"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out, errOut := runCommand(t, "--config", writeConfig(t, connections(map[string]any{})))
+	var line struct{ Level, Msg, Error string }
+	if err := json.Unmarshal([]byte(errOut), &line); err != nil || code != 0 || out != "" ||
+		line.Level != "WARN" || line.Msg != "spill cleanup failed" || !strings.Contains(line.Error, filepath.Join(cache, "pgglass")) {
+		t.Errorf("serving until stdin ends = %d, %q, %q; want 0 and one warning naming the spill directory", code, out, errOut)
+	}
+}
+
 func TestStdioStopsWhenTheContextEnds(t *testing.T) {
 	isolateHome(t)
 	path := writeConfig(t, connections(map[string]any{}))

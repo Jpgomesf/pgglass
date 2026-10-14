@@ -140,6 +140,22 @@ func TestDoctorPassesWhenEveryRoleOnlyReads(t *testing.T) {
 	}
 }
 
+// A role check that cannot finish fails the connection: a max_bytes too small
+// for the role check's catalog reads, say.
+func TestDoctorFailsAConnectionWhoseRoleCheckFails(t *testing.T) {
+	path := writeConfig(t, map[string]any{
+		"defaults":    map[string]any{"max_bytes": 1},
+		"connections": map[string]any{"clean": direct(testdb.DSN(t, testdb.RoleClean, testdb.DBApp))},
+	})
+	code, out, errOut := runCommand(t, "doctor", "--config", path)
+	want := "config " + path + " (role_check warn)\n" +
+		"FAIL clean: role check: preflight: current and session user: result truncated (max_bytes=1)\n" +
+		"1 failed, 0 passed\n"
+	if code != 1 || out != want || errOut != "" {
+		t.Errorf("doctor = %d, %q, %q; want 1 and\n%s", code, out, errOut, want)
+	}
+}
+
 func TestDoctorWarnsAboutTheDeprecatedReadonlyKey(t *testing.T) {
 	path := writeConfig(t, map[string]any{"defaults": map[string]any{"readonly": true}})
 	code, out, _ := runCommand(t, "doctor", "--config", path)
