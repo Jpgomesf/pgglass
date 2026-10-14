@@ -850,3 +850,31 @@ func TestOutputWithinUsesItsOwnLimit(t *testing.T) {
 		t.Errorf("capped to 300 bytes: got %d bytes:\n%s", len(out), out)
 	}
 }
+
+// A Store without Now runs on the current time: it removes the files older
+// than TTL by it, and stamps the files it writes with it, in UTC.
+func TestStoreWithoutNowUsesTheCurrentTime(t *testing.T) {
+	store := &spill.Store{Dir: t.TempDir(), TTL: time.Hour}
+	stale := touch(t, store.Dir, "spill-pg_query-prod-20261012T101530Z-1.csv", time.Now().Add(-2*time.Hour))
+	fresh := touch(t, store.Dir, "spill-pg_query-prod-20261012T101530Z-2.csv", time.Now().Add(-time.Minute))
+
+	before := time.Now().UTC().Truncate(time.Second)
+	out, err := store.OutputWithin("pg_query", "prod", numbered(50), render.TSV, 100)
+	after := time.Now().UTC()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stamp := regexp.MustCompile(`^spill-pg_query-prod-(\d{8}T\d{6}Z)-`).FindStringSubmatch(filepath.Base(spillPath(t, out)))
+	if stamp == nil {
+		t.Fatalf("spill file %s has no stamp", spillPath(t, out))
+	}
+	if at, err := time.Parse("20060102T150405Z", stamp[1]); err != nil || at.Before(before) || at.After(after) {
+		t.Errorf("stamp %s (%v), want a time between %s and %s", stamp[1], err, before, after)
+	}
+	if _, err := os.Stat(stale); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the file 2 hours old is still there (%v)", err)
+	}
+	if _, err := os.Stat(fresh); err != nil {
+		t.Errorf("the file a minute old was removed: %v", err)
+	}
+}
