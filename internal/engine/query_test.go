@@ -201,10 +201,28 @@ func TestPostgresErrorsAreFlattened(t *testing.T) {
 	if *qe != want {
 		t.Errorf("QueryError = %+v, want %+v", *qe, want)
 	}
+	if got := qe.Error(); got != "invalid input syntax for type json (SQLSTATE 22P02)" {
+		t.Errorf("Error() = %q, want the message and SQLSTATE", got)
+	}
 
 	_, err = m.Query(t.Context(), db, engine.Query{SQL: "SELECT nam FROM app.customers"})
 	if !errors.As(err, &qe) || qe.SQLState != "42703" || qe.Position != 8 || !strings.Contains(qe.Hint, `"customers.name"`) {
 		t.Errorf("err = %+v, want 42703 at 8 with a hint naming customers.name", qe)
+	}
+}
+
+// A parameter pgx cannot encode fails the query with pgx's error, before
+// Postgres sees it.
+func TestUnencodableParamFailsTheQuery(t *testing.T) {
+	t.Parallel()
+	m := cleanApp(t, config.Defaults{})
+	res, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT $1::text", Params: []any{make(chan int)}})
+	var qe *engine.QueryError
+	if res != nil || err == nil || errors.As(err, &qe) || !strings.Contains(err.Error(), "chan int") {
+		t.Errorf("Query = %+v, %v; want pgx's error for the chan int", res, err)
+	}
+	if got := value(t, m, "SELECT 1"); got != "1" {
+		t.Errorf("SELECT 1 after the failure = %s", got)
 	}
 }
 

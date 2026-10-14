@@ -120,6 +120,52 @@ func TestNewConnectionRefusesAnotherUserDatabaseOrHost(t *testing.T) {
 	}
 }
 
+// A DSN that stops resolving fails each new connection with the source's
+// error, until it resolves again.
+func TestNewConnectionFailsWhileTheDSNDoesNotResolve(t *testing.T) {
+	const envVar = "PGGLASS_ENGINE_VANISHING_DSN"
+	dsn := testdb.DSN(t, testdb.RoleClean, testdb.DBApp) + "&pool_max_conn_lifetime=1ms"
+	t.Setenv(envVar, dsn)
+	m := managerFor(t, config.Defaults{}, map[string]config.Connection{db: {Source: "env", DSNEnvVar: envVar}})
+	if got := value(t, m, "SELECT current_user"); got != testdb.RoleClean {
+		t.Fatalf("current_user = %s, want %s", got, testdb.RoleClean)
+	}
+
+	t.Setenv(envVar, "")
+	_, err := m.Query(t.Context(), db, engine.Query{SQL: "SELECT 1"})
+	if err == nil || !strings.Contains(err.Error(), `environment variable "`+envVar+`" is not set`) {
+		t.Errorf("err = %v, want the source's error", err)
+	}
+
+	t.Setenv(envVar, dsn)
+	if got := value(t, m, "SELECT current_user"); got != testdb.RoleClean {
+		t.Errorf("once the DSN resolves again: current_user = %s, want %s", got, testdb.RoleClean)
+	}
+}
+
+// A Querier runs on the connection it is bound to.
+func TestQuerierRunsOnItsConnection(t *testing.T) {
+	t.Parallel()
+	m := managerFor(t, config.Defaults{}, map[string]config.Connection{
+		"app":      {Source: "direct", DSN: testdb.DSN(t, testdb.RoleClean, testdb.DBApp)},
+		"supabase": {Source: "direct", DSN: testdb.DSN(t, testdb.RoleSupabase, testdb.DBSupabase)},
+	})
+	for conn, want := range map[string]string{"app": "ro_clean app", "supabase": "ro_supabase supabase_like"} {
+		res, err := m.Querier(conn).Query(t.Context(), engine.Query{SQL: "SELECT current_user || ' ' || current_database()"})
+		if err != nil {
+			t.Errorf("Querier(%s): %v", conn, err)
+			continue
+		}
+		if got := deref(res.Rows[0][0]); got != want {
+			t.Errorf("Querier(%s) ran as %q, want %q", conn, got, want)
+		}
+	}
+	_, err := m.Querier("nope").Query(t.Context(), engine.Query{SQL: "SELECT 1"})
+	if want := `unknown connection "nope" (available: app, supabase)`; err == nil || err.Error() != want {
+		t.Errorf("Querier(nope): err = %v, want %q", err, want)
+	}
+}
+
 func TestUnknownConnection(t *testing.T) {
 	m := managerFor(t, config.Defaults{}, map[string]config.Connection{
 		"staging": {Source: "direct", DSN: "postgres://localhost/s"},
