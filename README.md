@@ -132,7 +132,13 @@ claude mcp add --transport http --scope user pgglass http://127.0.0.1:8411/mcp
 
 ## Upgrading from mcp-postgres
 
-pgglass was called mcp-postgres; its tools and `config.json` format are unchanged. Move `~/.config/mcp-postgres` to `~/.config/pgglass` and update any path in `config.json` that names the old directory, such as a `dotenv_path`. pgglass reads `~/.config/pgglass/config.json`, or the file `--config` names, never a `config.json` next to the binary or in the working directory, so the binary need not live there. [Install](#install) pgglass, then rename the server to `pgglass` in your MCP client and point its `command` at the new binary: in Claude Code, tool permissions such as `mcp__mcp-postgres__pg_query` become `mcp__pgglass__pg_query`. Spill files now go to `pgglass` under the user cache directory, so the old `mcp-postgres` one can be deleted.
+pgglass was called mcp-postgres. The tools are the same, and it reads the same `config.json`.
+
+- mcp-postgres read the `config.json` next to its binary, else the one in its working directory; pgglass reads neither. Move that file to `~/.config/pgglass/config.json` (or `$XDG_CONFIG_HOME/pgglass/config.json`), or pass its path with `--config`.
+- A relative `dotenv_path`, and the default `.env`, still resolve against the server's working directory, which the MCP client picks, not against the directory of `config.json`. If a `.env` moves with `config.json`, set `dotenv_path` to its absolute path.
+- [Install](#install) pgglass, then rename the server in your MCP client and point it at the new binary. In Claude Code, run `claude mcp remove mcp-postgres` and [add pgglass](#add-to-claude-code), or rename the `mcp-postgres` entry under `mcpServers` in `~/.claude.json` or `.mcp.json` to `pgglass` and update its `command`.
+- Rename the permission rules in your Claude Code settings that name the server: `mcp__mcp-postgres` becomes `mcp__pgglass`, and `mcp__mcp-postgres__pg_query` becomes `mcp__pgglass__pg_query`.
+- Spill files now go to `pgglass` under the user cache directory, so the old `mcp-postgres` directory there can be deleted.
 
 ## Safety model
 

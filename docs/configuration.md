@@ -41,7 +41,7 @@ Read DSN from an environment variable at runtime.
 
 ### Dotenv File
 
-Read DSN from a `.env` file. Supports `KEY=VALUE`, quoted values, and comments.
+Read DSN from a `.env` file. Supports `KEY=VALUE`, quoted values, and comments. A relative `dotenv_path`, and `.env` when it is unset, resolve against the server's working directory, which the MCP client picks, not against the directory of `config.json`: give an absolute path to be sure.
 
 ```json
 {
