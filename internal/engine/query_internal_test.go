@@ -270,3 +270,14 @@ func TestValuesAndErrorsReplaceBytesThatAreNotUTF8(t *testing.T) {
 		t.Errorf("queryError = %+v, want %+v", got, want)
 	}
 }
+
+// An error that is not Postgres's can quote the DSN, whose user and database
+// an env var or a .env file can fill with any bytes, as a failed connection's
+// does: its text replaces them too, and it still wraps its cause.
+func TestQueryErrorReplacesBytesThatAreNotUTF8InOtherErrors(t *testing.T) {
+	refused := errors.New("dial tcp 127.0.0.1:1: connect: connection refused")
+	err := queryError(context.Background(), fmt.Errorf("failed to connect to `user=\xff\xfe database=caf\xe9`: %w", refused))
+	if want := "failed to connect to `user=\uFFFD database=caf\uFFFD`: " + refused.Error(); err.Error() != want || !errors.Is(err, refused) {
+		t.Errorf("queryError = %q, wraps the cause %t; want %q", err, errors.Is(err, refused), want)
+	}
+}

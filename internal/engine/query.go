@@ -202,5 +202,14 @@ func queryError(ctx context.Context, err error) error {
 			Position: int(pgErr.Position),
 		}
 	}
+	if !utf8.ValidString(err.Error()) {
+		return notUTF8Error{err}
+	}
 	return err
 }
+
+type notUTF8Error struct{ err error }
+
+func (e notUTF8Error) Error() string { return validUTF8(e.err.Error()) }
+
+func (e notUTF8Error) Unwrap() error { return e.err }
