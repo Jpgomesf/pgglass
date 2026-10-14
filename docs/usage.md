@@ -41,7 +41,15 @@ The findings also start the first response on the connection, which keeps to 10 
 - `schema`: one line per table, view, materialized view or foreign table, `app.orders: table, ~50 rows, 48 kB`, with `RLS` when row-level security is on
 - `schema` and `table`: the relation in a compact DDL-like form, with column types, defaults, identity and generated columns, enum labels, comments, constraints, indexes, policies, triggers and, for views, the definition. A column is `NOT NULL` only when Postgres has checked every row, so not under a `NOT VALID` not-null constraint (PostgreSQL 18), whose older rows may hold nulls; `pg_diff_schema` compares columns the same way
 
-`table` without `schema` looks in the connection's `default_schema`. Names are matched exactly, unquoted, as the catalog stores them. Results are cached for 5 minutes. Output longer than 10 KB is cut after the last whole line that fits, followed by `… 312 of 4000 lines shown (output limit 10000 bytes): use pg_search to find names`. A listing reads only its first 500 schemas or relations from the catalog, however many there are; the note counts them all. A comment longer than 200 characters is cut to its first 200, with a note of how many it drops, `...[+1234 chars]`: so cut, the comments of 500 relations, or of a relation's hundreds of columns, keep well within the default `max_bytes`. A description reads long definitions cut too, so that no one of them can take it past `max_bytes`: a view's query to its first 2,000 characters, then `-- truncated: 2000 of 12345 characters shown`; a default, generation expression, constraint, index or policy expression to its first 10,000, longer than a line of the 10 KB output, with the note a comment gets; and an enum's labels to its first 2,500.
+`table` without `schema` looks in the connection's `default_schema`. Names are matched exactly, unquoted, as the catalog stores them. Results are cached for 5 minutes. What `pg_schema` reads and returns is bounded:
+
+- Output longer than 10 KB is cut after the last whole line that fits, followed by `… 312 of 4000 lines shown (output limit 10000 bytes): use pg_search to find names`.
+- A listing reads only its first 500 schemas or relations from the catalog, however many there are; the note counts them all.
+- A comment longer than 200 characters is cut to its first 200, with a note of how many it drops, `...[+1234 chars]`: so cut, the comments of 500 relations, or of a relation's hundreds of columns, keep well within the default `max_bytes`.
+- A description reads long definitions cut too, so that no one of them can take it past `max_bytes`:
+  - a view's query to its first 2,000 characters, then `-- truncated: 2000 of 12345 characters shown`
+  - a default, generation expression, constraint, index or policy expression to its first 10,000, longer than a line of the 10 KB output, with the note a comment gets
+  - an enum's labels to its first 2,500
 
 `pg_search` finds names that contain `pattern`, ignoring case; `%` and `_` are plain characters. Relations come first, then columns, then functions, `limit` (default 50) at most:
 
@@ -148,7 +156,21 @@ flags:
   Seq Scan on app.events: full scan of ~20000 rows
 ```
 
-The 5 top nodes are ranked by what each takes on its own: its total less its children's. That is cost without `analyze`, and time with it, summed over loops and parallel workers. Rows are per loop, as in EXPLAIN, which gives them two decimals from PostgreSQL 18. A `LIMIT` stops early the nodes that pass it rows as it reads them, down to the first that reads all of its input before returning a row, such as a sort, hash, plain or hashed aggregate, or a window aggregate over the whole partition, such as `count(*) OVER ()`, whose startup cost PostgreSQL 17 and later plan to cover its input. Earlier versions do not, so there only `analyze` shows the full scan under such a window. Without `analyze`, each of them counts the part of its estimated cost and rows that the `LIMIT` is planned to read, as EXPLAIN costs the `Limit` itself: under `LIMIT 10`, a seq scan of 20,000 rows shows `cost 0.26, ~10 rows`, not `cost 528, ~20000 rows`. The rows an `OFFSET` skips count in full, even under an outer `LIMIT`, and a `LIMIT` whose count is only known when the query runs, such as `LIMIT (SELECT 5)`, is planned to read a tenth of its input. An `EXISTS` over a subquery with no aggregate, window or set-returning function, set operation or `OFFSET` reads it only up to the first row, each time it runs, and its nodes count that part, as under a `LIMIT 1`: a seq scan of 20,000 rows of which 5,000 match shows `cost 0.12, ~1 row`. With `analyze` too, what a `LIMIT` or an `EXISTS` is planned to stop early counts as stopped: a `LIMIT` that returned fewer rows than planned may have run out of rows or been stopped by what reads it, such as an `EXISTS` or an outer `LIMIT`, and EXPLAIN does not say which. So a scan under a `LIMIT` that ran out of rows is not flagged for returning too few, though it read all of its input; a seq scan is still flagged as a full scan. The flags are:
+- The 5 top nodes are ranked by what each takes on its own, its total less its children's: cost without `analyze`, and time with it, summed over loops and parallel workers.
+- Rows are per loop, as in EXPLAIN, which gives them two decimals from PostgreSQL 18.
+
+Costs and rows under a `LIMIT` or an `EXISTS`:
+
+- A `LIMIT` stops early the nodes that pass it rows as it reads them, down to the first that reads all of its input before returning a row, such as a sort, hash, plain or hashed aggregate, or a window aggregate over the whole partition, such as `count(*) OVER ()`.
+- PostgreSQL 17 and later plan the startup cost of such a window aggregate to cover its input. Earlier versions do not, so there only `analyze` shows the full scan under such a window.
+- Without `analyze`, each node a `LIMIT` stops early counts the part of its estimated cost and rows that the `LIMIT` is planned to read, as EXPLAIN costs the `Limit` itself: under `LIMIT 10`, a seq scan of 20,000 rows shows `cost 0.26, ~10 rows`, not `cost 528, ~20000 rows`.
+- The rows an `OFFSET` skips count in full, even under an outer `LIMIT`.
+- A `LIMIT` whose count is only known when the query runs, such as `LIMIT (SELECT 5)`, is planned to read a tenth of its input.
+- An `EXISTS` over a subquery with no aggregate, window or set-returning function, set operation or `OFFSET` reads it only up to the first row, each time it runs, and its nodes count that part, as under a `LIMIT 1`: a seq scan of 20,000 rows of which 5,000 match shows `cost 0.12, ~1 row`.
+- With `analyze` too, what a `LIMIT` or an `EXISTS` is planned to stop early counts as stopped: a `LIMIT` that returned fewer rows than planned may have run out of rows or been stopped by what reads it, such as an `EXISTS` or an outer `LIMIT`, and EXPLAIN does not say which.
+- So a scan under a `LIMIT` that ran out of rows is not flagged for returning too few, though it read all of its input; a seq scan is still flagged as a full scan.
+
+The flags are:
 
 - a seq scan that reads over 10,000 rows of a relation with over 10,000 (`pg_class.reltuples`): with `analyze`, the rows it returned and those its filter removed; without, all of the relation, or the part a `LIMIT` or an `EXISTS` is planned to read
 - with `analyze`: a node that returned more than 10 times its estimated rows or, unless a `LIMIT` or an `EXISTS` is planned to stop it early, less than a tenth of them
