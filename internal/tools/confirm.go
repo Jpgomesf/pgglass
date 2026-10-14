@@ -29,7 +29,17 @@ func asksUser(err error) bool {
 	return errors.As(err, &ask)
 }
 
-func canAsk(caps *mcp.ClientCapabilities) bool {
+const multiRoundTripRevision = "2026-07-28"
+
+func canAsk(req *mcp.CallToolRequest) bool {
+	init := req.Session.InitializeParams()
+	if init == nil || init.ProtocolVersion >= multiRoundTripRevision {
+		return formElicitation(req.ClientCapabilities())
+	}
+	return req.Extra == nil && formElicitation(init.Capabilities)
+}
+
+func formElicitation(caps *mcp.ClientCapabilities) bool {
 	if caps == nil || caps.Elicitation == nil {
 		return false
 	}

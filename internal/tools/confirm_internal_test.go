@@ -11,7 +11,7 @@ import (
 	"github.com/jpgomesf/pgglass/internal/config"
 )
 
-func TestCanAskNeedsFormElicitation(t *testing.T) {
+func TestFormElicitation(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		caps *mcp.ClientCapabilities
@@ -26,8 +26,8 @@ func TestCanAskNeedsFormElicitation(t *testing.T) {
 			Form: &mcp.FormElicitationCapabilities{}, URL: &mcp.URLElicitationCapabilities{},
 		}}, true},
 	} {
-		if got := canAsk(tc.caps); got != tc.want {
-			t.Errorf("%s: canAsk = %t, want %t", tc.name, got, tc.want)
+		if got := formElicitation(tc.caps); got != tc.want {
+			t.Errorf("%s: formElicitation = %t, want %t", tc.name, got, tc.want)
 		}
 	}
 }

@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -105,6 +108,46 @@ func TestHTTPAsksBeforeRunningOnConfirmConnections(t *testing.T) {
 	}
 	if got := strings.Count(srv.logs.String(), `"outcome":"ok"`); got != 1 {
 		t.Errorf("%d calls ran, want 1:\n%s", got, srv.logs)
+	}
+}
+
+// Over --http the server cannot ask an older client during the call, so an
+// older client is refused as one without form elicitation is, audited, even
+// when it claims form elicitation in _meta or in a batched initialize.
+func TestHTTPRefusesOlderClientsThatClaimElicitation(t *testing.T) {
+	conn := direct(unusedDSN)
+	conn["confirm"] = true
+	call := `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{%s"name":"pg_query","arguments":{"connection":"app","sql":"SELECT 1"}}}`
+	initialize := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{"elicitation":{}},"clientInfo":{"name":"test","version":"test"}}}`
+	for name, tc := range map[string]struct{ version, body string }{
+		"elicitation in _meta":        {"2025-06-18", fmt.Sprintf(call, `"_meta":{"io.modelcontextprotocol/clientCapabilities":{"elicitation":{"form":{}}}},`)},
+		"elicitation in a batch init": {"2025-03-26", "[" + initialize + "," + fmt.Sprintf(call, "") + "]"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := startApp(t, conn)
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.url, strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Accept", "application/json, text/event-stream")
+			req.Header.Set("Mcp-Protocol-Version", tc.version)
+			res, err := http.DefaultClient.Do(req) //nolint:gosec
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			const refusal = `"text":"pg_query on app requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation"}],"isError":true`
+			if !strings.Contains(string(body), refusal) {
+				t.Errorf("response lacks the refusal of a client that cannot ask:\n%s", body)
+			}
+			awaitLog(t, srv, `"tool":"pg_query","connection":"app"`)
+			awaitLog(t, srv, `"outcome":"error"`)
+		})
 	}
 }
 

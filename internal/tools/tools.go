@@ -59,6 +59,8 @@ func New(cfg config.Config, eng *engine.Manager, store *spill.Store, auditLog io
 
 // NewServer returns an MCP server, named pgglass, that exposes the tools
 // and table resources of h and tells clients how to use the tools well.
+// Served over HTTP, it keeps no sessions, so only a client on revision
+// 2026-07-28 or later can confirm a statement.
 func NewServer(h *Handlers, version string) *mcp.Server {
 	s := mcp.NewServer(&mcp.Implementation{
 		Name:        "pgglass",
@@ -84,7 +86,7 @@ type toolFunc func(ctx context.Context, args json.RawMessage, c *call) (string, 
 
 func (h *Handlers) handle(tool string, run toolFunc) mcp.ToolHandler {
 	return func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		c := &call{tool: tool, start: time.Now(), answers: req.Params.InputResponses, canAsk: canAsk(req.ClientCapabilities())}
+		c := &call{tool: tool, start: time.Now(), answers: req.Params.InputResponses, canAsk: canAsk(req)}
 		text, err := run(ctx, req.Params.Arguments, c)
 		var ask *confirmRequest
 		if errors.As(err, &ask) {

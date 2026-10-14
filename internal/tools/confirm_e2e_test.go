@@ -344,3 +344,32 @@ func TestConfirmAnswersOnlyTheQuestionAsked(t *testing.T) {
 		t.Errorf("audit lines\n%+v\nwant\n%+v", lines, want)
 	}
 }
+
+// Before revision 2026-07-28 the server asks during the call, which the SDK
+// does only for a client that declared form elicitation when it connected: a
+// call that claims it in _meta alone is refused, and audited, as a client
+// without it is.
+func TestConfirmTakesAnOlderClientAtWhatItDeclaredWhenItConnected(t *testing.T) {
+	cfg := newConfig(config.RoleCheckWarn, map[string]config.Connection{"prod": confirmed(unusedDSN)})
+	claim := mcp.Meta{mcp.MetaKeyClientCapabilities: map[string]any{"elicitation": map[string]any{"form": map[string]any{}}}}
+	const sql = "SELECT 1"
+	for _, version := range mcp.SupportedProtocolVersions()[1:] {
+		s, _ := connectUser(t, cfg, version, "")
+		res, err := s.CallTool(t.Context(), &mcp.CallToolParams{Meta: claim, Name: "pg_query", Arguments: args("prod", sql)})
+		if err != nil {
+			t.Errorf("%s: protocol error %v, want the refusal of a client that cannot ask", version, err)
+			continue
+		}
+		want := "pg_query on prod requires the user's confirmation, but this client cannot ask the user: it does not support form elicitation"
+		if text := resultText(t, res); !res.IsError || text != want {
+			t.Errorf("%s: error %t, %q; want %q", version, res.IsError, text, want)
+		}
+		lines := s.auditLines(t)
+		for i := range lines {
+			lines[i].DurationMS = nil
+		}
+		if wantLines := []auditLine{toolLine("pg_query", "prod", sql, 0, "error")}; !slices.Equal(lines, wantLines) {
+			t.Errorf("%s: audit lines %+v, want %+v", version, lines, wantLines)
+		}
+	}
+}
